@@ -168,6 +168,129 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "trend_ma_period": 200,
         "max_pct_above_ma": 65.0,
     },
+    # ------------------------------------------------------------------
+    # Trading objective presets — partial overrides applied on top of the
+    # base config above.  Select via --objective <name> or leave unset
+    # to use the base config as-is.
+    # ------------------------------------------------------------------
+    "objectives": {
+        "long_term": {
+            "description": "Position trading — weeks to months. Slower indicators, wider stops, higher warmup.",
+            "rsi": {
+                "period": 21,
+                "thresholds": {"oversold": 25, "overbought": 75},
+            },
+            "macd": {
+                "fast_period": 19,
+                "slow_period": 39,
+                "signal_period": 9,
+            },
+            "bollinger_bands": {
+                "period": 30,
+            },
+            "moving_averages": {
+                "periods": [50, 100, 200],
+            },
+            "stochastic": {
+                "k_period": 21,
+                "d_period": 5,
+                "smooth_k": 5,
+                "thresholds": {"oversold": 20, "overbought": 80},
+            },
+            "adx": {
+                "period": 21,
+            },
+            "volume": {
+                "obv_trend_period": 30,
+                "price_trend_period": 30,
+            },
+            "fibonacci": {
+                "swing_lookback": 120,
+            },
+            "support_resistance": {
+                "fractal_lookback": 120,
+                "fractal_order": 8,
+            },
+            "overall": {
+                "weights": {
+                    "rsi": 0.10,
+                    "macd": 0.10,
+                    "bollinger_bands": 0.10,
+                    "moving_averages": 0.25,
+                    "stochastic": 0.05,
+                    "adx": 0.15,
+                    "volume": 0.15,
+                    "fibonacci": 0.10,
+                },
+            },
+            "strategy": {
+                "rebalance_interval": 10,
+                "stop_loss_pct": 0.08,
+                "take_profit_pct": 0.30,
+            },
+            "backtest": {
+                "warmup_bars": 250,
+            },
+        },
+        "short_term": {
+            "description": "Swing trading — days to weeks. Faster indicators, tighter stops, lower warmup.",
+            "rsi": {
+                "period": 9,
+                "thresholds": {"oversold": 35, "overbought": 65},
+            },
+            "macd": {
+                "fast_period": 8,
+                "slow_period": 17,
+                "signal_period": 9,
+            },
+            "bollinger_bands": {
+                "period": 14,
+            },
+            "moving_averages": {
+                "periods": [10, 20, 50],
+            },
+            "stochastic": {
+                "k_period": 9,
+                "d_period": 3,
+                "smooth_k": 3,
+                "thresholds": {"oversold": 25, "overbought": 75},
+            },
+            "adx": {
+                "period": 10,
+            },
+            "volume": {
+                "obv_trend_period": 10,
+                "price_trend_period": 10,
+            },
+            "fibonacci": {
+                "swing_lookback": 30,
+            },
+            "support_resistance": {
+                "fractal_lookback": 30,
+                "fractal_order": 3,
+            },
+            "overall": {
+                "weights": {
+                    "rsi": 0.15,
+                    "macd": 0.20,
+                    "bollinger_bands": 0.15,
+                    "moving_averages": 0.10,
+                    "stochastic": 0.15,
+                    "adx": 0.10,
+                    "volume": 0.10,
+                    "fibonacci": 0.05,
+                },
+            },
+            "strategy": {
+                "rebalance_interval": 3,
+                "stop_loss_pct": 0.03,
+                "take_profit_pct": 0.10,
+            },
+            "backtest": {
+                "warmup_bars": 60,
+            },
+        },
+    },
 }
 
 
@@ -195,6 +318,7 @@ class Config:
     def __init__(self, data: dict[str, Any], path: str | None = None) -> None:
         self._data = data
         self.path = path
+        self._active_objective: str | None = None
 
     # ------------------------------------------------------------------
     # Factory methods
@@ -238,6 +362,54 @@ class Config:
     def defaults(cls) -> "Config":
         """Return a Config populated entirely with defaults."""
         return cls(copy.deepcopy(DEFAULT_CONFIG), None)
+
+    # ------------------------------------------------------------------
+    # Objective presets
+    # ------------------------------------------------------------------
+
+    @property
+    def active_objective(self) -> str | None:
+        """The name of the currently applied objective, or ``None``."""
+        return self._active_objective
+
+    def available_objectives(self) -> list[str]:
+        """Return the list of defined objective names."""
+        objectives = self._data.get("objectives", {})
+        return [k for k in objectives if isinstance(objectives[k], dict)]
+
+    def apply_objective(self, name: str) -> None:
+        """Apply a named objective preset on top of the current config.
+
+        The preset is a partial dict deep-merged over the base config, so
+        only the keys specified in the preset are overridden.
+
+        Raises ``ValueError`` if the objective name is not found.
+        """
+        objectives = self._data.get("objectives", {})
+        if name not in objectives:
+            available = self.available_objectives()
+            raise ValueError(
+                f"Unknown objective '{name}'. "
+                f"Available: {', '.join(available) if available else '(none defined)'}"
+            )
+
+        preset = objectives[name]
+        if not isinstance(preset, dict):
+            raise ValueError(f"Objective '{name}' must be a dict, got {type(preset).__name__}")
+
+        # Extract overrides (everything except 'description')
+        overrides = {k: v for k, v in preset.items() if k != "description"}
+
+        # Deep-merge overrides into the current config data
+        self._data = _deep_merge(self._data, overrides)
+        self._active_objective = name
+
+        # Re-validate after applying the preset
+        errors = self.validate()
+        if errors:
+            print(f"[config] Validation warnings after applying objective '{name}':")
+            for e in errors:
+                print(f"  • {e}")
 
     # ------------------------------------------------------------------
     # Validation
@@ -383,6 +555,15 @@ class Config:
             errors.append(
                 f"suitability.max_pct_above_ma must be between 0 and 100, got {max_pct!r}"
             )
+
+        # Objectives — must be dicts with valid structure
+        objectives = self._data.get("objectives", {})
+        if not isinstance(objectives, dict):
+            errors.append("objectives must be a dict")
+        else:
+            for obj_name, obj_data in objectives.items():
+                if not isinstance(obj_data, dict):
+                    errors.append(f"objectives.{obj_name} must be a dict")
 
         return errors
 

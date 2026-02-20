@@ -233,3 +233,148 @@ suitability:
 
   # ATR calculation period
   atr_period: 14
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trading Objective Presets
+# ─────────────────────────────────────────────────────────────────────────────
+# Named presets that override specific base values above.  Select via:
+#   python main.py AAPL --objective long_term
+#   python main.py AAPL --objective short_term -b
+#
+# Each preset is a partial config — only keys you list are overridden; all
+# other settings keep their base values.  You can add your own custom presets
+# (e.g. scalping, swing, position) by adding a new key under 'objectives'.
+#
+# The 'description' field is for display only and has no effect on behavior.
+
+objectives:
+
+  # ── Long-term / Position Trading ─────────────────────────────────────────
+  # Designed for holding periods of weeks to months.
+  # Uses slower indicator periods, wider stop/take-profit, and heavier weight
+  # on trend-following indicators (moving averages, ADX, volume).
+  long_term:
+    description: "Position trading — weeks to months. Slower indicators, wider stops, higher warmup."
+
+    rsi:
+      period: 21
+      thresholds:
+        oversold: 25            # deeper oversold before signaling reversal
+        overbought: 75          # higher overbought before signaling reversal
+
+    macd:
+      fast_period: 19           # ~1.5x standard (12 → 19)
+      slow_period: 39           # ~1.5x standard (26 → 39)
+      signal_period: 9
+
+    bollinger_bands:
+      period: 30                # wider window for smoother bands
+
+    moving_averages:
+      periods: [50, 100, 200]   # drop the 20-day, focus on longer trends
+
+    stochastic:
+      k_period: 21
+      d_period: 5
+      smooth_k: 5
+      thresholds:
+        oversold: 20
+        overbought: 80
+
+    adx:
+      period: 21
+
+    volume:
+      obv_trend_period: 30
+      price_trend_period: 30
+
+    fibonacci:
+      swing_lookback: 120       # look further back for swing high/low
+
+    support_resistance:
+      fractal_lookback: 120
+      fractal_order: 8          # require more confirmation bars
+
+    overall:
+      weights:
+        rsi: 0.10
+        macd: 0.10
+        bollinger_bands: 0.10
+        moving_averages: 0.25   # heavier weight on trend
+        stochastic: 0.05
+        adx: 0.15               # trend strength matters more
+        volume: 0.15            # institutional flow matters more
+        fibonacci: 0.10
+
+    strategy:
+      rebalance_interval: 10    # less frequent re-evaluation
+      stop_loss_pct: 0.08       # wider stop (8%)
+      take_profit_pct: 0.30     # wider target (30%)
+
+    backtest:
+      warmup_bars: 250          # need more data for slower indicators
+
+  # ── Short-term / Swing Trading ───────────────────────────────────────────
+  # Designed for holding periods of days to weeks.
+  # Uses faster indicator periods, tighter stop/take-profit, and heavier
+  # weight on momentum indicators (MACD, Stochastic, Bollinger).
+  short_term:
+    description: "Swing trading — days to weeks. Faster indicators, tighter stops, lower warmup."
+
+    rsi:
+      period: 9
+      thresholds:
+        oversold: 35            # trigger sooner on short-term moves
+        overbought: 65
+
+    macd:
+      fast_period: 8            # faster response
+      slow_period: 17
+      signal_period: 9
+
+    bollinger_bands:
+      period: 14                # tighter bands, more responsive
+
+    moving_averages:
+      periods: [10, 20, 50]     # drop the 200-day, focus on shorter trends
+
+    stochastic:
+      k_period: 9
+      d_period: 3
+      smooth_k: 3
+      thresholds:
+        oversold: 25
+        overbought: 75
+
+    adx:
+      period: 10
+
+    volume:
+      obv_trend_period: 10
+      price_trend_period: 10
+
+    fibonacci:
+      swing_lookback: 30        # recent swings only
+
+    support_resistance:
+      fractal_lookback: 30
+      fractal_order: 3          # fewer confirmation bars needed
+
+    overall:
+      weights:
+        rsi: 0.15
+        macd: 0.20              # momentum matters most
+        bollinger_bands: 0.15   # mean reversion in short term
+        moving_averages: 0.10
+        stochastic: 0.15        # short-term overbought/oversold
+        adx: 0.10
+        volume: 0.10
+        fibonacci: 0.05
+
+    strategy:
+      rebalance_interval: 3     # more frequent re-evaluation
+      stop_loss_pct: 0.03       # tighter stop (3%)
+      take_profit_pct: 0.10     # tighter target (10%)
+
+    backtest:
+      warmup_bars: 60           # much less data needed (no SMA200)

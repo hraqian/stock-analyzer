@@ -12,6 +12,8 @@ Usage:
     python main.py AAPL --backtest --period 2y   # run backtest with score strategy
     python main.py AAPL --backtest --start 2016-01-01  # backtest over ~10 years
     python main.py AAPL --backtest --mode long_only    # force long-only mode
+    python main.py AAPL --objective long_term          # use long-term indicator presets
+    python main.py AAPL --objective short_term -b      # short-term backtest
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
@@ -40,6 +42,8 @@ Examples:
   python main.py AAPL --backtest --start 2016-01-01   # backtest over ~10 years
   python main.py AAPL --backtest --mode long_only      # force long-only
   python main.py AAPL --backtest --mode auto           # auto-detect mode
+  python main.py AAPL --objective long_term            # long-term indicator presets
+  python main.py AAPL --objective short_term -b -p 6mo # short-term backtest
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -116,6 +120,17 @@ Examples:
         ),
     )
 
+    # Objective preset
+    parser.add_argument(
+        "--objective", "-o",
+        metavar="NAME",
+        help=(
+            "Trading objective preset to apply (e.g. long_term, short_term). "
+            "Overrides indicator periods, strategy thresholds, weights, etc. "
+            "Define custom presets in the 'objectives' section of config.yaml."
+        ),
+    )
+
     # Config options
     parser.add_argument(
         "--config", "-c",
@@ -169,6 +184,23 @@ def main() -> None:
         console.print(f"[dim]Config: {cfg.path}[/dim]")
     else:
         console.print("[dim]Config: using built-in defaults (no config.yaml found)[/dim]")
+
+    # ── Apply objective preset ────────────────────────────────────────────────
+    if args.objective:
+        try:
+            cfg.apply_objective(args.objective)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            available = cfg.available_objectives()
+            if available:
+                console.print(f"[dim]Available objectives: {', '.join(available)}[/dim]")
+            sys.exit(1)
+        obj_desc = cfg.section("objectives").get(args.objective, {}).get("description", "")
+        console.print(
+            f"[dim]Objective: [bold]{args.objective}[/bold]"
+            + (f" — {obj_desc}" if obj_desc else "")
+            + "[/dim]"
+        )
 
     # ── --validate-config ─────────────────────────────────────────────────────
     if args.validate_config:

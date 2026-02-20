@@ -87,7 +87,9 @@ def render_backtest(
     header_lines = [
         f"[bold white]Backtest Results[/bold white]  "
         f"[bold cyan]{result.ticker}[/bold cyan]  "
-        f"[dim]Period: {result.period}  |  Strategy: {result.strategy_name}[/dim]",
+        f"[dim]Period: {result.period}  |  Strategy: {result.strategy_name}"
+        + (f"  |  Objective: [bold]{cfg.active_objective}[/bold]" if cfg.active_objective else "")
+        + "[/dim]",
     ]
 
     console.print()

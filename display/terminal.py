@@ -79,6 +79,8 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
         f"[bold green]${price:.{price_dp}f}[/bold green]  "
         f"[dim]Period: {result.period}[/dim]"
     )
+    if cfg.active_objective:
+        header_lines[0] += f"  [dim]Objective: [bold]{cfg.active_objective}[/bold][/dim]"
     if meta_parts:
         header_lines.append(f"[dim]{'  |  '.join(meta_parts)}[/dim]")
 
