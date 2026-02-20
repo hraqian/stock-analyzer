@@ -221,7 +221,7 @@ suitability:
   min_atr_pct: 0.005          # ATR/price below this → hold_only (0.5%)
 
   # long_only thresholds — below these, shorting is not viable
-  min_adx_for_short: 20.0     # ADX below this → no clear trend to short
+  min_adx_for_short: 25.0     # ADX below this → no clear trend to short
   min_atr_for_short: 0.01     # ATR/price below this → too low vol for shorts (1%)
   min_volume_for_short: 500000 # avg daily volume below this → insufficient for shorting
 

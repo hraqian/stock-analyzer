@@ -161,7 +161,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode_override": "auto",
         "min_volume": 100_000,
         "min_atr_pct": 0.005,
-        "min_adx_for_short": 20.0,
+        "min_adx_for_short": 25.0,
         "min_atr_for_short": 0.01,
         "min_volume_for_short": 500_000,
         "atr_period": 14,
