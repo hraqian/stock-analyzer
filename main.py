@@ -5,9 +5,12 @@ Usage:
     python main.py AAPL                          # 6-month analysis (default)
     python main.py TSLA --period 1y              # 1-year analysis
     python main.py MSFT --period 1mo             # 1-month analysis
+    python main.py AAPL --start 2016-01-01       # custom date range (~10 years)
+    python main.py AAPL --start 2020-01-01 --end 2023-12-31
     python main.py AAPL --indicators rsi,macd    # run only specific indicators
     python main.py AAPL --config my_config.yaml  # use custom config file
     python main.py AAPL --backtest --period 2y   # run backtest with score strategy
+    python main.py AAPL --backtest --start 2016-01-01  # backtest over ~10 years
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
@@ -30,7 +33,10 @@ Examples:
   python main.py AAPL
   python main.py TSLA --period 1y
   python main.py MSFT --period 3mo --indicators rsi,macd,adx
+  python main.py AAPL --start 2016-01-01              # ~10 years of data
+  python main.py AAPL --start 2020-01-01 --end 2023-12-31
   python main.py AAPL --backtest --period 2y
+  python main.py AAPL --backtest --start 2016-01-01   # backtest over ~10 years
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -67,6 +73,24 @@ Examples:
         help=(
             "Comma-separated list of indicators to run. "
             "e.g. rsi,macd,adx   (default: all)"
+        ),
+    )
+
+    # Date range (alternative to --period)
+    parser.add_argument(
+        "--start", "-s",
+        metavar="DATE",
+        help=(
+            "Start date in YYYY-MM-DD format (e.g. 2016-02-20). "
+            "Overrides --period when specified."
+        ),
+    )
+    parser.add_argument(
+        "--end", "-e",
+        metavar="DATE",
+        help=(
+            "End date in YYYY-MM-DD format (default: today). "
+            "Only used when --start is specified."
         ),
     )
 
@@ -163,8 +187,33 @@ def main() -> None:
     if args.indicators:
         only_indicators = [s.strip().lower() for s in args.indicators.split(",") if s.strip()]
 
+    # ── Resolve date range vs period ──────────────────────────────────────────
+    start_date: str | None = args.start
+    end_date: str | None = args.end
+
+    if start_date:
+        # Validate date format
+        from datetime import datetime
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            console.print(f"[red]Error:[/red] --start must be YYYY-MM-DD, got '{start_date}'")
+            sys.exit(1)
+        if end_date:
+            try:
+                datetime.strptime(end_date, "%Y-%m-%d")
+            except ValueError:
+                console.print(f"[red]Error:[/red] --end must be YYYY-MM-DD, got '{end_date}'")
+                sys.exit(1)
+        period_label = f"{start_date} → {end_date or 'today'}"
+    else:
+        if end_date:
+            console.print("[red]Error:[/red] --end requires --start to be specified")
+            sys.exit(1)
+        period_label = args.period
+
     # ── Run analysis ──────────────────────────────────────────────────────────
-    console.print(f"\n[dim]Fetching data for [bold]{ticker}[/bold] ({args.period})...[/dim]")
+    console.print(f"\n[dim]Fetching data for [bold]{ticker}[/bold] ({period_label})...[/dim]")
 
     provider = YahooFinanceProvider()
 
@@ -188,7 +237,13 @@ def main() -> None:
         )
 
         try:
-            bt_result = engine.run(ticker, period=args.period, interval=args.interval)
+            bt_result = engine.run(
+                ticker,
+                period=args.period if not start_date else None,
+                interval=args.interval,
+                start=start_date,
+                end=end_date,
+            )
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             sys.exit(1)
@@ -203,7 +258,13 @@ def main() -> None:
     analyzer = Analyzer(cfg, provider, only_indicators=only_indicators)
 
     try:
-        result = analyzer.run(ticker, period=args.period, interval=args.interval)
+        result = analyzer.run(
+            ticker,
+            period=args.period if not start_date else None,
+            interval=args.interval,
+            start=start_date,
+            end=end_date,
+        )
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

@@ -153,7 +153,7 @@ strategy:
 
   # Risk management
   stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
-  take_profit_pct: 0.15     # exit if position gains this fraction (0.15 = 15%)
+  take_profit_pct: 0.50     # exit if position gains this fraction (0.15 = 15%)
 
   # How often to re-evaluate and potentially change position
   rebalance_interval: 5     # re-score every N bars

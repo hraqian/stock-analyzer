@@ -31,8 +31,10 @@ class DataProvider(ABC):
     def fetch(
         self,
         ticker: str,
-        period: str = "6mo",
+        period: str | None = "6mo",
         interval: str = "1d",
+        start: str | None = None,
+        end: str | None = None,
     ) -> pd.DataFrame:
         """Fetch OHLCV data.
 
@@ -40,8 +42,12 @@ class DataProvider(ABC):
             ticker:   Stock symbol, e.g. ``"AAPL"``.
             period:   How far back to fetch.  Accepted values:
                       ``1mo``, ``3mo``, ``6mo``, ``1y``, ``2y``, ``5y``.
+                      Ignored when *start* is provided.
             interval: Bar interval.  Accepted values:
                       ``1d``, ``1wk``, ``1mo``.
+            start:    Start date in ``YYYY-MM-DD`` format. Overrides *period*.
+            end:      End date in ``YYYY-MM-DD`` format (default: today).
+                      Only used when *start* is provided.
 
         Returns:
             DataFrame with columns [open, high, low, close, volume] and a

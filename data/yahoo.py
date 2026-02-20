@@ -20,18 +20,14 @@ class YahooFinanceProvider(DataProvider):
     def fetch(
         self,
         ticker: str,
-        period: str = "6mo",
+        period: str | None = "6mo",
         interval: str = "1d",
+        start: str | None = None,
+        end: str | None = None,
     ) -> pd.DataFrame:
         ticker = ticker.upper().strip()
-        period = period.lower().strip()
         interval = interval.lower().strip()
 
-        if period not in VALID_PERIODS:
-            raise ValueError(
-                f"Invalid period '{period}'. "
-                f"Valid options: {sorted(VALID_PERIODS)}"
-            )
         if interval not in VALID_INTERVALS:
             raise ValueError(
                 f"Invalid interval '{interval}'. "
@@ -39,7 +35,19 @@ class YahooFinanceProvider(DataProvider):
             )
 
         tk = yf.Ticker(ticker)
-        raw = tk.history(period=period, interval=interval, auto_adjust=True)
+
+        if start:
+            # Date-range mode: ignore period
+            raw = tk.history(start=start, end=end, interval=interval, auto_adjust=True)
+        else:
+            # Period mode
+            period = (period or "6mo").lower().strip()
+            if period not in VALID_PERIODS:
+                raise ValueError(
+                    f"Invalid period '{period}'. "
+                    f"Valid options: {sorted(VALID_PERIODS)}"
+                )
+            raw = tk.history(period=period, interval=interval, auto_adjust=True)
         assert isinstance(raw, pd.DataFrame), "yfinance did not return a DataFrame"
 
         df: pd.DataFrame = self._normalise_columns(raw)

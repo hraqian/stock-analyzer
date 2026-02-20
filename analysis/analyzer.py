@@ -46,16 +46,29 @@ class Analyzer:
         self._provider = provider
         self._only = only_indicators
 
-    def run(self, ticker: str, period: str = "6mo", interval: str = "1d") -> AnalysisResult:
+    def run(
+        self,
+        ticker: str,
+        period: str | None = "6mo",
+        interval: str = "1d",
+        start: str | None = None,
+        end: str | None = None,
+    ) -> AnalysisResult:
         """Fetch data, run all indicators, compute S/R, return AnalysisResult."""
 
         # 1. Fetch data and metadata
-        df = self._provider.fetch(ticker, period=period, interval=interval)
+        df = self._provider.fetch(ticker, period=period, interval=interval, start=start, end=end)
         info = self._provider.get_info(ticker)
 
         current_price = float(df["close"].iloc[-1])
         if info.get("current_price") is None:
             info["current_price"] = current_price
+
+        # Build a display-friendly period label
+        if start:
+            period_label = f"{start} → {end or 'today'}"
+        else:
+            period_label = period or "6mo"
 
         # 2. Run indicators
         registry = IndicatorRegistry(self._cfg, only=self._only)
@@ -71,7 +84,7 @@ class Analyzer:
 
         return AnalysisResult(
             ticker=ticker.upper(),
-            period=period,
+            period=period_label,
             info=info,
             indicator_results=indicator_results,
             support_levels=sr["support"],

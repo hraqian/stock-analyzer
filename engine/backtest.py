@@ -151,21 +151,31 @@ class BacktestEngine:
     def run(
         self,
         ticker: str,
-        period: str = "2y",
+        period: str | None = "2y",
         interval: str = "1d",
+        start: str | None = None,
+        end: str | None = None,
     ) -> BacktestResult:
         """Run the backtest and return results with performance metrics.
 
         Args:
             ticker:   Stock symbol.
-            period:   Historical period (e.g. "2y", "5y").
+            period:   Historical period (e.g. "2y", "5y"). Ignored when *start* is set.
             interval: Bar interval (e.g. "1d").
+            start:    Start date in YYYY-MM-DD format. Overrides *period*.
+            end:      End date in YYYY-MM-DD format (default: today).
 
         Returns:
             :class:`BacktestResult` with trades, equity curve, and metrics.
         """
         # 1. Fetch all data
-        df = self._provider.fetch(ticker, period=period, interval=interval)
+        df = self._provider.fetch(ticker, period=period, interval=interval, start=start, end=end)
+
+        # Build a display-friendly period label
+        if start:
+            period_label = f"{start} → {end or 'today'}"
+        else:
+            period_label = period or "2y"
 
         if len(df) < self._warmup_bars + 10:
             raise ValueError(
@@ -311,7 +321,7 @@ class BacktestEngine:
         # 5. Build result
         result = BacktestResult(
             ticker=ticker.upper(),
-            period=period,
+            period=period_label,
             strategy_name=self._strategy.name,
             initial_cash=self._initial_cash,
             final_equity=final_equity,
