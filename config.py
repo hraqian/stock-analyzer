@@ -74,21 +74,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "adx": {
         "period": 14,
-        "thresholds": {"weak": 30, "moderate": 50},
+        "thresholds": {"weak": 20, "moderate": 40},
         "scoring": {
-            "weak_multiplier": 0.4,
-            "moderate_multiplier": 0.75,
+            "weak_multiplier": 0.6,
+            "moderate_multiplier": 0.85,
             "strong_multiplier": 1.0,
-            "max_directional_spread": 40,
+            "max_directional_spread": 25,
         },
     },
     "volume": {
         "obv_trend_period": 20,
         "price_trend_period": 20,
         "scoring": {
-            "confirmation_score": 8.0,
-            "neutral_score": 5.0,
-            "divergence_score": 2.0,
+            "confirmation_bullish_max": 9.5,
+            "confirmation_bullish_min": 6.5,
+            "confirmation_bearish_max": 3.5,
+            "confirmation_bearish_min": 0.5,
+            "divergence_score": 5.0,
+            "obv_strong_change_pct": 10.0,
+            "obv_weak_change_pct": 1.0,
         },
     },
     "fibonacci": {
@@ -96,8 +100,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "levels": [0.236, 0.382, 0.5, 0.618, 0.786],
         "scoring": {
             "proximity_pct": 0.015,
-            "level_scores": {0.236: 7.0, 0.382: 6.5, 0.5: 5.5, 0.618: 4.5, 0.786: 3.0},
+            "level_scores": {0.236: 8.0, 0.382: 7.0, 0.5: 5.0, 0.618: 3.0, 0.786: 1.5},
             "no_level_score": 5.0,
+            "range_low_score": 2.0,
+            "range_high_score": 8.0,
         },
     },
     "support_resistance": {
@@ -128,15 +134,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "color_thresholds": {"bearish_max": 3.5, "neutral_max": 6.5},
     },
     "strategy": {
+        "threshold_mode": "fixed",
         "score_thresholds": {
-            "short_below": 3.5,
-            "hold_below": 6.5,
+            "short_below": 4.5,
+            "hold_below": 5.5,
         },
-        "position_sizing": "fixed",
+        "percentile_thresholds": {
+            "short_percentile": 25,
+            "long_percentile": 75,
+            "lookback_bars": 60,
+        },
+        "position_sizing": "percent_equity",
         "fixed_quantity": 100,
-        "percent_equity": 0.10,
+        "percent_equity": 0.80,
         "stop_loss_pct": 0.05,
-        "take_profit_pct": 0.15,
+        "take_profit_pct": 0.20,
         "rebalance_interval": 5,
     },
     "backtest": {
@@ -277,6 +289,37 @@ class Config:
         if sizing not in ("fixed", "percent_equity"):
             errors.append(
                 f"strategy.position_sizing must be 'fixed' or 'percent_equity', got {sizing!r}"
+            )
+
+        # Threshold mode
+        threshold_mode = strat.get("threshold_mode", "fixed")
+        if threshold_mode not in ("fixed", "percentile"):
+            errors.append(
+                f"strategy.threshold_mode must be 'fixed' or 'percentile', got {threshold_mode!r}"
+            )
+
+        # Percentile thresholds (validate even if mode is "fixed" — config should be valid)
+        pct_cfg = strat.get("percentile_thresholds", {})
+        short_pct = pct_cfg.get("short_percentile", 25)
+        long_pct = pct_cfg.get("long_percentile", 75)
+        lookback = pct_cfg.get("lookback_bars", 60)
+
+        if not isinstance(short_pct, (int, float)) or not (0 <= short_pct <= 100):
+            errors.append(
+                f"strategy.percentile_thresholds.short_percentile must be 0-100, got {short_pct!r}"
+            )
+        if not isinstance(long_pct, (int, float)) or not (0 <= long_pct <= 100):
+            errors.append(
+                f"strategy.percentile_thresholds.long_percentile must be 0-100, got {long_pct!r}"
+            )
+        if isinstance(short_pct, (int, float)) and isinstance(long_pct, (int, float)):
+            if short_pct >= long_pct:
+                errors.append(
+                    "strategy.percentile_thresholds.short_percentile must be less than long_percentile"
+                )
+        if not isinstance(lookback, int) or lookback < 10:
+            errors.append(
+                f"strategy.percentile_thresholds.lookback_bars must be an integer >= 10, got {lookback!r}"
             )
 
         for pct_key in ("stop_loss_pct", "take_profit_pct"):

@@ -58,20 +58,32 @@ class VolumeIndicator(BaseIndicator):
 
     def score(self, values: dict[str, Any]) -> float:
         scoring = self.config.get("scoring", {})
-        confirmation = float(scoring.get("confirmation_score", 8.0))
-        neutral = float(scoring.get("neutral_score", 5.0))
-        divergence = float(scoring.get("divergence_score", 2.0))
 
-        if values["signal"] == "confirming":
-            base = confirmation
-            # Tilt score based on direction
-            if values["price_rising"]:
-                return self._clamp(base)
-            else:
-                # Confirming a downtrend
-                return self._clamp(10.0 - base)
+        # Continuous scoring parameters (keyed by OBV change magnitude)
+        bull_max = float(scoring.get("confirmation_bullish_max", 9.5))
+        bull_min = float(scoring.get("confirmation_bullish_min", 6.5))
+        bear_max = float(scoring.get("confirmation_bearish_max", 3.5))
+        bear_min = float(scoring.get("confirmation_bearish_min", 0.5))
+        divergence = float(scoring.get("divergence_score", 5.0))
+
+        strong_pct = float(scoring.get("obv_strong_change_pct", 10.0))
+        weak_pct = float(scoring.get("obv_weak_change_pct", 1.0))
+
+        if values["signal"] != "confirming":
+            return self._clamp(divergence)
+
+        # Magnitude of OBV change (absolute %) drives the score within range
+        magnitude = abs(values["obv_change_pct"])
+
+        if values["price_rising"]:
+            # Bullish confirmation: scale from bull_min → bull_max
+            score = self._linear_score(magnitude, weak_pct, strong_pct, bull_min, bull_max)
         else:
-            return self._clamp(neutral)
+            # Bearish confirmation: scale from bear_max → bear_min
+            # (stronger bearish OBV = lower score)
+            score = self._linear_score(magnitude, weak_pct, strong_pct, bear_max, bear_min)
+
+        return self._clamp(score)
 
     def summary(self, values: dict[str, Any], score: float) -> dict[str, Any]:
         direction = "Rising" if values["obv_rising"] else "Falling"

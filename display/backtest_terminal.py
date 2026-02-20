@@ -156,10 +156,24 @@ def render_backtest(
     config_table.add_column("Parameter", style="bold white", min_width=24, no_wrap=True)
     config_table.add_column("Value", style="white", min_width=20, no_wrap=True)
 
-    config_rows = [
-        ("Signal: SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"),
-        ("Signal: HOLD when score <=", f"{thresholds.get('hold_below', 6.5)}"),
-        ("Signal: LONG when score >", f"{thresholds.get('hold_below', 6.5)}"),
+    config_rows = []
+
+    threshold_mode = strat_cfg.get("threshold_mode", "fixed")
+    config_rows.append(("Threshold Mode", threshold_mode))
+
+    if threshold_mode == "percentile":
+        pct_cfg = strat_cfg.get("percentile_thresholds", {})
+        config_rows.append(("SHORT when percentile <=", f"{pct_cfg.get('short_percentile', 25)}%"))
+        config_rows.append(("LONG when percentile >=", f"{pct_cfg.get('long_percentile', 75)}%"))
+        config_rows.append(("Lookback Window", f"{pct_cfg.get('lookback_bars', 60)} bars"))
+        config_rows.append(("(Fallback) SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"))
+        config_rows.append(("(Fallback) LONG when score >", f"{thresholds.get('hold_below', 6.5)}"))
+    else:
+        config_rows.append(("Signal: SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"))
+        config_rows.append(("Signal: HOLD when score <=", f"{thresholds.get('hold_below', 6.5)}"))
+        config_rows.append(("Signal: LONG when score >", f"{thresholds.get('hold_below', 6.5)}"))
+
+    config_rows += [
         ("Position Sizing", strat_cfg.get("position_sizing", "fixed")),
         ("Fixed Quantity", f"{strat_cfg.get('fixed_quantity', 100)} shares"),
         ("Stop Loss", f"{strat_cfg.get('stop_loss_pct', 0.05) * 100:.1f}%"),

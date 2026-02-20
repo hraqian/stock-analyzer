@@ -69,24 +69,33 @@ stochastic:
 adx:
   period: 14
   thresholds:
-    weak: 30       # ADX below this = weak/no trend
-    moderate: 50   # ADX 30-50 = moderate trend
+    weak: 20       # ADX below this = weak/no trend (was 30 — most stocks are below 30)
+    moderate: 40   # ADX 20-40 = moderate trend
     # ADX above moderate = strong trend
   scoring:
     # Trend strength multiplier applied to directional score
-    weak_multiplier: 0.4      # weak trend → score pulled toward 5
-    moderate_multiplier: 0.75
+    # Higher multipliers = more extreme scores when there IS a directional signal
+    weak_multiplier: 0.6       # weak trend → still allow some directional scoring
+    moderate_multiplier: 0.85
     strong_multiplier: 1.0
     # Base directional score from +DI vs -DI spread
-    max_directional_spread: 40  # +DI - -DI spread at which full directional score is reached
+    max_directional_spread: 25  # +DI - -DI spread for full score (was 40 — too wide)
 
 volume:
   obv_trend_period: 20   # EMA period for OBV trend
   price_trend_period: 20 # EMA period for price trend comparison
   scoring:
-    confirmation_score: 8.0   # OBV trend confirms price trend direction
-    neutral_score: 5.0        # OBV flat or mixed signal
-    divergence_score: 2.0     # OBV diverges from price trend
+    # Scores are now scaled by the magnitude of OBV change
+    # Confirmation = OBV and price trends match direction
+    # Divergence = OBV and price trends disagree
+    confirmation_bullish_max: 9.5   # OBV confirms bullish price — strong reading
+    confirmation_bullish_min: 6.5   # OBV confirms bullish price — weak reading
+    confirmation_bearish_max: 3.5   # OBV confirms bearish price — weak reading
+    confirmation_bearish_min: 0.5   # OBV confirms bearish price — strong reading
+    divergence_score: 5.0           # OBV diverges from price trend (neutral)
+    # OBV change % thresholds for scaling within the confirmation range
+    obv_strong_change_pct: 10.0     # OBV change >= this % → use max confirmation score
+    obv_weak_change_pct: 1.0        # OBV change <= this % → use min confirmation score
 
 fibonacci:
   # Swing lookback to find recent high/low for retracement calculation
@@ -94,14 +103,18 @@ fibonacci:
   levels: [0.236, 0.382, 0.5, 0.618, 0.786]
   scoring:
     proximity_pct: 0.015   # within 1.5% of a level = "at that level"
-    # Score based on which level price is near
+    # Score based on which Fibonacci level price is near
     level_scores:
-      0.236: 7.0   # shallow retracement (still bullish)
-      0.382: 6.5
-      0.5:   5.5
-      0.618: 4.5   # deep retracement (more bearish)
-      0.786: 3.0
+      0.236: 8.0   # shallow retracement (still bullish)
+      0.382: 7.0
+      0.5:   5.0
+      0.618: 3.0   # deep retracement (more bearish)
+      0.786: 1.5
     no_level_score: 5.0    # price not near any fib level
+    # When not near a level, score based on position in range
+    # These define the full range for range_position scoring (0.0 to 1.0)
+    range_low_score: 2.0   # at bottom of range → bearish (was 3.5)
+    range_high_score: 8.0  # at top of range → bullish (was 6.5)
 
 support_resistance:
   # Method to detect S/R levels: "pivot", "fractal", or "both"
@@ -141,19 +154,36 @@ display:
 
 strategy:
   # Map composite score ranges to trading decisions
+  #
+  # NOTE: The composite score (weighted average of 8 indicators) has lower
+  # variance than individual indicators — it typically ranges ~3.5–6.5.
+  # Set thresholds within that actual range for trades to trigger.
+  # Use threshold_mode: "percentile" for self-calibrating thresholds.
+  #
+  # threshold_mode: "fixed" or "percentile"
+  #   fixed      — use the absolute score values below
+  #   percentile — use rolling percentile ranks (adaptive to each stock)
+  threshold_mode: "fixed"
+
   score_thresholds:
-    short_below: 3.5      # composite score <= this → SHORT
-    hold_below: 6.5       # composite score <= this → HOLD
+    short_below: 4.5      # composite score <= this → SHORT
+    hold_below: 5.5       # composite score <= this → HOLD
     # composite score > hold_below → LONG
 
+  # Percentile mode settings (only used when threshold_mode = "percentile")
+  percentile_thresholds:
+    short_percentile: 25    # score in bottom 25% of recent window → SHORT
+    long_percentile: 75     # score in top 25% of recent window → LONG
+    lookback_bars: 60       # rolling window size for percentile calculation
+
   # Position sizing method: "fixed" or "percent_equity"
-  position_sizing: "fixed"
+  position_sizing: "percent_equity"
   fixed_quantity: 100       # shares per trade (when sizing = "fixed")
-  percent_equity: 0.10      # fraction of equity per trade (when sizing = "percent_equity")
+  percent_equity: 0.80      # fraction of equity per trade (when sizing = "percent_equity")
 
   # Risk management
   stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
-  take_profit_pct: 0.50     # exit if position gains this fraction (0.15 = 15%)
+  take_profit_pct: 0.20     # exit if position gains this fraction (0.20 = 20%)
 
   # How often to re-evaluate and potentially change position
   rebalance_interval: 5     # re-score every N bars

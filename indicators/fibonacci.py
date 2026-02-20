@@ -65,7 +65,9 @@ class FibonacciIndicator(BaseIndicator):
         if not values["at_level"] or values["nearest_level"] is None:
             # Not near any level — score based on range position
             # Upper half of range is slightly bullish, lower half slightly bearish
-            return self._linear_score(values["range_position"], 0.0, 1.0, 3.5, 6.5)
+            range_low = float(scoring.get("range_low_score", 2.0))
+            range_high = float(scoring.get("range_high_score", 8.0))
+            return self._linear_score(values["range_position"], 0.0, 1.0, range_low, range_high)
 
         lvl = values["nearest_level"]
         # level_scores keys may be floats or strings depending on YAML parsing
