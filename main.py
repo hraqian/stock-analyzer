@@ -209,6 +209,46 @@ def main() -> None:
             + "[/dim]"
         )
 
+    # ── Validate interval vs objective ────────────────────────────────────────
+    # day_trading requires an intraday interval — daily bars make no sense
+    # with 1.5% stops and EOD flattening.
+    intraday_intervals = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
+    is_intraday = args.interval.lower().strip() in intraday_intervals
+
+    if args.objective == "day_trading" and not is_intraday:
+        console.print(
+            "[red]Error:[/red] The [bold]day_trading[/bold] objective requires an intraday interval.\n"
+            "  Add [bold]-i 5m[/bold] (or 1m, 15m, 30m, 1h) to your command.\n\n"
+            "  Example: [dim]python main.py TSLA -o day_trading -b -i 5m --start 2025-12-23[/dim]\n\n"
+            "  [dim]yfinance intraday limits:[/dim]\n"
+            "  [dim]  1m = last 7 days  |  5m/15m/30m = last 60 days  |  1h = last 730 days[/dim]"
+        )
+        sys.exit(1)
+
+    # Warn about yfinance intraday data limits when using --period
+    if is_intraday and not args.start:
+        _max_period: dict[str, list[str]] = {
+            "1m": ["1mo"],
+            "2m": ["1mo"],
+            "5m": ["1mo", "3mo"],
+            "15m": ["1mo", "3mo"],
+            "30m": ["1mo", "3mo"],
+            "60m": ["1mo", "3mo", "6mo", "1y", "2y"],
+            "90m": ["1mo", "3mo", "6mo", "1y", "2y"],
+            "1h": ["1mo", "3mo", "6mo", "1y", "2y"],
+        }
+        allowed = _max_period.get(args.interval.lower().strip(), [])
+        if allowed and args.period.lower().strip() not in allowed:
+            _limits = "1m=7d, 5m/15m/30m=60d, 1h=730d"
+            console.print(
+                f"[red]Error:[/red] Period [bold]{args.period}[/bold] is too long for "
+                f"[bold]{args.interval}[/bold] interval data.\n"
+                f"  yfinance limits: {_limits}\n"
+                f"  Valid periods for {args.interval}: {', '.join(allowed)}\n\n"
+                f"  [dim]Tip: Use --start DATE instead of --period for precise date ranges.[/dim]"
+            )
+            sys.exit(1)
+
     # ── --validate-config ─────────────────────────────────────────────────────
     if args.validate_config:
         errors = cfg.validate()
@@ -285,10 +325,6 @@ def main() -> None:
         mode_str = args.mode  # CLI flag (None if not provided)
         if mode_str is None:
             mode_str = cfg.section("suitability").get("mode_override", "auto")
-
-        # Check if using an intraday interval
-        intraday_intervals = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
-        is_intraday = args.interval.lower().strip() in intraday_intervals
 
         # If a specific mode is forced (not "auto"), use it directly
         forced = mode_str != "auto"
