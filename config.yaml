@@ -188,6 +188,10 @@ strategy:
   # How often to re-evaluate and potentially change position
   rebalance_interval: 5     # re-score every N bars
 
+  # Day trading: force-close all positions at the end of each trading day
+  # (only applies when using intraday intervals like 1m, 5m, 15m, etc.)
+  flatten_eod: false
+
 backtest:
   initial_cash: 100000.0    # starting portfolio cash
   commission_per_trade: 0.0 # flat commission per trade (set 0 to ignore)
@@ -378,3 +382,78 @@ objectives:
 
     backtest:
       warmup_bars: 60           # much less data needed (no SMA200)
+
+  # ── Day Trading / Intraday ──────────────────────────────────────────────
+  # Designed for intraday positions only — all positions closed at end of day.
+  # Uses very fast indicator periods, tight stop/take-profit, and heavy weight
+  # on momentum indicators (MACD, Stochastic, RSI).
+  #
+  # Usage:
+  #   python main.py AAPL --objective day_trading -b --interval 5m --period 60d
+  #   python main.py AAPL --objective day_trading -b --interval 15m --start 2025-01-01
+  #
+  # Intraday data limits (yfinance):
+  #   1m  = last 7 days      5m/15m/30m = last 60 days
+  #   1h  = last 730 days    daily+     = unlimited
+  day_trading:
+    description: "Day trading — intraday positions only. Very fast indicators, tight stops, EOD flattening."
+
+    rsi:
+      period: 5
+      thresholds:
+        oversold: 30
+        overbought: 70
+
+    macd:
+      fast_period: 5
+      slow_period: 13
+      signal_period: 6
+
+    bollinger_bands:
+      period: 10
+      std_dev: 2.0
+
+    moving_averages:
+      periods: [5, 10, 20]      # very short-term MAs
+
+    stochastic:
+      k_period: 5
+      d_period: 3
+      smooth_k: 2
+      thresholds:
+        oversold: 20
+        overbought: 80
+
+    adx:
+      period: 7
+
+    volume:
+      obv_trend_period: 10
+      price_trend_period: 10
+
+    fibonacci:
+      swing_lookback: 20
+
+    support_resistance:
+      fractal_lookback: 20
+      fractal_order: 3
+
+    overall:
+      weights:
+        rsi: 0.15
+        macd: 0.25              # momentum is king intraday
+        bollinger_bands: 0.10
+        moving_averages: 0.05
+        stochastic: 0.20        # fast overbought/oversold
+        adx: 0.10
+        volume: 0.10
+        fibonacci: 0.05
+
+    strategy:
+      rebalance_interval: 1     # re-score every single bar
+      stop_loss_pct: 0.015      # tight stop (1.5%)
+      take_profit_pct: 0.03     # tight target (3%)
+      flatten_eod: true         # force-close all positions at end of each day
+
+    backtest:
+      warmup_bars: 30           # minimal warmup for fast indicators

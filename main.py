@@ -273,9 +273,15 @@ def main() -> None:
 
         # ── Determine trading mode ────────────────────────────────────────
         # Priority: --mode CLI flag > config.yaml mode_override > auto-detect
+        # Note: suitability detection is designed for daily data; intraday
+        # intervals bypass auto-detection and default to long_short.
         mode_str = args.mode  # CLI flag (None if not provided)
         if mode_str is None:
             mode_str = cfg.section("suitability").get("mode_override", "auto")
+
+        # Check if using an intraday interval
+        intraday_intervals = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
+        is_intraday = args.interval.lower().strip() in intraday_intervals
 
         # If a specific mode is forced (not "auto"), use it directly
         forced = mode_str != "auto"
@@ -288,6 +294,15 @@ def main() -> None:
                 "hold_only": TradingMode.HOLD_ONLY,
             }
             trading_mode = mode_map[mode_str]
+        elif is_intraday:
+            # Suitability thresholds are calibrated for daily bars;
+            # intraday data has naturally lower ATR% and per-bar volume.
+            # Default to long_short for intraday trading.
+            trading_mode = TradingMode.LONG_SHORT
+            console.print(
+                f"[dim]Suitability check skipped (intraday interval: {args.interval}). "
+                f"Using [bold]LONG SHORT[/bold] mode.[/dim]"
+            )
         else:
             # Auto-detect: need to fetch data first for suitability analysis
             console.print(f"[dim]Analyzing suitability for [bold]{ticker}[/bold]...[/dim]")

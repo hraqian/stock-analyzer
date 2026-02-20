@@ -146,6 +146,36 @@ class BacktestEngine:
         self._rebalance_interval: int = int(strat_cfg.get("rebalance_interval", 5))
         self._stop_loss_pct: float = float(strat_cfg.get("stop_loss_pct", 0.05))
         self._take_profit_pct: float = float(strat_cfg.get("take_profit_pct", 0.15))
+        self._flatten_eod: bool = bool(strat_cfg.get("flatten_eod", False))
+
+    # ------------------------------------------------------------------
+    # Interval helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _bars_per_day(interval: str) -> int:
+        """Estimate the number of intraday bars in a 6.5-hour trading day.
+
+        Returns 1 for daily-or-above intervals (used for annualization).
+        """
+        interval = interval.lower().strip()
+        # Map interval string to minutes per bar
+        _interval_minutes: dict[str, int] = {
+            "1m": 1, "2m": 2, "5m": 5, "15m": 15, "30m": 30,
+            "60m": 60, "90m": 90, "1h": 60,
+        }
+        minutes = _interval_minutes.get(interval)
+        if minutes is None:
+            return 1  # daily, weekly, monthly
+        # US market: 6.5 hours = 390 minutes
+        return max(1, 390 // minutes)
+
+    @staticmethod
+    def _is_intraday(interval: str) -> bool:
+        """Return True if the interval is intraday (sub-daily)."""
+        return interval.lower().strip() in {
+            "1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h",
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -202,10 +232,12 @@ class BacktestEngine:
 
         # 3. Bar-by-bar simulation
         bars_since_rebalance = self._rebalance_interval  # force recompute on first eligible bar
+        intraday = self._is_intraday(interval)
 
         for i in range(len(df)):
             row = df.iloc[i]
             date_str = str(df.index[i])[:10]
+            bar_timestamp = str(df.index[i])  # full timestamp for display
             close = float(row["close"])
             bar_dict = {
                 "open": float(row["open"]),
@@ -235,6 +267,14 @@ class BacktestEngine:
                     cash += self._trade_proceeds(trade, position)
                     trades.append(trade)
                     position = None
+
+            # -- Determine if this is the last bar of the trading day (for EOD flattening) --
+            eod_bar = False
+            if self._flatten_eod and intraday:
+                eod_bar = (
+                    i == len(df) - 1
+                    or str(df.index[i + 1])[:10] != date_str
+                )
 
             # -- Rebalance check: recompute indicators + get signal --
             bars_since_rebalance += 1
@@ -270,10 +310,26 @@ class BacktestEngine:
             order = self._strategy.on_bar(ctx)
 
             # -- Execute order (respecting trading mode) --
+            # On EOD bars with flatten_eod, skip opening new positions
             can_short = self._trading_mode == TradingMode.LONG_SHORT
             can_trade = self._trading_mode != TradingMode.HOLD_ONLY
 
-            if not can_trade:
+            if eod_bar:
+                # EOD: only allow closing existing positions, not opening new ones
+                if can_trade and position is not None:
+                    if order.signal == Signal.BUY and position.side == "short":
+                        # Close short (but don't open long)
+                        trade = self._close_position(position, close, date_str, "signal")
+                        cash += self._trade_proceeds(trade, position)
+                        trades.append(trade)
+                        position = None
+                    elif order.signal == Signal.SELL and position.side == "long":
+                        # Close long (but don't open short)
+                        trade = self._close_position(position, close, date_str, "signal")
+                        cash += self._trade_proceeds(trade, position)
+                        trades.append(trade)
+                        position = None
+            elif not can_trade:
                 pass  # hold_only: do nothing
             elif order.signal == Signal.BUY and position is None:
                 position, cost = self._open_position(
@@ -307,6 +363,15 @@ class BacktestEngine:
                     )
                     cash -= cost
 
+            # -- EOD flattening: force-close any remaining position at end of day --
+            if eod_bar and position is not None:
+                trade = self._close_position(
+                    position, close, date_str, "eod_flatten"
+                )
+                cash += self._trade_proceeds(trade, position)
+                trades.append(trade)
+                position = None
+
             # Record equity
             equity = cash
             if position is not None:
@@ -339,7 +404,7 @@ class BacktestEngine:
             trades=trades,
             equity_curve=equity_curve,
         )
-        self._compute_metrics(result)
+        self._compute_metrics(result, interval)
         self._strategy.on_end({"total_trades": len(trades)})
         return result
 
@@ -459,10 +524,18 @@ class BacktestEngine:
     # Performance metrics
     # ------------------------------------------------------------------
 
-    def _compute_metrics(self, result: BacktestResult) -> None:
-        """Populate performance metrics on *result* in-place."""
+    def _compute_metrics(self, result: BacktestResult, interval: str = "1d") -> None:
+        """Populate performance metrics on *result* in-place.
+
+        For intraday intervals, annualization uses bars_per_day * 252 instead
+        of just 252 to correctly scale to yearly figures.
+        """
         trades = result.trades
         result.total_trades = len(trades)
+
+        # Bars per trading year for this interval
+        bpd = self._bars_per_day(interval)
+        bars_per_year = bpd * 252  # trading days per year
 
         # Total return
         if result.initial_cash > 0:
@@ -475,8 +548,8 @@ class BacktestEngine:
         # Annualized return
         curve = result.equity_curve
         if len(curve) >= 2:
-            n_days = len(curve)
-            years = n_days / 252.0
+            n_bars = len(curve)
+            years = n_bars / bars_per_year
             if years > 0 and result.final_equity > 0 and result.initial_cash > 0:
                 result.annualized_return_pct = (
                     ((result.final_equity / result.initial_cash) ** (1 / years) - 1) * 100
@@ -514,16 +587,16 @@ class BacktestEngine:
             result.best_trade_pnl_pct = max(t.pnl_pct for t in trades) * 100
             result.worst_trade_pnl_pct = min(t.pnl_pct for t in trades) * 100
 
-        # Sharpe ratio (daily returns from equity curve)
+        # Sharpe ratio (bar-level returns from equity curve)
         if len(curve) >= 2:
             equities = [pt["equity"] for pt in curve]
-            daily_returns = []
+            bar_returns = []
             for j in range(1, len(equities)):
                 if equities[j - 1] > 0:
-                    daily_returns.append(equities[j] / equities[j - 1] - 1)
-            if daily_returns:
-                mean_r = sum(daily_returns) / len(daily_returns)
-                var_r = sum((r - mean_r) ** 2 for r in daily_returns) / len(daily_returns)
+                    bar_returns.append(equities[j] / equities[j - 1] - 1)
+            if bar_returns:
+                mean_r = sum(bar_returns) / len(bar_returns)
+                var_r = sum((r - mean_r) ** 2 for r in bar_returns) / len(bar_returns)
                 std_r = math.sqrt(var_r)
                 if std_r > 0:
-                    result.sharpe_ratio = (mean_r / std_r) * math.sqrt(252)
+                    result.sharpe_ratio = (mean_r / std_r) * math.sqrt(bars_per_year)

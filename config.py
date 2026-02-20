@@ -150,6 +150,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stop_loss_pct": 0.05,
         "take_profit_pct": 0.20,
         "rebalance_interval": 5,
+        "flatten_eod": False,  # force-close all positions at end of each trading day
     },
     "backtest": {
         "initial_cash": 100_000.0,
@@ -288,6 +289,66 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
             "backtest": {
                 "warmup_bars": 60,
+            },
+        },
+        "day_trading": {
+            "description": "Day trading — intraday positions only. Very fast indicators, tight stops, EOD flattening.",
+            "rsi": {
+                "period": 5,
+                "thresholds": {"oversold": 30, "overbought": 70},
+            },
+            "macd": {
+                "fast_period": 5,
+                "slow_period": 13,
+                "signal_period": 6,
+            },
+            "bollinger_bands": {
+                "period": 10,
+                "std_dev": 2.0,
+            },
+            "moving_averages": {
+                "periods": [5, 10, 20],
+            },
+            "stochastic": {
+                "k_period": 5,
+                "d_period": 3,
+                "smooth_k": 2,
+                "thresholds": {"oversold": 20, "overbought": 80},
+            },
+            "adx": {
+                "period": 7,
+            },
+            "volume": {
+                "obv_trend_period": 10,
+                "price_trend_period": 10,
+            },
+            "fibonacci": {
+                "swing_lookback": 20,
+            },
+            "support_resistance": {
+                "fractal_lookback": 20,
+                "fractal_order": 3,
+            },
+            "overall": {
+                "weights": {
+                    "rsi": 0.15,
+                    "macd": 0.25,
+                    "bollinger_bands": 0.10,
+                    "moving_averages": 0.05,
+                    "stochastic": 0.20,
+                    "adx": 0.10,
+                    "volume": 0.10,
+                    "fibonacci": 0.05,
+                },
+            },
+            "strategy": {
+                "rebalance_interval": 1,
+                "stop_loss_pct": 0.015,
+                "take_profit_pct": 0.03,
+                "flatten_eod": True,
+            },
+            "backtest": {
+                "warmup_bars": 30,
             },
         },
     },

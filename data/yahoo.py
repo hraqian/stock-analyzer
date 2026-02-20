@@ -11,7 +11,12 @@ from .provider import DataProvider
 
 # Periods yfinance accepts
 VALID_PERIODS = {"1mo", "3mo", "6mo", "1y", "2y", "5y", "ytd", "max"}
-VALID_INTERVALS = {"1d", "1wk", "1mo"}
+VALID_INTERVALS = {
+    # Intraday intervals (yfinance limits: 1m=7d, 5m/15m/30m=60d, 60m/1h=730d)
+    "1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h",
+    # Daily and above
+    "1d", "5d", "1wk", "1mo", "3mo",
+}
 
 
 class YahooFinanceProvider(DataProvider):

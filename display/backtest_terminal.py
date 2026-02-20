@@ -127,6 +127,14 @@ def render_backtest(
         ("Sharpe Ratio", f"{result.sharpe_ratio:.2f}", _pnl_color(result.sharpe_ratio)),
         ("", "", "white"),  # spacer
         ("Total Trades", f"{result.total_trades}", "white"),
+    ]
+
+    # Show EOD flatten count if any trades used that exit reason
+    eod_count = sum(1 for t in result.trades if t.exit_reason == "eod_flatten")
+    if eod_count > 0:
+        metrics.append(("  EOD Flattened", f"{eod_count}", "cyan"))
+
+    metrics += [
         ("Win Rate", f"{result.win_rate_pct:.1f}%", "green" if result.win_rate_pct >= 50 else "red"),
         ("Profit Factor", f"{result.profit_factor:.2f}" if result.profit_factor != float("inf") else "inf (no losses)", _pnl_color(result.profit_factor - 1)),
         ("Avg Trade P&L", f"{result.avg_trade_pnl_pct:+.2f}%", _pnl_color(result.avg_trade_pnl_pct)),
@@ -182,6 +190,7 @@ def render_backtest(
         ("Stop Loss", f"{strat_cfg.get('stop_loss_pct', 0.05) * 100:.1f}%"),
         ("Take Profit", f"{strat_cfg.get('take_profit_pct', 0.15) * 100:.1f}%"),
         ("Rebalance Interval", f"every {strat_cfg.get('rebalance_interval', 5)} bars"),
+        ("EOD Flatten", "[bold green]ON[/bold green]" if strat_cfg.get("flatten_eod", False) else "[dim]OFF[/dim]"),
         ("Slippage", f"{bt_cfg.get('slippage_pct', 0.001) * 100:.2f}%"),
         ("Commission", f"${bt_cfg.get('commission_per_trade', 0.0):.2f} / trade"),
         ("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"),
