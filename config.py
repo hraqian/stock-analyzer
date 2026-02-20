@@ -145,6 +145,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "slippage_pct": 0.001,
         "warmup_bars": 200,
     },
+    "suitability": {
+        "mode_override": "auto",
+        "min_volume": 100_000,
+        "min_atr_pct": 0.005,
+        "min_adx_for_short": 20.0,
+        "min_atr_for_short": 0.01,
+        "min_volume_for_short": 500_000,
+        "atr_period": 14,
+    },
 }
 
 
@@ -294,6 +303,29 @@ class Config:
         slippage = bt.get("slippage_pct", 0.001)
         if not isinstance(slippage, (int, float)) or slippage < 0:
             errors.append(f"backtest.slippage_pct must be non-negative, got {slippage!r}")
+
+        # Suitability parameters
+        suit = self._data.get("suitability", {})
+        mode_override = suit.get("mode_override", "auto")
+        valid_modes = ("auto", "long_short", "long_only", "hold_only")
+        if mode_override not in valid_modes:
+            errors.append(
+                f"suitability.mode_override must be one of {valid_modes}, got {mode_override!r}"
+            )
+
+        for key in ("min_volume", "min_volume_for_short"):
+            val = suit.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                errors.append(f"suitability.{key} must be non-negative, got {val!r}")
+
+        for key in ("min_atr_pct", "min_atr_for_short", "min_adx_for_short"):
+            val = suit.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                errors.append(f"suitability.{key} must be non-negative, got {val!r}")
+
+        atr_period = suit.get("atr_period", 14)
+        if not isinstance(atr_period, int) or atr_period < 1:
+            errors.append(f"suitability.atr_period must be a positive integer, got {atr_period!r}")
 
         return errors
 

@@ -11,6 +11,7 @@ Usage:
     python main.py AAPL --config my_config.yaml  # use custom config file
     python main.py AAPL --backtest --period 2y   # run backtest with score strategy
     python main.py AAPL --backtest --start 2016-01-01  # backtest over ~10 years
+    python main.py AAPL --backtest --mode long_only    # force long-only mode
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
@@ -37,6 +38,8 @@ Examples:
   python main.py AAPL --start 2020-01-01 --end 2023-12-31
   python main.py AAPL --backtest --period 2y
   python main.py AAPL --backtest --start 2016-01-01   # backtest over ~10 years
+  python main.py AAPL --backtest --mode long_only      # force long-only
+  python main.py AAPL --backtest --mode auto           # auto-detect mode
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -99,6 +102,18 @@ Examples:
         "--backtest", "-b",
         action="store_true",
         help="Run a backtest using the score-based strategy instead of (or in addition to) analysis",
+    )
+    parser.add_argument(
+        "--mode", "-m",
+        choices=["auto", "long_short", "long_only", "hold_only"],
+        default=None,
+        metavar="MODE",
+        help=(
+            "Trading mode for backtest: auto (detect from data), "
+            "long_short, long_only, hold_only. "
+            "Overrides config.yaml suitability.mode_override. "
+            "Only used with --backtest."
+        ),
     )
 
     # Config options
@@ -221,14 +236,76 @@ def main() -> None:
     if args.backtest:
         from engine.score_strategy import ScoreBasedStrategy
         from engine.backtest import BacktestEngine
+        from engine.suitability import SuitabilityAnalyzer, TradingMode
         from display.backtest_terminal import render_backtest
 
-        strategy = ScoreBasedStrategy(params=cfg.section("strategy"))
+        # ── Determine trading mode ────────────────────────────────────────
+        # Priority: --mode CLI flag > config.yaml mode_override > auto-detect
+        mode_str = args.mode  # CLI flag (None if not provided)
+        if mode_str is None:
+            mode_str = cfg.section("suitability").get("mode_override", "auto")
+
+        # If a specific mode is forced (not "auto"), use it directly
+        forced = mode_str != "auto"
+        assessment = None
+
+        if forced:
+            mode_map = {
+                "long_short": TradingMode.LONG_SHORT,
+                "long_only": TradingMode.LONG_ONLY,
+                "hold_only": TradingMode.HOLD_ONLY,
+            }
+            trading_mode = mode_map[mode_str]
+        else:
+            # Auto-detect: need to fetch data first for suitability analysis
+            console.print(f"[dim]Analyzing suitability for [bold]{ticker}[/bold]...[/dim]")
+            try:
+                suit_df = provider.fetch(
+                    ticker,
+                    period=args.period if not start_date else None,
+                    interval=args.interval,
+                    start=start_date,
+                    end=end_date,
+                )
+            except ValueError as exc:
+                console.print(f"[red]Error:[/red] {exc}")
+                sys.exit(1)
+
+            suit_analyzer = SuitabilityAnalyzer(cfg)
+            assessment = suit_analyzer.assess(suit_df)
+            trading_mode = assessment.mode
+
+        # ── If hold_only, show assessment and exit (no backtest) ──────────
+        if trading_mode == TradingMode.HOLD_ONLY and not forced:
+            from display.backtest_terminal import render_suitability
+            assert assessment is not None
+            console.print()
+            render_suitability(assessment, ticker)
+            console.print(
+                "\n  [yellow]Stock detected as unsuitable for active trading.[/yellow]"
+                "\n  [dim]Run without --backtest for analysis-only, "
+                "or use --mode long_short / --mode long_only to force a mode.[/dim]\n"
+            )
+            return
+
+        # ── Show mode selection ───────────────────────────────────────────
+        mode_label = trading_mode.value.replace("_", " ").upper()
+        if forced:
+            console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (forced via {'CLI' if args.mode else 'config'})[/dim]")
+        else:
+            console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (auto-detected)[/dim]")
+
+        # ── Create strategy and engine ────────────────────────────────────
+        strategy = ScoreBasedStrategy(
+            params=cfg.section("strategy"),
+            trading_mode=trading_mode,
+        )
 
         engine = BacktestEngine(
             data_provider=provider,
             strategy=strategy,
             cfg=cfg,
+            trading_mode=trading_mode,
         )
 
         console.print(
@@ -251,7 +328,7 @@ def main() -> None:
             console.print(f"[red]Unexpected error:[/red] {exc}")
             raise
 
-        render_backtest(bt_result, cfg)
+        render_backtest(bt_result, cfg, assessment=assessment)
         return
 
     # ── Standard analysis mode ────────────────────────────────────────────────

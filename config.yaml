@@ -165,3 +165,35 @@ backtest:
   # Minimum bars of data needed before the first signal can be generated
   # (must be >= longest indicator lookback, e.g. 200 for SMA200)
   warmup_bars: 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trading Mode Suitability Detection
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-detects whether a stock is suitable for shorting / active trading,
+# then constrains the backtest strategy accordingly.
+#
+# Three modes:
+#   long_short — both long and short positions allowed
+#   long_only  — only long positions; goes to cash when bearish
+#   hold_only  — unsuitable for active trading; display analysis only
+#
+# Set mode_override to force a specific mode (bypasses auto-detection):
+#   mode_override: "auto"        (default — auto-detect)
+#   mode_override: "long_short"  (force both directions)
+#   mode_override: "long_only"   (force long-only)
+#   mode_override: "hold_only"   (force hold-only)
+
+suitability:
+  mode_override: "auto"       # "auto", "long_short", "long_only", "hold_only"
+
+  # hold_only thresholds — below these, stock is too illiquid/dead for trading
+  min_volume: 100000          # avg daily volume below this → hold_only
+  min_atr_pct: 0.005          # ATR/price below this → hold_only (0.5%)
+
+  # long_only thresholds — below these, shorting is not viable
+  min_adx_for_short: 20.0     # ADX below this → no clear trend to short
+  min_atr_for_short: 0.01     # ATR/price below this → too low vol for shorts (1%)
+  min_volume_for_short: 500000 # avg daily volume below this → insufficient for shorting
+
+  # ATR calculation period
+  atr_period: 14

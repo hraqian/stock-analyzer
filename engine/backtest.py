@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 from indicators.registry import IndicatorRegistry
 from analysis.scorer import CompositeScorer
 from engine.strategy import Signal, StrategyContext, TradeOrder
+from engine.suitability import TradingMode
 
 
 # ---------------------------------------------------------------------------
@@ -126,10 +127,12 @@ class BacktestEngine:
         data_provider: "DataProvider",
         strategy: "Strategy",
         cfg: "Config",
+        trading_mode: TradingMode = TradingMode.LONG_SHORT,
     ) -> None:
         self._provider = data_provider
         self._strategy = strategy
         self._cfg = cfg
+        self._trading_mode = trading_mode
 
         # Config sections
         bt_cfg = cfg.section("backtest")
@@ -266,13 +269,18 @@ class BacktestEngine:
 
             order = self._strategy.on_bar(ctx)
 
-            # -- Execute order --
-            if order.signal == Signal.BUY and position is None:
+            # -- Execute order (respecting trading mode) --
+            can_short = self._trading_mode == TradingMode.LONG_SHORT
+            can_trade = self._trading_mode != TradingMode.HOLD_ONLY
+
+            if not can_trade:
+                pass  # hold_only: do nothing
+            elif order.signal == Signal.BUY and position is None:
                 position, cost = self._open_position(
                     "long", close, order.quantity, date_str
                 )
                 cash -= cost
-            elif order.signal == Signal.SELL and position is None:
+            elif order.signal == Signal.SELL and position is None and can_short:
                 position, cost = self._open_position(
                     "short", close, order.quantity, date_str
                 )
@@ -287,14 +295,17 @@ class BacktestEngine:
                 )
                 cash -= cost
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
-                # Close long, open short
+                # Close long
                 trade = self._close_position(position, close, date_str, "signal")
                 cash += self._trade_proceeds(trade, position)
                 trades.append(trade)
-                position, cost = self._open_position(
-                    "short", close, order.quantity, date_str
-                )
-                cash -= cost
+                position = None
+                # Open short only if trading mode allows
+                if can_short:
+                    position, cost = self._open_position(
+                        "short", close, order.quantity, date_str
+                    )
+                    cash -= cost
 
             # Record equity
             equity = cash

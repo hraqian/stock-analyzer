@@ -14,6 +14,7 @@ from rich import box
 if TYPE_CHECKING:
     from config import Config
     from engine.backtest import BacktestResult
+    from engine.suitability import SuitabilityAssessment
 
 console = Console()
 
@@ -26,7 +27,56 @@ def _pnl_color(value: float) -> str:
     return "white"
 
 
-def render_backtest(result: "BacktestResult", cfg: "Config") -> None:
+def _mode_color(mode_value: str) -> str:
+    """Color for trading mode labels."""
+    if mode_value == "long_short":
+        return "green"
+    if mode_value == "long_only":
+        return "yellow"
+    return "red"  # hold_only
+
+
+def render_suitability(
+    assessment: "SuitabilityAssessment",
+    ticker: str,
+) -> None:
+    """Render a standalone suitability assessment panel (used when hold_only)."""
+    mode_label = assessment.mode.value.replace("_", " ").upper()
+    color = _mode_color(assessment.mode.value)
+
+    lines = [
+        f"[bold white]{ticker}[/bold white]  "
+        f"Trading Mode: [{color}][bold]{mode_label}[/bold][/{color}]"
+        + ("  [dim](forced)[/dim]" if assessment.forced else "  [dim](auto-detected)[/dim]"),
+        "",
+    ]
+
+    # Metrics
+    lines.append("[bold]Metrics:[/bold]")
+    lines.append(f"  Avg Daily Volume:  {assessment.avg_daily_volume:>12,.0f}")
+    lines.append(f"  ADX:               {assessment.adx_value:>12.1f}")
+    lines.append(f"  ATR%:              {assessment.atr_pct:>12.3f}  ({assessment.atr_pct * 100:.1f}%)")
+    lines.append("")
+
+    # Reasons
+    lines.append("[bold]Reasons:[/bold]")
+    for reason in assessment.reasons:
+        lines.append(f"  [dim]- {reason}[/dim]")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title="[bold]Suitability Assessment[/bold]",
+        box=box.ROUNDED,
+        expand=True,
+        padding=(0, 2),
+    ))
+
+
+def render_backtest(
+    result: "BacktestResult",
+    cfg: "Config",
+    assessment: "SuitabilityAssessment | None" = None,
+) -> None:
     """Render backtest results to the terminal."""
     disp_cfg = cfg.section("display")
     price_dp = int(disp_cfg.get("price_decimal_places", 2))
@@ -47,6 +97,10 @@ def render_backtest(result: "BacktestResult", cfg: "Config") -> None:
         expand=True,
         padding=(0, 2),
     ))
+
+    # ── Suitability Assessment Panel ────────────────────────────────────────
+    if assessment is not None:
+        render_suitability(assessment, result.ticker)
 
     # ── Performance Metrics Table ───────────────────────────────────────────
     metrics_table = Table(
