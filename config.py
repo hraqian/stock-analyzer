@@ -127,6 +127,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "price_decimal_places": 2,
         "color_thresholds": {"bearish_max": 3.5, "neutral_max": 6.5},
     },
+    "strategy": {
+        "score_thresholds": {
+            "short_below": 3.5,
+            "hold_below": 6.5,
+        },
+        "position_sizing": "fixed",
+        "fixed_quantity": 100,
+        "percent_equity": 0.10,
+        "stop_loss_pct": 0.05,
+        "take_profit_pct": 0.15,
+        "rebalance_interval": 5,
+    },
+    "backtest": {
+        "initial_cash": 100_000.0,
+        "commission_per_trade": 0.0,
+        "slippage_pct": 0.001,
+        "warmup_bars": 200,
+    },
 }
 
 
@@ -231,6 +249,51 @@ class Config:
         ma_periods = self._data.get("moving_averages", {}).get("periods", [20, 50, 200])
         if ma_periods != sorted(ma_periods):
             errors.append("moving_averages.periods should be in ascending order")
+
+        # Strategy thresholds
+        strat = self._data.get("strategy", {})
+        st = strat.get("score_thresholds", {})
+        short_below = st.get("short_below", 3.5)
+        hold_below = st.get("hold_below", 6.5)
+        if short_below >= hold_below:
+            errors.append(
+                "strategy.score_thresholds.short_below must be less than hold_below"
+            )
+        if not (0 <= short_below <= 10) or not (0 <= hold_below <= 10):
+            errors.append(
+                "strategy.score_thresholds values must be between 0 and 10"
+            )
+
+        sizing = strat.get("position_sizing", "fixed")
+        if sizing not in ("fixed", "percent_equity"):
+            errors.append(
+                f"strategy.position_sizing must be 'fixed' or 'percent_equity', got {sizing!r}"
+            )
+
+        for pct_key in ("stop_loss_pct", "take_profit_pct"):
+            val = strat.get(pct_key)
+            if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+                errors.append(f"strategy.{pct_key} must be a positive number, got {val!r}")
+
+        rebal = strat.get("rebalance_interval", 5)
+        if not isinstance(rebal, int) or rebal < 1:
+            errors.append(
+                f"strategy.rebalance_interval must be a positive integer, got {rebal!r}"
+            )
+
+        # Backtest parameters
+        bt = self._data.get("backtest", {})
+        cash = bt.get("initial_cash", 100_000)
+        if not isinstance(cash, (int, float)) or cash <= 0:
+            errors.append(f"backtest.initial_cash must be positive, got {cash!r}")
+
+        warmup = bt.get("warmup_bars", 200)
+        if not isinstance(warmup, int) or warmup < 1:
+            errors.append(f"backtest.warmup_bars must be a positive integer, got {warmup!r}")
+
+        slippage = bt.get("slippage_pct", 0.001)
+        if not isinstance(slippage, (int, float)) or slippage < 0:
+            errors.append(f"backtest.slippage_pct must be non-negative, got {slippage!r}")
 
         return errors
 

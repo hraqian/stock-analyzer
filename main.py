@@ -7,6 +7,7 @@ Usage:
     python main.py MSFT --period 1mo             # 1-month analysis
     python main.py AAPL --indicators rsi,macd    # run only specific indicators
     python main.py AAPL --config my_config.yaml  # use custom config file
+    python main.py AAPL --backtest --period 2y   # run backtest with score strategy
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
@@ -29,6 +30,7 @@ Examples:
   python main.py AAPL
   python main.py TSLA --period 1y
   python main.py MSFT --period 3mo --indicators rsi,macd,adx
+  python main.py AAPL --backtest --period 2y
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -66,6 +68,13 @@ Examples:
             "Comma-separated list of indicators to run. "
             "e.g. rsi,macd,adx   (default: all)"
         ),
+    )
+
+    # Backtest mode
+    parser.add_argument(
+        "--backtest", "-b",
+        action="store_true",
+        help="Run a backtest using the score-based strategy instead of (or in addition to) analysis",
     )
 
     # Config options
@@ -158,6 +167,39 @@ def main() -> None:
     console.print(f"\n[dim]Fetching data for [bold]{ticker}[/bold] ({args.period})...[/dim]")
 
     provider = YahooFinanceProvider()
+
+    # ── Backtest mode ─────────────────────────────────────────────────────────
+    if args.backtest:
+        from engine.score_strategy import ScoreBasedStrategy
+        from engine.backtest import BacktestEngine
+        from display.backtest_terminal import render_backtest
+
+        strategy = ScoreBasedStrategy(params=cfg.section("strategy"))
+
+        engine = BacktestEngine(
+            data_provider=provider,
+            strategy=strategy,
+            cfg=cfg,
+        )
+
+        console.print(
+            f"[dim]Running backtest with {strategy.name} "
+            f"(rebalance every {cfg.section('strategy').get('rebalance_interval', 5)} bars)...[/dim]"
+        )
+
+        try:
+            bt_result = engine.run(ticker, period=args.period, interval=args.interval)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            sys.exit(1)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Unexpected error:[/red] {exc}")
+            raise
+
+        render_backtest(bt_result, cfg)
+        return
+
+    # ── Standard analysis mode ────────────────────────────────────────────────
     analyzer = Analyzer(cfg, provider, only_indicators=only_indicators)
 
     try:

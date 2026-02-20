@@ -134,3 +134,34 @@ display:
   color_thresholds:
     bearish_max: 3.5    # score <= this → red
     neutral_max: 6.5    # score <= this → yellow, above → green
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy & Backtesting Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+strategy:
+  # Map composite score ranges to trading decisions
+  score_thresholds:
+    short_below: 3.5      # composite score <= this → SHORT
+    hold_below: 6.5       # composite score <= this → HOLD
+    # composite score > hold_below → LONG
+
+  # Position sizing method: "fixed" or "percent_equity"
+  position_sizing: "fixed"
+  fixed_quantity: 100       # shares per trade (when sizing = "fixed")
+  percent_equity: 0.10      # fraction of equity per trade (when sizing = "percent_equity")
+
+  # Risk management
+  stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
+  take_profit_pct: 0.15     # exit if position gains this fraction (0.15 = 15%)
+
+  # How often to re-evaluate and potentially change position
+  rebalance_interval: 5     # re-score every N bars
+
+backtest:
+  initial_cash: 100000.0    # starting portfolio cash
+  commission_per_trade: 0.0 # flat commission per trade (set 0 to ignore)
+  slippage_pct: 0.001       # simulated slippage as fraction of price (0.1%)
+  # Minimum bars of data needed before the first signal can be generated
+  # (must be >= longest indicator lookback, e.g. 200 for SMA200)
+  warmup_bars: 200
