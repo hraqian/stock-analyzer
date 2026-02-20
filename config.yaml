@@ -1,0 +1,136 @@
+# Stock Technical Analysis — Scoring & Parameter Configuration
+# ---------------------------------------------------------------
+# All scores range from 0 (strongly bearish) to 10 (strongly bullish)
+# Edit thresholds and weights to match your analysis style.
+# Run `python main.py --generate-config` to regenerate this file with defaults.
+
+rsi:
+  period: 14
+  thresholds:
+    oversold: 30        # RSI below this → high score (oversold = potential reversal up)
+    overbought: 70      # RSI above this → low score  (overbought = potential reversal down)
+  scores:
+    oversold_score: 9.0       # score when RSI <= oversold
+    overbought_score: 1.0     # score when RSI >= overbought
+    neutral_score: 5.0        # score at RSI = 50
+
+macd:
+  fast_period: 12
+  slow_period: 26
+  signal_period: 9
+  scoring:
+    # Histogram thresholds relative to current price (as % of price)
+    strong_bullish_pct: 0.005   # histogram > price * this → score 9-10
+    moderate_bullish_pct: 0.001 # histogram > price * this → score 7-8
+    strong_bearish_pct: -0.005  # histogram < price * this → score 0-1
+    moderate_bearish_pct: -0.001
+    # Bonus/penalty for MACD line crossing signal line recently (within N bars)
+    crossover_lookback: 5
+    bullish_cross_bonus: 1.5
+    bearish_cross_penalty: 1.5
+
+bollinger_bands:
+  period: 20
+  std_dev: 2.0
+  scoring:
+    # Score based on %B = (price - lower) / (upper - lower)
+    # %B = 0 → at lower band, %B = 1 → at upper band
+    lower_zone: 0.20    # %B below this → score 8-10 (near support)
+    upper_zone: 0.80    # %B above this → score 0-2  (near resistance)
+    squeeze_threshold: 0.02  # band width / price below this = squeeze (volatility note)
+
+moving_averages:
+  periods: [20, 50, 200]
+  type: "sma"           # "sma" or "ema"
+  scoring:
+    # Points awarded per condition, summed then normalized to 0-10
+    price_above_ma_points: 1.5      # per MA that price is above
+    ma_aligned_bullish_points: 1.0  # per consecutive bullish MA alignment (20>50, 50>200)
+    golden_cross_bonus: 2.0         # 50 MA crossed above 200 MA within lookback bars
+    death_cross_penalty: 2.0        # 50 MA crossed below 200 MA within lookback bars
+    cross_lookback: 10              # bars to look back for golden/death cross
+    max_raw_score: 9.5              # cap before normalization
+
+stochastic:
+  k_period: 14
+  d_period: 3
+  smooth_k: 3
+  thresholds:
+    oversold: 20
+    overbought: 80
+  scores:
+    oversold_score: 9.0
+    overbought_score: 1.0
+    neutral_score: 5.0
+    # Bonus when %K crosses %D (signal crossover)
+    bullish_cross_bonus: 1.0
+    bearish_cross_penalty: 1.0
+
+adx:
+  period: 14
+  thresholds:
+    weak: 30       # ADX below this = weak/no trend
+    moderate: 50   # ADX 30-50 = moderate trend
+    # ADX above moderate = strong trend
+  scoring:
+    # Trend strength multiplier applied to directional score
+    weak_multiplier: 0.4      # weak trend → score pulled toward 5
+    moderate_multiplier: 0.75
+    strong_multiplier: 1.0
+    # Base directional score from +DI vs -DI spread
+    max_directional_spread: 40  # +DI - -DI spread at which full directional score is reached
+
+volume:
+  obv_trend_period: 20   # EMA period for OBV trend
+  price_trend_period: 20 # EMA period for price trend comparison
+  scoring:
+    confirmation_score: 8.0   # OBV trend confirms price trend direction
+    neutral_score: 5.0        # OBV flat or mixed signal
+    divergence_score: 2.0     # OBV diverges from price trend
+
+fibonacci:
+  # Swing lookback to find recent high/low for retracement calculation
+  swing_lookback: 60
+  levels: [0.236, 0.382, 0.5, 0.618, 0.786]
+  scoring:
+    proximity_pct: 0.015   # within 1.5% of a level = "at that level"
+    # Score based on which level price is near
+    level_scores:
+      0.236: 7.0   # shallow retracement (still bullish)
+      0.382: 6.5
+      0.5:   5.5
+      0.618: 4.5   # deep retracement (more bearish)
+      0.786: 3.0
+    no_level_score: 5.0    # price not near any fib level
+
+support_resistance:
+  # Method to detect S/R levels: "pivot", "fractal", or "both"
+  method: "both"
+  # Classic pivot point calculation (uses last complete bar's HLC)
+  pivot_levels: ["S1", "S2", "S3", "P", "R1", "R2", "R3"]
+  # Fractal-based: look for local min/max over this window
+  fractal_lookback: 60
+  fractal_order: 5          # number of bars each side for a local extremum
+  num_levels: 4             # number of support AND resistance levels to display
+  cluster_pct: 0.015        # merge levels within 1.5% of each other
+  min_touches: 1            # minimum price touches to confirm a level
+
+overall:
+  # Weights for composite score — will be normalized if they don't sum to 1.0
+  weights:
+    rsi: 0.15
+    macd: 0.15
+    bollinger_bands: 0.10
+    moving_averages: 0.20
+    stochastic: 0.10
+    adx: 0.10
+    volume: 0.10
+    fibonacci: 0.10
+
+display:
+  show_disclaimer: true
+  score_decimal_places: 1
+  price_decimal_places: 2
+  color_thresholds:
+    bearish_max: 3.5    # score <= this → red
+    neutral_max: 6.5    # score <= this → yellow, above → green
