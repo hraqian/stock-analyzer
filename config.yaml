@@ -225,5 +225,11 @@ suitability:
   min_atr_for_short: 0.01     # ATR/price below this → too low vol for shorts (1%)
   min_volume_for_short: 500000 # avg daily volume below this → insufficient for shorting
 
+  # Trend direction filter — if price is above its long-term MA for more than
+  # this % of the time, the stock has a structural upward bias and shorting
+  # will lose more often than it wins over the long run → force long_only.
+  trend_ma_period: 200        # long-term MA period for trend direction check
+  max_pct_above_ma: 65.0      # if price is above MA for more than this % → long_only
+
   # ATR calculation period
   atr_period: 14

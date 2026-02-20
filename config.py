@@ -165,6 +165,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_atr_for_short": 0.01,
         "min_volume_for_short": 500_000,
         "atr_period": 14,
+        "trend_ma_period": 200,
+        "max_pct_above_ma": 65.0,
     },
 }
 
@@ -369,6 +371,18 @@ class Config:
         atr_period = suit.get("atr_period", 14)
         if not isinstance(atr_period, int) or atr_period < 1:
             errors.append(f"suitability.atr_period must be a positive integer, got {atr_period!r}")
+
+        trend_ma_period = suit.get("trend_ma_period", 200)
+        if not isinstance(trend_ma_period, int) or trend_ma_period < 1:
+            errors.append(
+                f"suitability.trend_ma_period must be a positive integer, got {trend_ma_period!r}"
+            )
+
+        max_pct = suit.get("max_pct_above_ma", 65.0)
+        if not isinstance(max_pct, (int, float)) or not (0 <= max_pct <= 100):
+            errors.append(
+                f"suitability.max_pct_above_ma must be between 0 and 100, got {max_pct!r}"
+            )
 
         return errors
 

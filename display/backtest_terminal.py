@@ -56,6 +56,7 @@ def render_suitability(
     lines.append(f"  Avg Daily Volume:  {assessment.avg_daily_volume:>12,.0f}")
     lines.append(f"  ADX:               {assessment.adx_value:>12.1f}")
     lines.append(f"  ATR%:              {assessment.atr_pct:>12.3f}  ({assessment.atr_pct * 100:.1f}%)")
+    lines.append(f"  Trend (% above 200 MA): {assessment.pct_above_ma:>7.1f}%")
     lines.append("")
 
     # Reasons
