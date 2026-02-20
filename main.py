@@ -5,47 +5,63 @@ Usage:
     python main.py AAPL                          # 6-month analysis (default)
     python main.py TSLA --period 1y              # 1-year analysis
     python main.py MSFT --period 1mo             # 1-month analysis
-    python main.py AAPL --start 2016-01-01       # custom date range (~10 years)
-    python main.py AAPL --start 2020-01-01 --end 2023-12-31
+    python main.py AAPL --start <10y-ago>        # custom date range (~10 years)
+    python main.py AAPL --start <5y-ago> --end <2y-ago>  # custom window
     python main.py AAPL --indicators rsi,macd    # run only specific indicators
     python main.py AAPL --config my_config.yaml  # use custom config file
     python main.py AAPL --backtest --period 2y   # run backtest with score strategy
-    python main.py AAPL --backtest --start 2016-01-01  # backtest over ~10 years
-    python main.py AAPL --backtest --mode long_only    # force long-only mode
-    python main.py AAPL --objective long_term          # use long-term indicator presets
-    python main.py AAPL --objective short_term -b      # short-term backtest
-    python main.py AAPL -o day_trading -b -i 5m --start 2025-12-23  # day trading
+    python main.py AAPL --backtest --start <10y-ago>     # backtest over ~10 years
+    python main.py AAPL --backtest --mode long_only      # force long-only mode
+    python main.py AAPL --objective long_term            # use long-term indicator presets
+    python main.py AAPL --objective short_term -b        # short-term backtest
+    python main.py AAPL -o day_trading -b -i 5m --start <recent>  # day trading
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
+
+(Dates above are placeholders — actual examples are computed dynamically at runtime.)
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
 
+def _example_dates() -> dict[str, str]:
+    """Compute dynamic example dates so help text never goes stale."""
+    today = datetime.date.today()
+    return {
+        "ten_years_ago": (today - datetime.timedelta(days=365 * 10)).strftime("%Y-%m-%d"),
+        "five_years_ago": (today - datetime.timedelta(days=365 * 5)).strftime("%Y-%m-%d"),
+        "two_years_ago": (today - datetime.timedelta(days=365 * 2)).strftime("%Y-%m-%d"),
+        "recent_intraday": (today - datetime.timedelta(days=5)).strftime("%Y-%m-%d"),
+        "today": today.strftime("%Y-%m-%d"),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
+    d = _example_dates()
     parser = argparse.ArgumentParser(
         prog="stock_analyzer",
         description="Technical analysis of any stock — scored 0-10 per indicator.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
   python main.py AAPL
   python main.py TSLA --period 1y
   python main.py MSFT --period 3mo --indicators rsi,macd,adx
-  python main.py AAPL --start 2016-01-01              # ~10 years of data
-  python main.py AAPL --start 2020-01-01 --end 2023-12-31
+  python main.py AAPL --start {d['ten_years_ago']}              # ~10 years of data
+  python main.py AAPL --start {d['five_years_ago']} --end {d['two_years_ago']}
   python main.py AAPL --backtest --period 2y
-  python main.py AAPL --backtest --start 2016-01-01   # backtest over ~10 years
+  python main.py AAPL --backtest --start {d['ten_years_ago']}   # backtest over ~10 years
   python main.py AAPL --backtest --mode long_only      # force long-only
   python main.py AAPL --backtest --mode auto           # auto-detect mode
   python main.py AAPL --objective long_term            # long-term indicator presets
   python main.py AAPL --objective short_term -b -p 6mo # short-term backtest
-  python main.py AAPL -o day_trading -b -i 5m --start 2025-12-23  # day trading
+  python main.py AAPL -o day_trading -b -i 5m --start {d['recent_intraday']}  # day trading
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -94,7 +110,7 @@ Examples:
         "--start", "-s",
         metavar="DATE",
         help=(
-            "Start date in YYYY-MM-DD format (e.g. 2016-02-20). "
+            f"Start date in YYYY-MM-DD format (e.g. {d['ten_years_ago']}). "
             "Overrides --period when specified."
         ),
     )
@@ -216,10 +232,11 @@ def main() -> None:
     is_intraday = args.interval.lower().strip() in intraday_intervals
 
     if args.objective == "day_trading" and not is_intraday:
+        _recent = (datetime.date.today() - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
         console.print(
             "[red]Error:[/red] The [bold]day_trading[/bold] objective requires an intraday interval.\n"
             "  Add [bold]-i 5m[/bold] (or 1m, 15m, 30m, 1h) to your command.\n\n"
-            "  Example: [dim]python main.py TSLA -o day_trading -b -i 5m --start 2025-12-23[/dim]\n\n"
+            f"  Example: [dim]python main.py TSLA -o day_trading -b -i 5m --start {_recent}[/dim]\n\n"
             "  [dim]yfinance intraday limits:[/dim]\n"
             "  [dim]  1m = last 7 days  |  5m/15m/30m = last 60 days  |  1h = last 730 days[/dim]"
         )
@@ -287,15 +304,14 @@ def main() -> None:
 
     if start_date:
         # Validate date format
-        from datetime import datetime
         try:
-            datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.datetime.strptime(start_date, "%Y-%m-%d")
         except ValueError:
             console.print(f"[red]Error:[/red] --start must be YYYY-MM-DD, got '{start_date}'")
             sys.exit(1)
         if end_date:
             try:
-                datetime.strptime(end_date, "%Y-%m-%d")
+                datetime.datetime.strptime(end_date, "%Y-%m-%d")
             except ValueError:
                 console.print(f"[red]Error:[/red] --end must be YYYY-MM-DD, got '{end_date}'")
                 sys.exit(1)

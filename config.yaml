@@ -389,8 +389,8 @@ objectives:
   # on momentum indicators (MACD, Stochastic, RSI).
   #
   # Usage:
-  #   python main.py AAPL --objective day_trading -b --interval 5m --period 60d
-  #   python main.py AAPL --objective day_trading -b --interval 15m --start 2025-01-01
+  #   python main.py AAPL --objective day_trading -b --interval 5m --period 1mo
+  #   python main.py AAPL --objective day_trading -b --interval 15m --start <recent-date>
   #
   # Intraday data limits (yfinance):
   #   1m  = last 7 days      5m/15m/30m = last 60 days
