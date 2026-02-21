@@ -236,6 +236,7 @@ def render_backtest(
         trade_table.add_column("Side", min_width=6, no_wrap=True)
         trade_table.add_column("Entry Date", min_width=12, no_wrap=True)
         trade_table.add_column("Entry Price", min_width=12, no_wrap=True)
+        trade_table.add_column("Entry Reason", style="dim", min_width=20, no_wrap=True)
         trade_table.add_column("Exit Date", min_width=12, no_wrap=True)
         trade_table.add_column("Exit Price", min_width=12, no_wrap=True)
         trade_table.add_column("Qty", min_width=6, no_wrap=True)
@@ -265,6 +266,7 @@ def render_backtest(
                 f"[{side_color}]{t.side.upper()}[/{side_color}]",
                 t.entry_date,
                 f"${t.entry_price:.{price_dp}f}",
+                t.entry_reason,
                 t.exit_date,
                 f"${t.exit_price:.{price_dp}f}",
                 f"{t.quantity:.0f}",
@@ -278,7 +280,7 @@ def render_backtest(
                 trade_table.add_section()
                 trade_table.add_row(
                     "", f"[dim]... {len(result.trades) - 50} more trades ...[/dim]",
-                    "", "", "", "", "", "", "", "",
+                    "", "", "", "", "", "", "", "", "",
                 )
                 trade_table.add_section()
 

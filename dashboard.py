@@ -865,6 +865,7 @@ def render_trade_log(bt_result: BacktestResult) -> None:
             "Side": t.side.upper(),
             "Entry Date": t.entry_date,
             "Entry Price": f"${t.entry_price:.2f}",
+            "Entry Reason": t.entry_reason,
             "Exit Date": t.exit_date,
             "Exit Price": f"${t.exit_price:.2f}",
             "Qty": int(t.quantity),

@@ -52,6 +52,7 @@ class BacktestTrade:
     pnl: float             # absolute P&L
     pnl_pct: float         # percentage P&L
     exit_reason: str = ""  # "signal", "stop_loss", "take_profit"
+    entry_reason: str = "" # strategy notes at entry (e.g. "ind=6.80 pat=5.20 eff=6.32")
 
 
 @dataclass
@@ -92,6 +93,7 @@ class _Position:
     entry_price: float
     quantity: float
     bars_held: int = 0
+    entry_reason: str = ""  # carried through to BacktestTrade on close
 
     def unrealized_pnl(self, current_price: float) -> float:
         if self.side == "long":
@@ -337,12 +339,12 @@ class BacktestEngine:
                 pass  # hold_only: do nothing
             elif order.signal == Signal.BUY and position is None:
                 position, cost = self._open_position(
-                    "long", close, order.quantity, date_str
+                    "long", close, order.quantity, date_str, order.notes
                 )
                 cash -= cost
             elif order.signal == Signal.SELL and position is None and can_short:
                 position, cost = self._open_position(
-                    "short", close, order.quantity, date_str
+                    "short", close, order.quantity, date_str, order.notes
                 )
                 cash -= cost  # cost = commission only for short opens
             elif order.signal == Signal.BUY and position is not None and position.side == "short":
@@ -351,7 +353,7 @@ class BacktestEngine:
                 cash += self._trade_proceeds(trade, position)
                 trades.append(trade)
                 position, cost = self._open_position(
-                    "long", close, order.quantity, date_str
+                    "long", close, order.quantity, date_str, order.notes
                 )
                 cash -= cost
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
@@ -363,7 +365,7 @@ class BacktestEngine:
                 # Open short only if trading mode allows
                 if can_short:
                     position, cost = self._open_position(
-                        "short", close, order.quantity, date_str
+                        "short", close, order.quantity, date_str, order.notes
                     )
                     cash -= cost
 
@@ -422,6 +424,7 @@ class BacktestEngine:
         price: float,
         quantity: float,
         date: str,
+        entry_reason: str = "",
     ) -> tuple[_Position, float]:
         """Open a new position. Returns (position, cash_cost).
 
@@ -434,6 +437,7 @@ class BacktestEngine:
             entry_date=date,
             entry_price=fill_price,
             quantity=quantity,
+            entry_reason=entry_reason,
         )
         if side == "long":
             cost = fill_price * quantity + self._commission
@@ -472,6 +476,7 @@ class BacktestEngine:
             pnl=pnl,
             pnl_pct=pnl_pct,
             exit_reason=reason,
+            entry_reason=position.entry_reason,
         )
 
     def _trade_proceeds(self, trade: BacktestTrade, position: _Position) -> float:
