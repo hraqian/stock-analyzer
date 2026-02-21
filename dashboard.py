@@ -1,11 +1,14 @@
 """
 dashboard.py — Streamlit-based graphical dashboard for the stock analyzer.
 
-Phase 1: Read-only dashboard for visual analysis and backtesting.
+Phase 2: Interactive dashboard with editable parameters and config loadouts.
 Run with:  streamlit run dashboard.py
 
 Features:
   - Sidebar: ticker, period/date-range, interval, objective preset
+  - **Interactive parameter editing** for all indicator, pattern, strategy,
+    scoring, and backtest params — changes auto re-run analysis
+  - **3 config loadout slots** — save/load full config snapshots
   - Candlestick price chart with indicator & pattern score overlays
   - Support/resistance levels on the price chart
   - Indicator & pattern breakdown tables
@@ -17,6 +20,8 @@ Features:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -65,6 +70,9 @@ DAILY_INTERVALS = ["1d", "5d", "1wk", "1mo", "3mo"]
 ALL_INTERVALS = INTRADAY_INTERVALS + DAILY_INTERVALS
 TRADING_MODES = ["auto", "long_short", "long_only", "hold_only"]
 
+LOADOUT_DIR = _PROJECT_ROOT
+LOADOUT_SLOTS = 3
+
 # Color palette
 COLOR_BULLISH = "#26a69a"
 COLOR_BEARISH = "#ef5350"
@@ -75,6 +83,76 @@ COLOR_IND_SCORE = "#42a5f5"
 COLOR_PAT_SCORE = "#ab47bc"
 COLOR_EQUITY = "#42a5f5"
 COLOR_BENCHMARK = "#78909c"
+
+
+# ---------------------------------------------------------------------------
+# Config hashing (for cache invalidation)
+# ---------------------------------------------------------------------------
+
+def _config_hash(data: dict) -> str:
+    """Return a stable hash of a config dict for use as a cache key."""
+    raw = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Config ↔ session state helpers
+# ---------------------------------------------------------------------------
+
+def _get_config() -> Config:
+    """Build a Config object from the current session state config_data."""
+    data = st.session_state.get("config_data")
+    if data is None:
+        cfg = Config.load()
+        st.session_state["config_data"] = cfg.to_dict()
+        return cfg
+    return Config.from_dict(data)
+
+
+def _init_config_data() -> None:
+    """Ensure session_state['config_data'] is initialised."""
+    if "config_data" not in st.session_state:
+        cfg = Config.load()
+        st.session_state["config_data"] = cfg.to_dict()
+
+
+def _apply_objective_to_session(objective: str | None) -> None:
+    """Re-load base config, apply objective if any, store in session state.
+
+    This is called when the objective dropdown changes.  We must start from
+    the base YAML (not the already-mutated session state) so that switching
+    objectives gives a clean slate.
+    """
+    cfg = Config.load()
+    if objective:
+        cfg.apply_objective(objective)
+    st.session_state["config_data"] = cfg.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Loadout helpers
+# ---------------------------------------------------------------------------
+
+def _loadout_path(slot: int) -> Path:
+    return LOADOUT_DIR / f"config_slot_{slot}.yaml"
+
+
+def _save_loadout(slot: int) -> None:
+    cfg = _get_config()
+    cfg.save(str(_loadout_path(slot)))
+
+
+def _load_loadout(slot: int) -> bool:
+    path = _loadout_path(slot)
+    if not path.exists():
+        return False
+    cfg = Config.load(str(path))
+    st.session_state["config_data"] = cfg.to_dict()
+    return True
+
+
+def _loadout_exists(slot: int) -> bool:
+    return _loadout_path(slot).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +248,348 @@ def _build_score_table_html(
 
 
 # ---------------------------------------------------------------------------
+# Sidebar — parameter editors
+# ---------------------------------------------------------------------------
+
+def _edit_indicator_weights(data: dict) -> None:
+    """Editable indicator weight sliders (auto-normalised display)."""
+    weights = data.setdefault("overall", {}).setdefault("weights", {})
+    names = list(weights.keys())
+    total = sum(weights.values()) or 1.0
+
+    for name in names:
+        raw = float(weights.get(name, 0))
+        new_val = st.slider(
+            f"{name}",
+            min_value=0.0,
+            max_value=1.0,
+            value=raw,
+            step=0.05,
+            key=f"iw_{name}",
+            format="%.2f",
+        )
+        weights[name] = new_val
+
+    new_total = sum(weights.values())
+    if new_total > 0:
+        st.caption(f"Sum: {new_total:.2f} (normalised at runtime)")
+    else:
+        st.warning("All weights are zero — equal weighting will be used.")
+
+
+def _edit_indicator_params(data: dict) -> None:
+    """Editable indicator parameter inputs, one expander per indicator."""
+    indicator_params = {
+        "rsi": [
+            ("period", "Period", int, 2, 50),
+            ("thresholds.oversold", "Oversold threshold", int, 0, 100),
+            ("thresholds.overbought", "Overbought threshold", int, 0, 100),
+        ],
+        "macd": [
+            ("fast_period", "Fast period", int, 2, 50),
+            ("slow_period", "Slow period", int, 5, 100),
+            ("signal_period", "Signal period", int, 2, 50),
+        ],
+        "bollinger_bands": [
+            ("period", "Period", int, 5, 100),
+            ("std_dev", "Std deviation", float, 0.5, 4.0),
+        ],
+        "moving_averages": [
+            ("periods", "Periods (comma-sep)", "int_list", None, None),
+        ],
+        "stochastic": [
+            ("k_period", "K period", int, 2, 50),
+            ("d_period", "D period", int, 2, 20),
+            ("smooth_k", "Smooth K", int, 1, 10),
+            ("thresholds.oversold", "Oversold", int, 0, 100),
+            ("thresholds.overbought", "Overbought", int, 0, 100),
+        ],
+        "adx": [
+            ("period", "Period", int, 2, 50),
+            ("thresholds.weak", "Weak threshold", int, 0, 100),
+            ("thresholds.moderate", "Moderate threshold", int, 0, 100),
+        ],
+        "volume": [
+            ("obv_trend_period", "OBV trend period", int, 5, 100),
+            ("price_trend_period", "Price trend period", int, 5, 100),
+        ],
+        "fibonacci": [
+            ("swing_lookback", "Swing lookback", int, 10, 300),
+        ],
+    }
+
+    for ind_key, params in indicator_params.items():
+        section = data.setdefault(ind_key, {})
+        with st.expander(ind_key.replace("_", " ").title()):
+            for path, label, ptype, pmin, pmax in params:
+                parts = path.split(".")
+                # Navigate to the right nested dict
+                target = section
+                for p in parts[:-1]:
+                    target = target.setdefault(p, {})
+                field = parts[-1]
+
+                if ptype == "int_list":
+                    # Special: comma-separated integer list
+                    current = target.get(field, [20, 50, 200])
+                    current_str = ", ".join(str(x) for x in current)
+                    new_str = st.text_input(label, value=current_str, key=f"ip_{ind_key}_{path}")
+                    try:
+                        parsed = [int(x.strip()) for x in new_str.split(",") if x.strip()]
+                        target[field] = sorted(parsed)
+                    except ValueError:
+                        st.warning("Enter comma-separated integers")
+                elif ptype is int:
+                    current = int(target.get(field, pmin))
+                    new_val = st.number_input(
+                        label, min_value=pmin, max_value=pmax,
+                        value=current, step=1, key=f"ip_{ind_key}_{path}",
+                    )
+                    target[field] = int(new_val)
+                elif ptype is float:
+                    current = float(target.get(field, pmin))
+                    new_val = st.number_input(
+                        label, min_value=float(pmin), max_value=float(pmax),
+                        value=current, step=0.1, key=f"ip_{ind_key}_{path}",
+                        format="%.2f",
+                    )
+                    target[field] = float(new_val)
+
+
+def _edit_pattern_weights(data: dict) -> None:
+    """Editable pattern weight sliders."""
+    weights = data.setdefault("overall_patterns", {}).setdefault("weights", {})
+    names = list(weights.keys())
+
+    for name in names:
+        raw = float(weights.get(name, 0))
+        new_val = st.slider(
+            f"{name}",
+            min_value=0.0,
+            max_value=1.0,
+            value=raw,
+            step=0.05,
+            key=f"pw_{name}",
+            format="%.2f",
+        )
+        weights[name] = new_val
+
+    new_total = sum(weights.values())
+    if new_total > 0:
+        st.caption(f"Sum: {new_total:.2f} (normalised at runtime)")
+    else:
+        st.warning("All weights are zero — equal weighting will be used.")
+
+
+def _edit_pattern_indicator_combination(data: dict) -> None:
+    """Editable combination mode and related params."""
+    strat = data.setdefault("strategy", {})
+
+    modes = ["weighted", "gate", "boost"]
+    current_mode = strat.get("combination_mode", "weighted")
+    idx = modes.index(current_mode) if current_mode in modes else 0
+    mode = st.selectbox("Combination mode", modes, index=idx, key="combo_mode")
+    strat["combination_mode"] = mode
+
+    if mode == "weighted":
+        ind_w = st.slider(
+            "Indicator weight",
+            0.0, 1.0,
+            value=float(strat.get("indicator_weight", 0.7)),
+            step=0.05, key="combo_ind_w", format="%.2f",
+        )
+        pat_w = st.slider(
+            "Pattern weight",
+            0.0, 1.0,
+            value=float(strat.get("pattern_weight", 0.3)),
+            step=0.05, key="combo_pat_w", format="%.2f",
+        )
+        strat["indicator_weight"] = ind_w
+        strat["pattern_weight"] = pat_w
+        total = ind_w + pat_w
+        if total > 0:
+            st.caption(f"Effective: indicator {ind_w/total:.0%} / pattern {pat_w/total:.0%}")
+    elif mode == "gate":
+        strat["gate_indicator_min"] = st.number_input(
+            "Indicator LONG threshold",
+            0.0, 10.0, float(strat.get("gate_indicator_min", 5.5)),
+            step=0.1, key="gate_ind_min", format="%.1f",
+        )
+        strat["gate_indicator_max"] = st.number_input(
+            "Indicator SHORT threshold",
+            0.0, 10.0, float(strat.get("gate_indicator_max", 4.5)),
+            step=0.1, key="gate_ind_max", format="%.1f",
+        )
+        strat["gate_pattern_min"] = st.number_input(
+            "Pattern LONG threshold",
+            0.0, 10.0, float(strat.get("gate_pattern_min", 5.5)),
+            step=0.1, key="gate_pat_min", format="%.1f",
+        )
+        strat["gate_pattern_max"] = st.number_input(
+            "Pattern SHORT threshold",
+            0.0, 10.0, float(strat.get("gate_pattern_max", 4.5)),
+            step=0.1, key="gate_pat_max", format="%.1f",
+        )
+    elif mode == "boost":
+        strat["boost_strength"] = st.slider(
+            "Boost strength",
+            0.0, 2.0, float(strat.get("boost_strength", 0.5)),
+            step=0.1, key="boost_str", format="%.1f",
+        )
+        strat["boost_dead_zone"] = st.slider(
+            "Dead zone (±)",
+            0.0, 2.0, float(strat.get("boost_dead_zone", 0.3)),
+            step=0.1, key="boost_dz", format="%.1f",
+        )
+
+
+def _edit_scoring_thresholds(data: dict) -> None:
+    """Editable scoring threshold mode and values."""
+    strat = data.setdefault("strategy", {})
+
+    mode = st.radio(
+        "Threshold mode",
+        ["fixed", "percentile"],
+        index=0 if strat.get("threshold_mode", "fixed") == "fixed" else 1,
+        horizontal=True,
+        key="threshold_mode_radio",
+    )
+    strat["threshold_mode"] = mode
+
+    if mode == "fixed":
+        thresholds = strat.setdefault("score_thresholds", {})
+        short_below = st.slider(
+            "SHORT when score <=",
+            0.0, 10.0, float(thresholds.get("short_below", 4.5)),
+            step=0.1, key="fix_short", format="%.1f",
+        )
+        hold_below = st.slider(
+            "LONG when score >",
+            0.0, 10.0, float(thresholds.get("hold_below", 5.5)),
+            step=0.1, key="fix_long", format="%.1f",
+        )
+        thresholds["short_below"] = short_below
+        thresholds["hold_below"] = hold_below
+        if short_below >= hold_below:
+            st.warning("SHORT threshold should be below LONG threshold.")
+    else:
+        pct = strat.setdefault("percentile_thresholds", {})
+        pct["short_percentile"] = st.number_input(
+            "SHORT percentile <=",
+            0, 100, int(pct.get("short_percentile", 25)),
+            step=1, key="pct_short",
+        )
+        pct["long_percentile"] = st.number_input(
+            "LONG percentile >=",
+            0, 100, int(pct.get("long_percentile", 75)),
+            step=1, key="pct_long",
+        )
+        pct["lookback_bars"] = st.number_input(
+            "Lookback bars",
+            10, 500, int(pct.get("lookback_bars", 60)),
+            step=5, key="pct_lookback",
+        )
+
+
+def _edit_strategy_params(data: dict) -> None:
+    """Editable strategy execution params."""
+    strat = data.setdefault("strategy", {})
+
+    strat["stop_loss_pct"] = st.number_input(
+        "Stop loss %",
+        0.1, 50.0,
+        value=float(strat.get("stop_loss_pct", 0.05)) * 100,
+        step=0.5, key="sl_pct", format="%.1f",
+    ) / 100.0
+
+    strat["take_profit_pct"] = st.number_input(
+        "Take profit %",
+        0.1, 100.0,
+        value=float(strat.get("take_profit_pct", 0.20)) * 100,
+        step=0.5, key="tp_pct", format="%.1f",
+    ) / 100.0
+
+    sizing_modes = ["percent_equity", "fixed"]
+    current_sizing = strat.get("position_sizing", "percent_equity")
+    sizing_idx = sizing_modes.index(current_sizing) if current_sizing in sizing_modes else 0
+    strat["position_sizing"] = st.selectbox(
+        "Position sizing", sizing_modes, index=sizing_idx, key="pos_sizing",
+    )
+
+    if strat["position_sizing"] == "percent_equity":
+        strat["percent_equity"] = st.slider(
+            "Equity % (0-1)",
+            0.1, 1.0, float(strat.get("percent_equity", 0.80)),
+            step=0.05, key="pct_equity", format="%.2f",
+        )
+    else:
+        strat["fixed_quantity"] = st.number_input(
+            "Fixed quantity",
+            1, 10000, int(strat.get("fixed_quantity", 100)),
+            step=10, key="fix_qty",
+        )
+
+    strat["rebalance_interval"] = st.number_input(
+        "Rebalance interval (bars)",
+        1, 100, int(strat.get("rebalance_interval", 5)),
+        step=1, key="rebal",
+    )
+
+    strat["flatten_eod"] = st.checkbox(
+        "Flatten at EOD",
+        value=bool(strat.get("flatten_eod", False)),
+        key="flatten_eod_cb",
+    )
+
+
+def _edit_backtest_params(data: dict) -> None:
+    """Editable backtest engine params."""
+    bt = data.setdefault("backtest", {})
+
+    bt["initial_cash"] = st.number_input(
+        "Initial capital ($)",
+        1000.0, 10_000_000.0,
+        value=float(bt.get("initial_cash", 100_000)),
+        step=10_000.0, key="init_cash", format="%.0f",
+    )
+
+    bt["commission_per_trade"] = st.number_input(
+        "Commission per trade ($)",
+        0.0, 100.0,
+        value=float(bt.get("commission_per_trade", 0.0)),
+        step=1.0, key="commission", format="%.2f",
+    )
+
+    bt["slippage_pct"] = st.number_input(
+        "Slippage %",
+        0.0, 5.0,
+        value=float(bt.get("slippage_pct", 0.001)) * 100,
+        step=0.01, key="slippage", format="%.3f",
+    ) / 100.0
+
+    bt["warmup_bars"] = st.number_input(
+        "Warmup bars",
+        10, 1000,
+        value=int(bt.get("warmup_bars", 200)),
+        step=10, key="warmup",
+    )
+
+    bt["significant_pattern_min_strength"] = st.number_input(
+        "Sig. pattern min strength",
+        0.0, 3.0,
+        value=float(bt.get("significant_pattern_min_strength", 0.5)),
+        step=0.1, key="sig_min_str", format="%.1f",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
 def render_sidebar() -> dict:
     """Render sidebar controls and return user selections."""
+    _init_config_data()
+
     st.sidebar.title("Stock Analyzer")
     st.sidebar.markdown("---")
 
@@ -212,6 +627,12 @@ def render_sidebar() -> dict:
     if objective == "(none)":
         objective = None
 
+    # When objective changes, re-apply from scratch
+    prev_obj = st.session_state.get("_prev_objective")
+    if objective != prev_obj:
+        _apply_objective_to_session(objective)
+        st.session_state["_prev_objective"] = objective
+
     st.sidebar.markdown("---")
 
     # Backtest toggle
@@ -219,6 +640,63 @@ def render_sidebar() -> dict:
     trading_mode = "auto"
     if run_backtest:
         trading_mode = st.sidebar.selectbox("Trading mode", TRADING_MODES, index=0)
+
+    # ------------------------------------------------------------------
+    # Parameter editors (Phase 2)
+    # ------------------------------------------------------------------
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### Parameter Tuning")
+
+    data = st.session_state["config_data"]
+
+    with st.sidebar.expander("Indicator Weights"):
+        _edit_indicator_weights(data)
+
+    with st.sidebar.expander("Indicator Parameters"):
+        _edit_indicator_params(data)
+
+    with st.sidebar.expander("Pattern Weights"):
+        _edit_pattern_weights(data)
+
+    with st.sidebar.expander("Pattern-Indicator Combination"):
+        _edit_pattern_indicator_combination(data)
+
+    with st.sidebar.expander("Scoring Thresholds"):
+        _edit_scoring_thresholds(data)
+
+    with st.sidebar.expander("Strategy"):
+        _edit_strategy_params(data)
+
+    with st.sidebar.expander("Backtest"):
+        _edit_backtest_params(data)
+
+    # Write back to session state (widgets already mutated `data` in-place)
+    st.session_state["config_data"] = data
+
+    # ------------------------------------------------------------------
+    # Loadout save / load
+    # ------------------------------------------------------------------
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### Config Loadouts")
+
+    for slot in range(1, LOADOUT_SLOTS + 1):
+        exists = _loadout_exists(slot)
+        c_load, c_save = st.sidebar.columns(2)
+        with c_load:
+            if st.button(
+                f"Load #{slot}" if exists else f"#{slot} (empty)",
+                key=f"load_{slot}",
+                disabled=not exists,
+                use_container_width=True,
+            ):
+                if _load_loadout(slot):
+                    st.toast(f"Loaded config slot #{slot}")
+                    st.rerun()
+        with c_save:
+            if st.button(f"Save #{slot}", key=f"save_{slot}", use_container_width=True):
+                _save_loadout(slot)
+                st.toast(f"Saved to config slot #{slot}")
+                st.rerun()
 
     return {
         "ticker": ticker,
@@ -243,13 +721,11 @@ def load_analysis(
     interval: str,
     start: str | None,
     end: str | None,
-    objective: str | None,
-    config_path: str | None = None,
-) -> tuple[AnalysisResult, Config]:
-    """Run the full analysis pipeline and return (result, cfg)."""
-    cfg = Config.load(config_path)
-    if objective:
-        cfg.apply_objective(objective)
+    config_hash: str,
+    config_data: dict,
+) -> tuple[AnalysisResult, dict]:
+    """Run the full analysis pipeline and return (result, cfg_data)."""
+    cfg = Config.from_dict(config_data)
 
     provider = YahooFinanceProvider()
     analyzer = Analyzer(cfg, provider)
@@ -260,7 +736,7 @@ def load_analysis(
         start=start,
         end=end,
     )
-    return result, cfg
+    return result, config_data
 
 
 @st.cache_data(ttl=300, show_spinner="Running backtest...")
@@ -270,20 +746,22 @@ def load_backtest(
     interval: str,
     start: str | None,
     end: str | None,
-    objective: str | None,
     trading_mode_str: str,
-    config_path: str | None = None,
-) -> tuple[BacktestResult, TradingMode, "SuitabilityAssessment | None", Config]:
-    """Run the backtest engine and return results."""
-    cfg = Config.load(config_path)
-    if objective:
-        cfg.apply_objective(objective)
+    config_hash: str,
+    config_data: dict,
+) -> tuple[BacktestResult, str, "dict | None", dict]:
+    """Run the backtest engine and return results.
+
+    Returns (bt_result, trading_mode_value, assessment_dict_or_None, cfg_data).
+    We return serialisable types so Streamlit can cache them.
+    """
+    cfg = Config.from_dict(config_data)
 
     provider = YahooFinanceProvider()
 
     # Determine trading mode
     forced = trading_mode_str != "auto"
-    assessment = None
+    assessment_dict = None
 
     if forced:
         mode_map = {
@@ -305,6 +783,14 @@ def load_backtest(
         suit_analyzer = SuitabilityAnalyzer(cfg)
         assessment = suit_analyzer.assess(df)
         trading_mode = assessment.mode
+        # Serialise assessment for cache-friendliness
+        assessment_dict = {
+            "mode": assessment.mode.value,
+            "avg_daily_volume": assessment.avg_daily_volume,
+            "adx_value": assessment.adx_value,
+            "atr_pct": assessment.atr_pct,
+            "reasons": assessment.reasons,
+        }
 
     strategy = ScoreBasedStrategy(
         params=cfg.section("strategy"),
@@ -323,7 +809,7 @@ def load_backtest(
         start=start,
         end=end,
     )
-    return bt_result, trading_mode, assessment, cfg
+    return bt_result, trading_mode.value, assessment_dict, config_data
 
 
 # ---------------------------------------------------------------------------
@@ -337,20 +823,16 @@ def compute_score_timeseries(
     interval: str,
     start: str | None,
     end: str | None,
-    objective: str | None,
+    config_hash: str,
+    config_data: dict,
     step: int = 5,
 ) -> pd.DataFrame:
     """Compute indicator and pattern composite scores at regular intervals.
 
     Returns a DataFrame indexed by date with columns:
       indicator_score, pattern_score
-
-    Walks through the data and computes scores every *step* bars using
-    trailing data up to each point (same approach as the backtest engine).
     """
-    cfg = Config.load()
-    if objective:
-        cfg.apply_objective(objective)
+    cfg = Config.from_dict(config_data)
 
     provider = YahooFinanceProvider()
     df = provider.fetch(
@@ -404,6 +886,7 @@ def compute_score_timeseries(
 def create_price_chart(
     result: AnalysisResult,
     score_df: pd.DataFrame | None = None,
+    cfg: Config | None = None,
 ) -> go.Figure:
     """Create a candlestick price chart with score overlay and S/R levels."""
     df = result.df.copy()
@@ -516,8 +999,10 @@ def create_price_chart(
         )
 
         # Threshold lines on score chart
-        strat_cfg = Config.load()
-        thresholds = strat_cfg.section("strategy").get("score_thresholds", {})
+        if cfg is not None:
+            thresholds = cfg.section("strategy").get("score_thresholds", {})
+        else:
+            thresholds = {}
         short_below = float(thresholds.get("short_below", 4.5))
         hold_below = float(thresholds.get("hold_below", 5.5))
 
@@ -664,7 +1149,7 @@ def create_equity_chart(
     return fig
 
 
-def create_score_histogram(score_df: pd.DataFrame) -> go.Figure:
+def create_score_histogram(score_df: pd.DataFrame, cfg: Config | None = None) -> go.Figure:
     """Create a histogram of indicator composite scores with threshold markers."""
     if score_df is None or score_df.empty:
         return go.Figure()
@@ -687,8 +1172,10 @@ def create_score_histogram(score_df: pd.DataFrame) -> go.Figure:
     ))
 
     # Threshold lines
-    cfg = Config.load()
-    thresholds = cfg.section("strategy").get("score_thresholds", {})
+    if cfg is not None:
+        thresholds = cfg.section("strategy").get("score_thresholds", {})
+    else:
+        thresholds = {}
     short_below = float(thresholds.get("short_below", 4.5))
     hold_below = float(thresholds.get("hold_below", 5.5))
 
@@ -810,23 +1297,24 @@ def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_suitability(assessment, ticker: str) -> None:
+def render_suitability(assessment_dict: dict, ticker: str) -> None:
     """Render suitability assessment as an info/warning box."""
-    mode_label = assessment.mode.value.replace("_", " ").upper()
+    mode_value = assessment_dict["mode"]
+    mode_label = mode_value.replace("_", " ").upper()
     mode_map = {
         "long_short": "success",
         "long_only": "warning",
         "hold_only": "error",
     }
-    msg_type = mode_map.get(assessment.mode.value, "info")
+    msg_type = mode_map.get(mode_value, "info")
 
     cols = st.columns(4)
     cols[0].metric("Trading Mode", mode_label)
-    cols[1].metric("Avg Volume", f"{assessment.avg_daily_volume:,.0f}")
-    cols[2].metric("ADX", f"{assessment.adx_value:.1f}")
-    cols[3].metric("ATR%", f"{assessment.atr_pct * 100:.2f}%")
+    cols[1].metric("Avg Volume", f"{assessment_dict['avg_daily_volume']:,.0f}")
+    cols[2].metric("ADX", f"{assessment_dict['adx_value']:.1f}")
+    cols[3].metric("ATR%", f"{assessment_dict['atr_pct'] * 100:.2f}%")
 
-    for reason in assessment.reasons:
+    for reason in assessment_dict["reasons"]:
         if msg_type == "error":
             st.error(reason)
         elif msg_type == "warning":
@@ -923,7 +1411,7 @@ def render_significant_patterns(bt_result: BacktestResult) -> None:
 
 
 def render_strategy_config(cfg: Config) -> None:
-    """Render strategy configuration summary."""
+    """Render strategy configuration summary (read-only view of active config)."""
     strat_cfg = cfg.section("strategy")
     bt_cfg = cfg.section("backtest")
     thresholds = strat_cfg.get("score_thresholds", {})
@@ -981,15 +1469,21 @@ def main() -> None:
         )
         return
 
+    # Build Config from current session state
+    cfg = _get_config()
+    cfg_data = st.session_state["config_data"]
+    cfg_h = _config_hash(cfg_data)
+
     # ── Run analysis ──────────────────────────────────────────────────────
     try:
-        result, cfg = load_analysis(
+        result, _ = load_analysis(
             ticker=params["ticker"],
             period=params["period"],
             interval=params["interval"],
             start=params["start"],
             end=params["end"],
-            objective=params["objective"],
+            config_hash=cfg_h,
+            config_data=cfg_data,
         )
     except Exception as e:
         st.error(f"Analysis failed: {e}")
@@ -1010,7 +1504,8 @@ def main() -> None:
             interval=params["interval"],
             start=params["start"],
             end=params["end"],
-            objective=params["objective"],
+            config_hash=cfg_h,
+            config_data=cfg_data,
             step=step,
         )
     except Exception:
@@ -1018,7 +1513,7 @@ def main() -> None:
 
     # ── Price Chart ───────────────────────────────────────────────────────
     st.subheader("Price Chart")
-    price_fig = create_price_chart(result, score_df)
+    price_fig = create_price_chart(result, score_df, cfg=cfg)
     st.plotly_chart(price_fig, use_container_width=True)
 
     # ── Indicator & Pattern Tables ────────────────────────────────────────
@@ -1046,7 +1541,7 @@ def main() -> None:
     # ── Score Distribution ────────────────────────────────────────────────
     if score_df is not None and not score_df.empty:
         st.subheader("Score Distribution")
-        hist_fig = create_score_histogram(score_df)
+        hist_fig = create_score_histogram(score_df, cfg=cfg)
         st.plotly_chart(hist_fig, use_container_width=True)
 
         # Score stats
@@ -1063,26 +1558,27 @@ def main() -> None:
         st.header("Backtest Results")
 
         try:
-            bt_result, trading_mode, assessment, bt_cfg = load_backtest(
+            bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
                 ticker=params["ticker"],
                 period=params["period"],
                 interval=params["interval"],
                 start=params["start"],
                 end=params["end"],
-                objective=params["objective"],
                 trading_mode_str=params["trading_mode"],
+                config_hash=cfg_h,
+                config_data=cfg_data,
             )
         except Exception as e:
             st.error(f"Backtest failed: {e}")
             return
 
         # Suitability
-        if assessment is not None:
+        if assessment_dict is not None:
             st.subheader("Suitability Assessment")
-            render_suitability(assessment, params["ticker"])
+            render_suitability(assessment_dict, params["ticker"])
 
         # Trading mode badge
-        mode_label = trading_mode.value.replace("_", " ").upper()
+        mode_label = trading_mode_val.replace("_", " ").upper()
         st.info(f"Trading mode: **{mode_label}**")
 
         # Metrics
@@ -1096,7 +1592,7 @@ def main() -> None:
 
         # Strategy config
         with st.expander("Strategy Configuration"):
-            render_strategy_config(bt_cfg)
+            render_strategy_config(cfg)
 
         # Trade log
         with st.expander(f"Trade Log ({bt_result.total_trades} trades)"):

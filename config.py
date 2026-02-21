@@ -215,15 +215,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "trap_weight": 0.7,
         "max_signal_strength": 3.0,
     },
+    "inside_outside": {
+        "lookback": 20,
+        "trend_period": 10,
+        "breakout_bars": 3,
+        "outside_range_min": 1.2,
+        "max_signal_strength": 3.0,
+    },
     # ------------------------------------------------------------------
     # Pattern composite scoring
     # ------------------------------------------------------------------
     "overall_patterns": {
         "weights": {
-            "gaps": 0.25,
-            "volume_range": 0.30,
+            "gaps": 0.20,
+            "volume_range": 0.25,
             "candlesticks": 0.25,
-            "spikes": 0.20,
+            "spikes": 0.15,
+            "inside_outside": 0.15,
         },
     },
     "suitability": {
@@ -440,9 +448,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "overall_patterns": {
                 "weights": {
                     "gaps": 0.15,
-                    "volume_range": 0.35,
-                    "candlesticks": 0.30,
-                    "spikes": 0.20,
+                    "volume_range": 0.30,
+                    "candlesticks": 0.25,
+                    "spikes": 0.15,
+                    "inside_outside": 0.15,
                 },
             },
             "overall": {
@@ -798,6 +807,42 @@ class Config:
     # ------------------------------------------------------------------
     # Config generation
     # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deep copy of the internal configuration dictionary."""
+        return copy.deepcopy(self._data)
+
+    def save(self, output_path: str) -> None:
+        """Persist the current configuration to a YAML file.
+
+        This writes the full merged config (defaults + user overrides +
+        objective preset if any).  The resulting file can later be loaded
+        with ``Config.load(path)``.
+        """
+        with open(output_path, "w") as fh:
+            yaml.dump(
+                self._data,
+                fh,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Config":
+        """Create a Config from an arbitrary dict (e.g. dashboard session state).
+
+        Deep-merges *data* over ``DEFAULT_CONFIG`` so that any missing keys
+        fall back to defaults, then validates.
+        """
+        merged = _deep_merge(DEFAULT_CONFIG, data)
+        cfg = cls(merged, path=None)
+        errors = cfg.validate()
+        if errors:
+            print("[config] Validation warnings:")
+            for e in errors:
+                print(f"  • {e}")
+        return cfg
 
     @staticmethod
     def generate_default(output_path: str = "config.yaml") -> None:
