@@ -90,19 +90,83 @@ def score_color(score: float) -> str:
     return COLOR_BULLISH
 
 
-def score_bar_html(score: float, width: int = 120) -> str:
-    """Return an HTML progress-bar-style visual for a score."""
-    pct = score / 10 * 100
+def score_bar_html(score: float, width: int = 100) -> str:
+    """Return an HTML progress-bar-style visual for a score, color-coded."""
+    pct = max(0, min(100, score / 10 * 100))
     color = score_color(score)
     return (
-        f'<div style="background:#333;border-radius:4px;width:{width}px;height:14px;display:inline-block;">'
-        f'<div style="background:{color};border-radius:4px;width:{pct:.0f}%;height:100%;"></div>'
+        f'<div style="display:flex;align-items:center;gap:6px;">'
+        f'<span style="color:{color};font-weight:600;min-width:28px;">{score:.1f}</span>'
+        f'<div style="background:#333;border-radius:3px;width:{width}px;height:12px;flex-shrink:0;">'
+        f'<div style="background:{color};border-radius:3px;width:{pct:.0f}%;height:100%;"></div>'
+        f'</div>'
         f'</div>'
     )
 
 
 def is_intraday(interval: str) -> bool:
     return interval.lower().strip() in set(INTRADAY_INTERVALS)
+
+
+def _build_score_table_html(
+    rows: list[dict],
+    name_col: str,
+    columns: list[str],
+) -> str:
+    """Build a dark-themed HTML table with color-coded score bars.
+
+    Args:
+        rows: List of row dicts.  Each dict must have keys matching *columns*.
+        name_col: Which column holds the row name (e.g. "Indicator" or "Pattern").
+        columns: Ordered list of column names to render.
+
+    Special handling:
+      - "Score" column → rendered via ``score_bar_html()``.
+      - "Weight" column → if float, formatted as percentage; if already str, used as-is.
+      - Last row is rendered bold (OVERALL row).
+    """
+    # --- CSS ---
+    style = (
+        "<style>"
+        ".score-table { width:100%; border-collapse:collapse; font-size:0.85rem; }"
+        ".score-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
+        "  color:#aaa; font-weight:600; }"
+        ".score-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
+        "  vertical-align:middle; }"
+        ".score-table tr:last-child td { border-bottom:none; font-weight:700; }"
+        ".score-table tr:hover td { background:#1a1d2e; }"
+        "</style>"
+    )
+
+    # --- Header ---
+    header_cells = "".join(f"<th>{c}</th>" for c in columns)
+    header = f"<tr>{header_cells}</tr>"
+
+    # --- Rows ---
+    body_rows = []
+    for row in rows:
+        cells = []
+        for col in columns:
+            val = row.get(col, "")
+            if col == "Score":
+                # Render color-coded bar
+                cell_html = score_bar_html(float(val))
+            elif col == "Weight":
+                if isinstance(val, (int, float)):
+                    cell_html = f"{val * 100:.0f}%"
+                else:
+                    cell_html = str(val)
+            else:
+                cell_html = str(val)
+            cells.append(f"<td>{cell_html}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        f'{style}<table class="score-table">'
+        f"<thead>{header}</thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        f"</table>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -683,7 +747,7 @@ def render_header(result: AnalysisResult, cfg: Config) -> None:
 
 
 def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
-    """Render indicator breakdown as a styled dataframe."""
+    """Render indicator breakdown with color-coded score bars."""
     weights = cfg.normalized_weights()
 
     rows = []
@@ -692,37 +756,30 @@ def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
             "Indicator": r.name,
             "Value": r.display.get("value_str", "N/A") if not r.error else "ERROR",
             "Detail": r.display.get("detail_str", "") if not r.error else r.error[:60],
-            "Score": round(r.score, 1),
-            "Weight": f"{weights.get(r.config_key, 0) * 100:.0f}%",
+            "Score": r.score,
+            "Weight": weights.get(r.config_key, 0),
         })
 
     # Add overall row
     rows.append({
-        "Indicator": "OVERALL",
+        "Indicator": "**OVERALL**",
         "Value": "",
         "Detail": f"{result.composite['n_scored']} indicators weighted",
-        "Score": round(result.composite["overall"], 1),
-        "Weight": "100%",
+        "Score": result.composite["overall"],
+        "Weight": 1.0,
     })
 
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score",
-                min_value=0,
-                max_value=10,
-                format="%.1f",
-            ),
-        },
+    # Build HTML table
+    html = _build_score_table_html(
+        rows,
+        name_col="Indicator",
+        columns=["Indicator", "Value", "Detail", "Score", "Weight"],
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
-    """Render pattern breakdown as a styled dataframe."""
+    """Render pattern breakdown with color-coded score bars."""
     weights = cfg.normalized_pattern_weights()
 
     rows = []
@@ -731,32 +788,26 @@ def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
             "Pattern": r.name,
             "Signal": r.display.get("value_str", "N/A") if not r.error else "ERROR",
             "Detail": r.display.get("detail_str", "") if not r.error else r.error[:60],
-            "Score": round(r.score, 1),
-            "Weight": f"{weights.get(r.config_key, 0) * 100:.0f}%",
+            "Score": r.score,
+            "Weight": weights.get(r.config_key, 0),
         })
 
+    # Add overall row
     rows.append({
-        "Pattern": "PATTERN OVERALL",
+        "Pattern": "**PATTERN OVERALL**",
         "Signal": "",
         "Detail": f"{result.pattern_composite['n_scored']} patterns weighted",
-        "Score": round(result.pattern_composite["overall"], 1),
-        "Weight": "100%",
+        "Score": result.pattern_composite["overall"],
+        "Weight": 1.0,
     })
 
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score",
-                min_value=0,
-                max_value=10,
-                format="%.1f",
-            ),
-        },
+    # Build HTML table
+    html = _build_score_table_html(
+        rows,
+        name_col="Pattern",
+        columns=["Pattern", "Signal", "Detail", "Score", "Weight"],
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_suitability(assessment, ticker: str) -> None:
