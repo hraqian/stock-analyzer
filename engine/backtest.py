@@ -51,6 +51,30 @@ def _format_pattern_name(raw: str) -> str:
     return raw.replace("_", " ").title()
 
 
+# Detector-aware strength → human-readable confidence label.
+# Each detector uses a different strength scale, so the thresholds differ.
+_STRENGTH_THRESHOLDS: dict[str, list[tuple[float, str]]] = {
+    "Candlesticks":    [(0.4, "Weak"), (0.7, "Moderate"), (1.0, "Strong")],
+    "Inside/Outside":  [(0.4, "Weak"), (0.6, "Moderate"), (0.8, "Strong")],
+    "Gaps":            [(0.5, "Weak"), (1.0, "Moderate"), (1.5, "Strong")],
+    "Spikes":          [(0.5, "Weak"), (1.0, "Moderate"), (1.5, "Strong")],
+}
+
+
+def _strength_label(strength: float, detector: str) -> str:
+    """Return a human-readable confidence label for a pattern strength value.
+
+    Uses detector-aware thresholds because the raw strength scales differ
+    between detectors (e.g. candlesticks 0.3–1.3 vs gaps 0–2.0).
+    Falls back to the Candlesticks thresholds for unknown detectors.
+    """
+    thresholds = _STRENGTH_THRESHOLDS.get(detector, _STRENGTH_THRESHOLDS["Candlesticks"])
+    for upper, label in thresholds:
+        if strength <= upper:
+            return label
+    return "Very Strong"
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -83,6 +107,7 @@ class SignificantPattern:
     pattern: str           # specific pattern, e.g. "hammer", "breakaway"
     signal: str            # "bullish", "bearish", or "neutral"
     strength: float        # raw strength / magnitude (detector-specific)
+    confidence: str = ""   # human-readable label: Weak / Moderate / Strong / Very Strong
     detail: str = ""       # extra context, e.g. "gap_pct=1.2%" or "z=3.1 Confirmed"
 
 
@@ -625,6 +650,7 @@ class BacktestEngine:
                         pattern=_format_pattern_name(p["pattern"]),
                         signal=p["signal"],
                         strength=strength,
+                        confidence=_strength_label(strength, pr.name),
                     ))
 
             # ── Gaps ────────────────────────────────────────────────────
@@ -654,6 +680,7 @@ class BacktestEngine:
                         pattern=f"{gap_type.capitalize()} Gap {direction.upper()}",
                         signal=signal,
                         strength=strength,
+                        confidence=_strength_label(strength, pr.name),
                         detail=f"{gap_pct:.1%}{vol_tag}",
                     ))
 
@@ -686,6 +713,7 @@ class BacktestEngine:
                         pattern=f"Spike {direction.upper()}",
                         signal=signal,
                         strength=strength,
+                        confidence=_strength_label(strength, pr.name),
                         detail=f"z={s['z_score']:.1f} {status}",
                     ))
 

@@ -901,6 +901,7 @@ def render_significant_patterns(bt_result: BacktestResult) -> None:
             "Pattern": p.pattern,
             "Signal": signal_display,
             "Strength": f"{p.strength:.2f}",
+            "Confidence": p.confidence,
             "Detail": p.detail,
         })
 

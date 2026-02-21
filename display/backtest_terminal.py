@@ -60,12 +60,13 @@ def _render_significant_patterns(result: "BacktestResult") -> None:
         title="[bold]Significant Patterns Timeline[/bold]",
         title_style="bold white",
     )
-    pat_table.add_column("Date", min_width=12, no_wrap=True)
-    pat_table.add_column("Detector", min_width=16, no_wrap=True)
-    pat_table.add_column("Pattern", min_width=24, no_wrap=True)
+    pat_table.add_column("Date", min_width=10, no_wrap=True)
+    pat_table.add_column("Detector", min_width=14, no_wrap=True)
+    pat_table.add_column("Pattern", min_width=20, no_wrap=True)
     pat_table.add_column("Signal", min_width=10, no_wrap=True)
-    pat_table.add_column("Strength", min_width=10, no_wrap=True, justify="right")
-    pat_table.add_column("Detail", style="white", min_width=20, no_wrap=True)
+    pat_table.add_column("Str", min_width=5, no_wrap=True, justify="right")
+    pat_table.add_column("Confidence", min_width=11, no_wrap=True)
+    pat_table.add_column("Detail", style="white", min_width=14)
 
     # Truncate if too many patterns
     display_patterns = patterns
@@ -80,12 +81,24 @@ def _render_significant_patterns(result: "BacktestResult") -> None:
         color = _signal_color(p.signal)
         signal_arrow = "\u2191" if p.signal == "bullish" else ("\u2193" if p.signal == "bearish" else "\u25CB")
 
+        # Color-code confidence label
+        conf = p.confidence
+        if conf == "Very Strong":
+            conf_styled = "[bold bright_green]Very Strong[/bold bright_green]"
+        elif conf == "Strong":
+            conf_styled = "[green]Strong[/green]"
+        elif conf == "Moderate":
+            conf_styled = "[yellow]Moderate[/yellow]"
+        else:
+            conf_styled = f"[dim]{conf}[/dim]"
+
         pat_table.add_row(
             p.date,
             f"[dim]{p.detector}[/dim]",
             p.pattern,
             f"[{color}]{signal_arrow} {p.signal.upper()}[/{color}]",
             f"{p.strength:.2f}",
+            conf_styled,
             p.detail,
         )
 
@@ -94,7 +107,7 @@ def _render_significant_patterns(result: "BacktestResult") -> None:
             pat_table.add_section()
             pat_table.add_row(
                 "", f"[dim]... {len(patterns) - max_display} more patterns ...[/dim]",
-                "", "", "", "",
+                "", "", "", "", "",
             )
             pat_table.add_section()
 
