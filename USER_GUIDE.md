@@ -17,45 +17,53 @@
    - 5.6 [ADX (Average Directional Index)](#56-adx-average-directional-index)
    - 5.7 [Volume (OBV)](#57-volume-obv)
    - 5.8 [Fibonacci Retracement](#58-fibonacci-retracement)
-6. [Composite Scoring System](#6-composite-scoring-system)
-7. [Support and Resistance Levels](#7-support-and-resistance-levels)
-8. [Backtesting Engine](#8-backtesting-engine)
-   - 8.1 [How Backtesting Works](#81-how-backtesting-works)
-   - 8.2 [Strategy: Signal Generation](#82-strategy-signal-generation)
-   - 8.3 [Position Management](#83-position-management)
-   - 8.4 [Risk Management](#84-risk-management)
-   - 8.5 [Performance Metrics](#85-performance-metrics)
-9. [Trading Mode Suitability Detection](#9-trading-mode-suitability-detection)
-10. [Trading Objective Presets](#10-trading-objective-presets)
-    - 10.1 [Long-Term (Position Trading)](#101-long-term-position-trading)
-    - 10.2 [Short-Term (Swing Trading)](#102-short-term-swing-trading)
-    - 10.3 [Day Trading (Intraday)](#103-day-trading-intraday)
-    - 10.4 [Custom Presets](#104-custom-presets)
-11. [Configuration](#11-configuration)
-    - 11.1 [Config File Loading](#111-config-file-loading)
-    - 11.2 [Full Configuration Reference](#112-full-configuration-reference)
-    - 11.3 [Generating and Validating Config](#113-generating-and-validating-config)
-12. [Data Provider and Limitations](#12-data-provider-and-limitations)
-13. [Display and Output](#13-display-and-output)
-14. [Extending the Tool: Adding New Indicators](#14-extending-the-tool-adding-new-indicators)
-15. [Troubleshooting](#15-troubleshooting)
+6. [Pattern Signal Detection](#6-pattern-signal-detection)
+   - 6.1 [Gaps](#61-gaps)
+   - 6.2 [Candlesticks](#62-candlesticks)
+   - 6.3 [Volume-Range Correlation](#63-volume-range-correlation)
+   - 6.4 [Spikes](#64-spikes)
+   - 6.5 [Pattern Composite Scoring](#65-pattern-composite-scoring)
+   - 6.6 [Adding New Patterns](#66-adding-new-patterns)
+7. [Composite Scoring System](#7-composite-scoring-system)
+8. [Support and Resistance Levels](#8-support-and-resistance-levels)
+9. [Backtesting Engine](#9-backtesting-engine)
+   - 9.1 [How Backtesting Works](#91-how-backtesting-works)
+   - 9.2 [Strategy: Signal Generation](#92-strategy-signal-generation)
+   - 9.3 [Position Management](#93-position-management)
+   - 9.4 [Risk Management](#94-risk-management)
+   - 9.5 [Performance Metrics](#95-performance-metrics)
+10. [Trading Mode Suitability Detection](#10-trading-mode-suitability-detection)
+11. [Trading Objective Presets](#11-trading-objective-presets)
+    - 11.1 [Long-Term (Position Trading)](#111-long-term-position-trading)
+    - 11.2 [Short-Term (Swing Trading)](#112-short-term-swing-trading)
+    - 11.3 [Day Trading (Intraday)](#113-day-trading-intraday)
+    - 11.4 [Custom Presets](#114-custom-presets)
+12. [Configuration](#12-configuration)
+    - 12.1 [Config File Loading](#121-config-file-loading)
+    - 12.2 [Full Configuration Reference](#122-full-configuration-reference)
+    - 12.3 [Generating and Validating Config](#123-generating-and-validating-config)
+13. [Data Provider and Limitations](#13-data-provider-and-limitations)
+14. [Display and Output](#14-display-and-output)
+15. [Extending the Tool: Adding New Indicators](#15-extending-the-tool-adding-new-indicators)
+16. [Troubleshooting](#16-troubleshooting)
 
 ---
 
 ## 1. Overview
 
-The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — calculates support/resistance levels, and produces a weighted composite score. It also includes a full backtesting engine with configurable strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
+The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects four types of pattern signals (also scored 0–10), calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with configurable strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
 
 **Key Features:**
 
 - **8 technical indicators** with configurable parameters, each scored 0 (strongly bearish) to 10 (strongly bullish)
-- **Composite scoring** via weighted average with fully configurable weights
+- **4 pattern signal detectors** — gaps, candlesticks, volume-range correlation, and spikes — scored independently from indicators
+- **Dual composite scoring** — separate indicator and pattern composite scores, combined via configurable weighted blend or gate mode
 - **Support/resistance detection** using pivot points and/or fractal analysis
 - **Backtesting engine** with bar-by-bar simulation, stop-loss, take-profit, slippage, and commission modeling
 - **Trading mode auto-detection** that determines whether a stock is suitable for long/short trading, long-only, or hold-only
 - **Trading objective presets** for long-term, short-term, and day trading — each overriding indicator periods, strategy thresholds, and weights
-- **Plugin architecture** — add new indicators by dropping a file into the `indicators/` directory
-- **Fully configurable** via `config.yaml` — all scoring thresholds, weights, strategy parameters, and indicator settings can be tuned without touching code
+- **Plugin architecture** — add new indicators or patterns by dropping a file into the `indicators/` or `patterns/` directory
+- **Fully configurable** via `config.yaml` — all scoring thresholds, weights, strategy parameters, indicator settings, and pattern parameters can be tuned without touching code
 
 ---
 
@@ -190,7 +198,7 @@ usage: stock_analyzer [-h] [--period PERIOD] [--interval INTERVAL]
 ### Validation Rules
 
 - The `day_trading` objective requires an intraday interval (`-i 5m`, `-i 15m`, etc.). The tool will exit with an error if you use `day_trading` with a daily interval.
-- Intraday intervals with `--period` are validated against yfinance data limits (see [Section 12](#12-data-provider-and-limitations)).
+- Intraday intervals with `--period` are validated against yfinance data limits (see [Section 13](#13-data-provider-and-limitations)).
 - `--end` requires `--start` to be specified.
 
 ---
@@ -405,7 +413,184 @@ All indicators produce a score from **0.0** (strongly bearish) to **10.0** (stro
 
 ---
 
-## 6. Composite Scoring System
+## 6. Pattern Signal Detection
+
+Patterns form a **second scoring axis** alongside the indicator composite. While indicators measure *where the stock is* (overbought, trending, near support), patterns measure *what just happened* (a gap, a reversal candle, a volume spike). The two systems are scored independently and combined in the strategy layer.
+
+All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0** (strongly bullish), with **5.0** meaning no pattern detected or neutral. Every parameter is configurable in `config.yaml`.
+
+### 6.1 Gaps
+
+**What it detects:** Price gaps between consecutive bars — where the open of one bar is meaningfully above or below the close of the previous bar.
+
+**Gap classification:**
+
+| Type | Criteria | Significance |
+|------|----------|-------------|
+| **Breakaway** | Gap with volume surge AND trend-aligned direction | Strong trend initiation signal |
+| **Runaway** | Gap in the direction of the existing trend (no volume surge needed) | Trend continuation |
+| **Exhaustion** | Gap against the current trend | Possible trend reversal |
+| **Common** | Gap with low volume, no clear trend context | Low significance |
+
+**Scoring logic:** Recent gaps (within the lookback window) are weighted by recency (more recent = higher weight) and type weight. Bullish gaps push the score above 5.0; bearish gaps push below. The `max_signal_strength` config caps the maximum deviation from neutral.
+
+**Default Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `lookback` | 20 | Bars to search for gaps |
+| `min_gap_pct` | 0.005 | Minimum gap size (0.5% of price) to qualify |
+| `volume_surge_mult` | 1.5 | Volume must be this × average for breakaway |
+| `trend_period` | 20 | Period for determining trend direction |
+| `type_weights` | common: 0.3, runaway: 0.7, breakaway: 1.0, exhaustion: 0.5 | Weight per gap type |
+| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
+
+### 6.2 Candlesticks
+
+**What it detects:** Classic single-bar and two-bar candlestick patterns, interpreted in context of the prevailing trend direction.
+
+**Detected patterns:**
+
+| Pattern | Criteria | Bullish/Bearish |
+|---------|----------|----------------|
+| **Doji** | Body size < 5% of bar range | Neutral (reversal hint) |
+| **Hammer** | Small body at top, long lower shadow (≥ 2× body), in downtrend | Bullish reversal |
+| **Hanging Man** | Same shape as hammer, but in uptrend | Bearish reversal |
+| **Inverted Hammer** | Small body at bottom, long upper shadow, in downtrend | Bullish reversal |
+| **Shooting Star** | Same shape as inverted hammer, but in uptrend | Bearish reversal |
+| **Bullish Engulfing** | Current bar's body fully engulfs previous bar's body, current is up | Bullish reversal |
+| **Bearish Engulfing** | Current bar's body fully engulfs previous bar's body, current is down | Bearish reversal |
+
+**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish).
+
+**Default Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `doji_threshold` | 0.05 | Body/range ratio below this = doji |
+| `shadow_ratio` | 2.0 | Shadow must be this × body size for hammer/star |
+| `lookback` | 10 | Bars to search for recent patterns |
+| `trend_period` | 10 | Bars for trend direction detection |
+| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
+
+### 6.3 Volume-Range Correlation
+
+**What it detects:** The relationship between price range (high - low) and volume, identifying expansion, contraction, and divergence regimes.
+
+**Regimes:**
+
+| Regime | Condition | Interpretation |
+|--------|-----------|----------------|
+| **Expansion** | Both range and volume above average | Strong directional move with conviction |
+| **Contraction** | Both range and volume below average | Consolidation / indecision |
+| **Divergence** | Range and volume disagree (one high, one low) | Move may lack conviction |
+
+**Scoring:** Expansion during a bullish move scores high; expansion during a bearish move scores low. Contraction and divergence score near 5.0 (neutral).
+
+**Default Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `period` | 20 | Lookback for average range and volume |
+| `expansion_threshold` | 1.5 | Ratio above this = expansion |
+| `contraction_threshold` | 0.6 | Ratio below this = contraction |
+| `lookback` | 10 | Bars to analyze for current regime |
+| `scoring.expansion_bull` | 8.0 | Score for bullish expansion |
+| `scoring.expansion_bear` | 2.0 | Score for bearish expansion |
+| `scoring.contraction` | 5.0 | Score for contraction |
+| `scoring.divergence` | 5.0 | Score for divergence |
+
+### 6.4 Spikes
+
+**What it detects:** Abnormal price moves (z-score > threshold), then classifies them as confirmed breakouts or failed traps.
+
+**Detection logic:**
+
+1. Compute a z-score of the current bar's return vs. rolling mean/std.
+2. If z-score exceeds `spike_std` (default 2.5), a spike is detected.
+3. **Confirmation:** If price holds above/below the spike level for `confirm_bars` (default 3) bars, the move is confirmed.
+4. **Trap:** If price reverses back through the spike level, it's classified as a failed breakout. Traps generate an *inverse* signal (bullish spike that fails = bearish signal).
+
+**Scoring:** Confirmed bullish spikes push the score above 5.0; confirmed bearish spikes push below. Traps push the score in the opposite direction. The `trap_weight` config controls how strongly traps influence the score.
+
+**Default Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `period` | 20 | Lookback for mean/std of returns |
+| `spike_std` | 2.5 | Z-score threshold for spike detection |
+| `confirm_bars` | 3 | Bars to wait for confirmation |
+| `confirm_pct` | 0.5 | Price must hold this % of spike move |
+| `lookback` | 20 | Bars to search for recent spikes |
+| `trap_weight` | 0.7 | How strongly traps influence score (0-1) |
+| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
+
+### 6.5 Pattern Composite Scoring
+
+Pattern scores are combined into a weighted composite, independent of the indicator composite.
+
+**Default Pattern Weights:**
+
+| Pattern | Weight |
+|---------|--------|
+| Gaps | 0.25 |
+| Volume-Range | 0.30 |
+| Candlesticks | 0.25 |
+| Spikes | 0.20 |
+
+Weights are normalized to sum to 1.0, just like indicator weights.
+
+**How patterns combine with indicators in the strategy:**
+
+The strategy supports two combination modes (configured in the `strategy` section):
+
+#### Weighted Mode (default)
+
+```
+effective_score = (indicator_weight × indicator_composite + pattern_weight × pattern_composite) / (indicator_weight + pattern_weight)
+```
+
+The effective score is then used with the normal threshold logic (fixed or percentile) to generate BUY/SELL/HOLD signals.
+
+Default weights: indicator 70%, pattern 30%. Objective presets adjust these (e.g., day_trading uses 50/50).
+
+#### Gate Mode
+
+Both scores must independently pass their thresholds:
+
+- **BUY** requires: indicator score > `gate_indicator_min` AND pattern score > `gate_pattern_min`
+- **SELL** requires: indicator score < `gate_indicator_max` AND pattern score < `gate_pattern_max`
+- Otherwise: **HOLD**
+
+Gate mode is more conservative — it only trades when both systems agree.
+
+**Configuration:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `combination_mode` | "weighted" | "weighted" or "gate" |
+| `indicator_weight` | 0.7 | Indicator weight in blended score |
+| `pattern_weight` | 0.3 | Pattern weight in blended score |
+| `gate_indicator_min` | 5.5 | Indicator must exceed this for BUY (gate mode) |
+| `gate_indicator_max` | 4.5 | Indicator must be below this for SELL (gate mode) |
+| `gate_pattern_min` | 5.5 | Pattern must exceed this for BUY (gate mode) |
+| `gate_pattern_max` | 4.5 | Pattern must be below this for SELL (gate mode) |
+
+### 6.6 Adding New Patterns
+
+The pattern plugin architecture mirrors the indicator architecture. To add a new pattern:
+
+1. Create `patterns/my_pattern.py`
+2. Subclass `BasePattern` and implement `detect()`, `score()`, `summary()`
+3. Set class attributes: `name`, `config_key`
+4. Add configuration in `config.yaml` and `config.py`
+5. Add a weight in `overall_patterns.weights`
+
+The `PatternRegistry` auto-discovers the new class — no other code changes needed. See [Section 15](#15-extending-the-tool-adding-new-indicators) for the equivalent indicator walkthrough.
+
+---
+
+## 7. Composite Scoring System
 
 The composite score is a **weighted average** of all indicator scores.
 
@@ -426,7 +611,7 @@ Weights are automatically **normalized** to sum to 1.0. If you change a single w
 
 ### Score Distribution
 
-Because the composite score is an average of eight indicators, its variance is naturally lower than individual indicators. Typical composite scores range from roughly **3.5 to 6.5**. This is expected behavior — the strategy thresholds (see [Section 8.2](#82-strategy-signal-generation)) are calibrated for this narrower range.
+Because the composite score is an average of eight indicators, its variance is naturally lower than individual indicators. Typical composite scores range from roughly **3.5 to 6.5**. This is expected behavior — the strategy thresholds (see [Section 9.2](#92-strategy-signal-generation)) are calibrated for this narrower range.
 
 ### Interpreting the Score
 
@@ -440,7 +625,7 @@ Because the composite score is an average of eight indicators, its variance is n
 
 ---
 
-## 7. Support and Resistance Levels
+## 8. Support and Resistance Levels
 
 The tool identifies key price levels where the stock has historically found support (price floor) or resistance (price ceiling).
 
@@ -474,11 +659,11 @@ Levels within 1.5% of each other are merged into a single cluster. The cluster's
 
 ---
 
-## 8. Backtesting Engine
+## 9. Backtesting Engine
 
 The backtesting engine simulates trading a score-based strategy over historical data to evaluate how well the indicator system would have performed.
 
-### 8.1 How Backtesting Works
+### 9.1 How Backtesting Works
 
 1. **Data Fetch:** The full historical OHLCV dataset is loaded for the specified period/date range and interval.
 2. **Warmup Period:** The first N bars (default: 200) are used to initialize indicator calculations. No trades are executed during warmup.
@@ -492,7 +677,7 @@ The backtesting engine simulates trading a score-based strategy over historical 
 
 > **No Look-Ahead Bias:** At each bar, the engine only uses data up to and including that bar. It never looks at future prices.
 
-### 8.2 Strategy: Signal Generation
+### 9.2 Strategy: Signal Generation
 
 The score-based strategy supports two threshold modes:
 
@@ -529,7 +714,7 @@ Percentile mode is **self-calibrating** — it adapts to each stock's actual sco
 | `percentile_thresholds.long_percentile` | 75 | Percentile: BUY at or above this rank |
 | `percentile_thresholds.lookback_bars` | 60 | Rolling window size |
 
-### 8.3 Position Management
+### 9.3 Position Management
 
 **Position Sizing:**
 
@@ -553,7 +738,7 @@ The strategy only re-evaluates (re-runs all indicators and generates a new signa
 |-----------|---------|-------------|
 | `rebalance_interval` | 5 | Re-score every N bars |
 
-### 8.4 Risk Management
+### 9.4 Risk Management
 
 **Stop-Loss and Take-Profit** are checked on every bar (not just rebalance bars):
 
@@ -570,7 +755,7 @@ When `flatten_eod` is enabled, all open positions are force-closed at the end of
 |-----------|---------|-------------|
 | `flatten_eod` | false | Force-close all positions at end of each day |
 
-### 8.5 Performance Metrics
+### 9.5 Performance Metrics
 
 The backtest report includes these metrics:
 
@@ -601,7 +786,7 @@ The backtest report includes these metrics:
 
 ---
 
-## 9. Trading Mode Suitability Detection
+## 10. Trading Mode Suitability Detection
 
 Before running a backtest, the tool can automatically assess whether a stock is suitable for different trading strategies. This prevents backtesting a short-selling strategy on a stock that fundamentally does not support it.
 
@@ -672,11 +857,11 @@ If any triggers → **LONG ONLY**.
 
 ---
 
-## 10. Trading Objective Presets
+## 11. Trading Objective Presets
 
 Objective presets are **partial configuration overrides** that adapt the tool to different trading horizons. When you apply a preset, only the settings specified in the preset are changed — everything else keeps its base value.
 
-### 10.1 Long-Term (Position Trading)
+### 11.1 Long-Term (Position Trading)
 
 ```bash
 python main.py AAPL --objective long_term
@@ -696,7 +881,7 @@ python main.py AAPL --objective long_term --backtest --period 5y
 | Rebalance interval | 5 bars → 10 bars |
 | Warmup bars | 200 → 250 |
 
-### 10.2 Short-Term (Swing Trading)
+### 11.2 Short-Term (Swing Trading)
 
 ```bash
 python main.py AAPL --objective short_term
@@ -716,7 +901,7 @@ python main.py AAPL --objective short_term --backtest --period 6mo
 | Rebalance interval | 5 bars → 3 bars |
 | Warmup bars | 200 → 60 |
 
-### 10.3 Day Trading (Intraday)
+### 11.3 Day Trading (Intraday)
 
 ```bash
 python main.py AAPL -o day_trading -b -i 5m --start 2026-02-10
@@ -739,7 +924,7 @@ python main.py AAPL -o day_trading -b -i 15m --period 1mo
 | EOD Flattening | Off → **On** (force-close all positions at end of each day) |
 | Warmup bars | 200 → 30 |
 
-### 10.4 Custom Presets
+### 11.4 Custom Presets
 
 You can define your own presets by adding entries under the `objectives` section in `config.yaml`. A preset is simply a partial config — only the keys you specify are overridden.
 
@@ -779,9 +964,9 @@ python main.py AAPL -o scalping -b -i 1m --start 2026-02-18
 
 ---
 
-## 11. Configuration
+## 12. Configuration
 
-### 11.1 Config File Loading
+### 12.1 Config File Loading
 
 The tool looks for configuration in this order:
 
@@ -792,7 +977,7 @@ The tool looks for configuration in this order:
 
 Loaded configuration is **deep-merged** with built-in defaults. This means you only need to include the settings you want to change in your `config.yaml` — any missing keys automatically fall back to defaults.
 
-### 11.2 Full Configuration Reference
+### 12.2 Full Configuration Reference
 
 Below is the complete configuration structure with all sections and their defaults:
 
@@ -917,6 +1102,54 @@ overall:
     volume: 0.10
     fibonacci: 0.10
 
+# ── Pattern Signal Detectors ─────────────────────────────────────
+
+gaps:
+  lookback: 20
+  min_gap_pct: 0.005
+  volume_surge_mult: 1.5
+  trend_period: 20
+  type_weights:
+    common: 0.3
+    runaway: 0.7
+    breakaway: 1.0
+    exhaustion: 0.5
+  max_signal_strength: 3.0
+
+volume_range:
+  period: 20
+  expansion_threshold: 1.5
+  contraction_threshold: 0.6
+  lookback: 10
+  scoring:
+    expansion_bull: 8.0
+    expansion_bear: 2.0
+    contraction: 5.0
+    divergence: 5.0
+
+candlesticks:
+  doji_threshold: 0.05
+  shadow_ratio: 2.0
+  lookback: 10
+  trend_period: 10
+  max_signal_strength: 3.0
+
+spikes:
+  period: 20
+  spike_std: 2.5
+  confirm_bars: 3
+  confirm_pct: 0.5
+  lookback: 20
+  trap_weight: 0.7
+  max_signal_strength: 3.0
+
+overall_patterns:
+  weights:
+    gaps: 0.25
+    volume_range: 0.30
+    candlesticks: 0.25
+    spikes: 0.20
+
 # ── Display ──────────────────────────────────────────────────────
 
 display:
@@ -945,6 +1178,15 @@ strategy:
   take_profit_pct: 0.20
   rebalance_interval: 5
   flatten_eod: false
+  # Pattern-Indicator Combination
+  combination_mode: "weighted"   # "weighted" or "gate"
+  indicator_weight: 0.7          # indicator weight in blended score
+  pattern_weight: 0.3            # pattern weight in blended score
+  # Gate mode thresholds (only used when combination_mode = "gate")
+  gate_indicator_min: 5.5
+  gate_indicator_max: 4.5
+  gate_pattern_min: 5.5
+  gate_pattern_max: 4.5
 
 # ── Backtesting ──────────────────────────────────────────────────
 
@@ -972,16 +1214,16 @@ suitability:
 objectives:
   long_term:
     description: "Position trading — weeks to months."
-    # ... (partial overrides)
+    # ... (partial overrides for indicators, patterns, strategy, backtest)
   short_term:
     description: "Swing trading — days to weeks."
-    # ... (partial overrides)
+    # ... (partial overrides for indicators, patterns, strategy, backtest)
   day_trading:
     description: "Day trading — intraday positions only."
-    # ... (partial overrides)
+    # ... (partial overrides for indicators, patterns, overall_patterns, strategy, backtest)
 ```
 
-### 11.3 Generating and Validating Config
+### 12.3 Generating and Validating Config
 
 **Generate a fresh config file:**
 
@@ -1008,7 +1250,7 @@ This checks for common errors including:
 
 ---
 
-## 12. Data Provider and Limitations
+## 13. Data Provider and Limitations
 
 The tool uses **Yahoo Finance** (via the `yfinance` library) as its data source.
 
@@ -1065,7 +1307,7 @@ The tool automatically:
 
 ---
 
-## 13. Display and Output
+## 14. Display and Output
 
 ### Analysis Output
 
@@ -1081,11 +1323,18 @@ The standard analysis display includes:
 
 3. **Overall Score** — Weighted composite of all indicator scores.
 
-4. **Support and Resistance Table** — Up to 4 support levels and 4 resistance levels with prices, labels, and detection sources.
+4. **Pattern Signals Table** — One row per pattern detector showing:
+   - Pattern name
+   - Primary value (e.g., "3 gaps detected")
+   - Descriptive detail (e.g., "1 breakaway ↑, 2 common")
+   - Score with visual bar
+   - PATTERN SCORE composite at the bottom
 
-5. **Score Legend** — Color-coded interpretation guide.
+5. **Support and Resistance Table** — Up to 4 support levels and 4 resistance levels with prices, labels, and detection sources.
 
-6. **Disclaimer** — "For informational purposes only. Not financial advice."
+6. **Score Legend** — Color-coded interpretation guide.
+
+7. **Disclaimer** — "For informational purposes only. Not financial advice."
 
 ### Backtest Output
 
@@ -1095,9 +1344,9 @@ The backtest display includes:
 
 2. **Suitability Assessment** (if auto-detected) — Trading mode, metrics, and reasons.
 
-3. **Performance Summary Table** — All metrics from [Section 8.5](#85-performance-metrics), color-coded green (positive) or red (negative).
+3. **Performance Summary Table** — All metrics from [Section 9.5](#95-performance-metrics), color-coded green (positive) or red (negative).
 
-4. **Strategy Configuration Table** — All active strategy parameters.
+4. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted or gate) and indicator/pattern weight split.
 
 5. **Trade Log** — Detailed table of every trade:
    - Trade number, side (LONG/SHORT), entry/exit dates and prices
@@ -1110,7 +1359,7 @@ The backtest display includes:
 
 ---
 
-## 14. Extending the Tool: Adding New Indicators
+## 15. Extending the Tool: Adding New Indicators
 
 The plugin architecture makes it straightforward to add new indicators without modifying any existing code.
 
@@ -1217,7 +1466,7 @@ All indicators inherit these from `BaseIndicator`:
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### "No data found for ticker"
 
@@ -1226,7 +1475,7 @@ All indicators inherit these from `BaseIndicator`:
 
 ### "Period X is too long for interval Y"
 
-- Intraday data has strict history limits (see [Section 12](#12-data-provider-and-limitations)).
+- Intraday data has strict history limits (see [Section 13](#13-data-provider-and-limitations)).
 - Use `--start` with a recent date instead of `--period`, or use a wider interval.
 
 ### SMA-200 shows "N/A"
