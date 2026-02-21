@@ -319,19 +319,20 @@ class BacktestEngine:
             # On EOD bars with flatten_eod, skip opening new positions
             can_short = self._trading_mode == TradingMode.LONG_SHORT
             can_trade = self._trading_mode != TradingMode.HOLD_ONLY
+            signal_reason = f"signal: {order.notes}" if order.notes else "signal"
 
             if eod_bar:
                 # EOD: only allow closing existing positions, not opening new ones
                 if can_trade and position is not None:
                     if order.signal == Signal.BUY and position.side == "short":
                         # Close short (but don't open long)
-                        trade = self._close_position(position, close, date_str, "signal")
+                        trade = self._close_position(position, close, date_str, signal_reason)
                         cash += self._trade_proceeds(trade, position)
                         trades.append(trade)
                         position = None
                     elif order.signal == Signal.SELL and position.side == "long":
                         # Close long (but don't open short)
-                        trade = self._close_position(position, close, date_str, "signal")
+                        trade = self._close_position(position, close, date_str, signal_reason)
                         cash += self._trade_proceeds(trade, position)
                         trades.append(trade)
                         position = None
@@ -349,7 +350,7 @@ class BacktestEngine:
                 cash -= cost  # cost = commission only for short opens
             elif order.signal == Signal.BUY and position is not None and position.side == "short":
                 # Close short, open long
-                trade = self._close_position(position, close, date_str, "signal")
+                trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
                 trades.append(trade)
                 position, cost = self._open_position(
@@ -358,7 +359,7 @@ class BacktestEngine:
                 cash -= cost
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
                 # Close long
-                trade = self._close_position(position, close, date_str, "signal")
+                trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
                 trades.append(trade)
                 position = None
