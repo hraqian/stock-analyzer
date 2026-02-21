@@ -4,12 +4,17 @@ engine/score_strategy.py — Score-based trading strategy.
 Maps composite indicator scores (and optionally pattern scores) to
 LONG / SHORT / HOLD signals using configurable thresholds from config.yaml.
 
-Two combination modes for indicator + pattern scores:
+Three combination modes for indicator + pattern scores:
   "weighted" (default):
     blended_score = indicator_weight * indicator_composite + pattern_weight * pattern_composite
     Then the blended score follows the same threshold logic below.
   "gate":
     Only trade if both indicator and pattern scores pass their thresholds.
+  "boost":
+    Indicator score is the base signal. When patterns are active (score
+    meaningfully away from 5.0), the pattern deviation is scaled by
+    boost_strength and added to the indicator score. When no patterns are
+    active, the indicator score passes through unmodified.
 
 Fixed mode (threshold_mode: "fixed"):
     composite score <= short_below  → SHORT
@@ -45,9 +50,10 @@ class ScoreBasedStrategy(Strategy):
         "fixed"      — absolute score thresholds (default)
         "percentile" — rolling percentile-based adaptive thresholds
 
-    Supports two combination modes for indicator + pattern scores:
+    Supports three combination modes for indicator + pattern scores:
         "weighted" — blended_score = w_ind * indicator_score + w_pat * pattern_score
         "gate"     — both scores must independently pass thresholds to trade
+        "boost"    — indicator is the base; patterns amplify/dampen when active
 
     Parameters (loaded from ``config.yaml`` → ``strategy`` section):
         threshold_mode               : str    — "fixed" or "percentile"
@@ -56,13 +62,15 @@ class ScoreBasedStrategy(Strategy):
         percentile_thresholds.short_percentile : int — bottom N% → SHORT (percentile mode)
         percentile_thresholds.long_percentile  : int — top N% → LONG (percentile mode)
         percentile_thresholds.lookback_bars    : int — rolling window size
-        combination_mode             : str    — "weighted" or "gate"
+        combination_mode             : str    — "weighted", "gate", or "boost"
         indicator_weight             : float  — weight of indicator composite (weighted mode)
         pattern_weight               : float  — weight of pattern composite (weighted mode)
         gate_indicator_min           : float  — indicator score must exceed this for LONG (gate mode)
         gate_indicator_max           : float  — indicator score must be below this for SHORT (gate mode)
         gate_pattern_min             : float  — pattern score must exceed this for LONG (gate mode)
         gate_pattern_max             : float  — pattern score must be below this for SHORT (gate mode)
+        boost_strength               : float  — multiplier for pattern deviation (boost mode)
+        boost_dead_zone              : float  — pattern score within 5.0 ± this → no boost
         position_sizing              : str    — "fixed" or "percent_equity"
         fixed_quantity               : int    — shares per trade (fixed mode)
         percent_equity               : float  — fraction of equity per trade
@@ -109,6 +117,10 @@ class ScoreBasedStrategy(Strategy):
         self._gate_pattern_min: float = float(self.params.get("gate_pattern_min", 5.5))
         self._gate_pattern_max: float = float(self.params.get("gate_pattern_max", 4.5))
 
+        # Boost mode parameters
+        self._boost_strength: float = float(self.params.get("boost_strength", 0.5))
+        self._boost_dead_zone: float = float(self.params.get("boost_dead_zone", 0.3))
+
         # Position sizing
         self._sizing: str = self.params.get("position_sizing", "fixed")
         self._fixed_qty: int = int(self.params.get("fixed_quantity", 100))
@@ -136,6 +148,11 @@ class ScoreBasedStrategy(Strategy):
 
         In "gate" mode, both indicator and pattern scores must independently
         pass their gate thresholds for a trade signal to fire; otherwise HOLD.
+
+        In "boost" mode, the indicator score is the base.  When patterns are
+        active (score meaningfully away from 5.0), the pattern deviation is
+        scaled and added to the indicator score.  When no patterns fire, the
+        indicator score passes through unmodified.
         """
         ind_score = ctx.overall_score
         pat_score = ctx.pattern_score
@@ -143,6 +160,10 @@ class ScoreBasedStrategy(Strategy):
         if self._combination_mode == "gate":
             signal = self._gate_signal(ind_score, pat_score)
             effective_score = ind_score  # for notes
+        elif self._combination_mode == "boost":
+            effective_score = self._boost_score(ind_score, pat_score)
+            self._score_window.append(effective_score)
+            signal = self._score_to_signal(effective_score)
         else:
             # Weighted blend
             w_total = self._indicator_weight + self._pattern_weight
@@ -208,6 +229,28 @@ class ScoreBasedStrategy(Strategy):
             return Signal.SELL
 
         return Signal.HOLD
+
+    def _boost_score(self, ind_score: float, pat_score: float) -> float:
+        """Boost mode: indicator is the base, patterns amplify when active.
+
+        If the pattern score is within the dead zone around 5.0 (no pattern
+        activity), the indicator score passes through unmodified.
+
+        When patterns ARE active, the deviation ``(pat_score - 5.0)`` is
+        scaled by ``boost_strength`` and added to the indicator score.
+
+        The result is clamped to [0, 10].
+        """
+        pat_deviation = pat_score - 5.0
+        if abs(pat_deviation) <= self._boost_dead_zone:
+            return ind_score
+
+        # Remove the dead zone portion so the boost ramps smoothly from 0
+        effective_deviation = pat_deviation - (
+            self._boost_dead_zone if pat_deviation > 0 else -self._boost_dead_zone
+        )
+        boost = effective_deviation * self._boost_strength
+        return max(0.0, min(10.0, ind_score + boost))
 
     def _score_to_signal(self, score: float) -> Signal:
         if self._threshold_mode == "percentile":

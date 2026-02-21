@@ -152,7 +152,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rebalance_interval": 5,
         "flatten_eod": False,  # force-close all positions at end of each trading day
         # Pattern-indicator combination for strategy decisions
-        "combination_mode": "weighted",  # "weighted" or "gate"
+        "combination_mode": "weighted",  # "weighted", "gate", or "boost"
         "indicator_weight": 0.7,         # weight of indicator composite in blended score
         "pattern_weight": 0.3,           # weight of pattern composite in blended score
         # Gate mode: only trade if both scores pass their respective thresholds
@@ -160,6 +160,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "gate_indicator_max": 4.5,       # indicator score must be below this for SHORT
         "gate_pattern_min": 5.5,         # pattern score must exceed this for LONG
         "gate_pattern_max": 4.5,         # pattern score must be below this for SHORT
+        # Boost mode: patterns amplify indicator score when active
+        "boost_strength": 0.5,           # multiplier for pattern deviation from 5.0
+        "boost_dead_zone": 0.3,          # pattern score within 5.0 ± this → no boost
     },
     "backtest": {
         "initial_cash": 100_000.0,
@@ -461,6 +464,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "flatten_eod": True,
                 "indicator_weight": 0.5,
                 "pattern_weight": 0.5,
+                "boost_strength": 0.7,      # stronger boost — patterns more meaningful intraday
+                "boost_dead_zone": 0.2,     # narrower dead zone — react to smaller pattern signals
             },
             "backtest": {
                 "warmup_bars": 30,
@@ -609,9 +614,9 @@ class Config:
 
         # Strategy combination weights must sum sensibly
         combo_mode = self._data.get("strategy", {}).get("combination_mode", "weighted")
-        if combo_mode not in ("weighted", "gate"):
+        if combo_mode not in ("weighted", "gate", "boost"):
             errors.append(
-                f"strategy.combination_mode must be 'weighted' or 'gate', got {combo_mode!r}"
+                f"strategy.combination_mode must be 'weighted', 'gate', or 'boost', got {combo_mode!r}"
             )
 
         # RSI thresholds

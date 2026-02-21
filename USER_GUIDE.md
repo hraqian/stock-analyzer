@@ -545,7 +545,7 @@ Weights are normalized to sum to 1.0, just like indicator weights.
 
 **How patterns combine with indicators in the strategy:**
 
-The strategy supports two combination modes (configured in the `strategy` section):
+The strategy supports three combination modes (configured in the `strategy` section):
 
 #### Weighted Mode (default)
 
@@ -557,6 +557,8 @@ The effective score is then used with the normal threshold logic (fixed or perce
 
 Default weights: indicator 70%, pattern 30%. Objective presets adjust these (e.g., day_trading uses 50/50).
 
+**Caveat:** When no patterns fire (most of the time), `pattern_score = 5.0`, and the blend dilutes the indicator signal toward neutral. For example, `0.7 × 7.0 + 0.3 × 5.0 = 6.4` — the strong indicator signal of 7.0 gets pulled down. See Boost Mode below for an alternative.
+
 #### Gate Mode
 
 Both scores must independently pass their thresholds:
@@ -565,19 +567,43 @@ Both scores must independently pass their thresholds:
 - **SELL** requires: indicator score < `gate_indicator_max` AND pattern score < `gate_pattern_max`
 - Otherwise: **HOLD**
 
-Gate mode is more conservative — it only trades when both systems agree.
+Gate mode is more conservative — it only trades when both systems agree. The downside is that it misses indicator-only signals entirely (when no patterns are active, pattern score ≈ 5.0, which won't pass the gate).
+
+#### Boost Mode
+
+Indicator score is the base signal that always passes through. Patterns only amplify or dampen it when active.
+
+```
+if abs(pattern_score - 5.0) <= boost_dead_zone:
+    effective_score = indicator_score              # no pattern activity → pass through
+else:
+    effective_deviation = (pattern_score - 5.0) - dead_zone_sign
+    boost = effective_deviation × boost_strength
+    effective_score = clamp(indicator_score + boost, 0, 10)
+```
+
+- **Dead zone** (default ±0.3 around 5.0): pattern scores between 4.7 and 5.3 are treated as "no pattern activity" and the indicator score is used as-is.
+- **Boost strength** (default 0.5): multiplier on the pattern deviation. Higher values make patterns more influential when they do fire.
+- The boost ramps smoothly from the dead zone edge, so there's no discontinuity.
+
+**Example:** indicator=6.0, pattern=7.5 → deviation=2.5, effective=2.2 (after dead zone), boost=1.1 → effective_score=7.1
+**Example:** indicator=6.0, pattern=5.1 → deviation=0.1, within dead zone → effective_score=6.0 (unchanged)
+
+Boost mode is recommended when you want indicators to drive decisions while patterns add conviction only when they fire. The `day_trading` preset overrides `boost_strength: 0.7` and `boost_dead_zone: 0.2` (stronger boost, narrower dead zone) since patterns are more meaningful on intraday data.
 
 **Configuration:**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `combination_mode` | "weighted" | "weighted" or "gate" |
-| `indicator_weight` | 0.7 | Indicator weight in blended score |
-| `pattern_weight` | 0.3 | Pattern weight in blended score |
+| `combination_mode` | "weighted" | "weighted", "gate", or "boost" |
+| `indicator_weight` | 0.7 | Indicator weight in blended score (weighted mode) |
+| `pattern_weight` | 0.3 | Pattern weight in blended score (weighted mode) |
 | `gate_indicator_min` | 5.5 | Indicator must exceed this for BUY (gate mode) |
 | `gate_indicator_max` | 4.5 | Indicator must be below this for SELL (gate mode) |
 | `gate_pattern_min` | 5.5 | Pattern must exceed this for BUY (gate mode) |
 | `gate_pattern_max` | 4.5 | Pattern must be below this for SELL (gate mode) |
+| `boost_strength` | 0.5 | Multiplier for pattern deviation (boost mode) |
+| `boost_dead_zone` | 0.3 | Pattern score within 5.0 ± this → no boost (boost mode) |
 
 ### 6.6 Adding New Patterns
 
@@ -1183,7 +1209,7 @@ strategy:
   rebalance_interval: 5
   flatten_eod: false
   # Pattern-Indicator Combination
-  combination_mode: "weighted"   # "weighted" or "gate"
+  combination_mode: "weighted"   # "weighted", "gate", or "boost"
   indicator_weight: 0.7          # indicator weight in blended score
   pattern_weight: 0.3            # pattern weight in blended score
   # Gate mode thresholds (only used when combination_mode = "gate")
@@ -1191,6 +1217,9 @@ strategy:
   gate_indicator_max: 4.5
   gate_pattern_min: 5.5
   gate_pattern_max: 4.5
+  # Boost mode parameters (only used when combination_mode = "boost")
+  boost_strength: 0.5            # multiplier for pattern deviation from 5.0
+  boost_dead_zone: 0.3           # pattern score within 5.0 ± this → no boost
 
 # ── Backtesting ──────────────────────────────────────────────────
 
@@ -1350,7 +1379,7 @@ The backtest display includes:
 
 3. **Performance Summary Table** — All metrics from [Section 9.5](#95-performance-metrics), color-coded green (positive) or red (negative).
 
-4. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted or gate) and indicator/pattern weight split.
+4. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted, gate, or boost) and indicator/pattern weight split.
 
 5. **Trade Log** — Detailed table of every trade:
    - Trade number, side (LONG/SHORT), entry/exit dates and prices

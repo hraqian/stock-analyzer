@@ -192,7 +192,13 @@ def render_backtest(
         pat_w = float(strat_cfg.get("pattern_weight", 0.3))
         config_rows.append(("  Indicator Weight", f"{ind_w:.0%}"))
         config_rows.append(("  Pattern Weight", f"{pat_w:.0%}"))
+    elif combo_mode == "boost":
+        boost_str = float(strat_cfg.get("boost_strength", 0.5))
+        dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
+        config_rows.append(("  Boost Strength", f"{boost_str}"))
+        config_rows.append(("  Boost Dead Zone", f"±{dead_zone} around 5.0"))
     else:
+        # gate mode
         config_rows.append(("  Gate Ind. LONG >", f"{strat_cfg.get('gate_indicator_min', 5.5)}"))
         config_rows.append(("  Gate Ind. SHORT <", f"{strat_cfg.get('gate_indicator_max', 4.5)}"))
         config_rows.append(("  Gate Pat. LONG >", f"{strat_cfg.get('gate_pattern_min', 5.5)}"))

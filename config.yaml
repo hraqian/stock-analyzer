@@ -260,6 +260,14 @@ strategy:
   #   Only trade LONG if indicator_score > gate_indicator_min AND pattern_score > gate_pattern_min
   #   Only trade SHORT if indicator_score < gate_indicator_max AND pattern_score < gate_pattern_max
   #   Otherwise HOLD.
+  #
+  # "boost" mode:
+  #   Indicator score is the base signal (always passes through).
+  #   When patterns are active (score outside the dead zone around 5.0),
+  #   the pattern deviation is scaled by boost_strength and added to the
+  #   indicator score. When no patterns fire, the indicator score is used
+  #   unmodified. This avoids the weighted-mode problem where inactive
+  #   patterns (score = 5.0) dilute the indicator signal toward neutral.
   combination_mode: "weighted"
   indicator_weight: 0.7       # weight of indicator composite in blended score
   pattern_weight: 0.3         # weight of pattern composite in blended score
@@ -268,6 +276,9 @@ strategy:
   gate_indicator_max: 4.5     # indicator score must be below this for SHORT
   gate_pattern_min: 5.5       # pattern score must exceed this for LONG
   gate_pattern_max: 4.5       # pattern score must be below this for SHORT
+  # Boost mode parameters (only used when combination_mode = "boost")
+  boost_strength: 0.5         # multiplier for pattern deviation from 5.0
+  boost_dead_zone: 0.3        # pattern score within 5.0 ± this → no boost
 
 backtest:
   initial_cash: 100000.0    # starting portfolio cash
@@ -573,6 +584,8 @@ objectives:
       flatten_eod: true         # force-close all positions at end of each day
       indicator_weight: 0.5     # day trading: equal weight to patterns
       pattern_weight: 0.5
+      boost_strength: 0.7       # stronger boost — patterns more meaningful intraday
+      boost_dead_zone: 0.2      # narrower dead zone — react to smaller pattern signals
 
     backtest:
       warmup_bars: 30           # minimal warmup for fast indicators
