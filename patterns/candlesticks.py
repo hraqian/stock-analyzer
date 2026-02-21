@@ -7,6 +7,8 @@ Detects common single-bar and two-bar candlestick patterns:
   - Shooting Star / Inverted Hammer: small body at bottom, long upper shadow
   - Bullish Engulfing: bullish bar completely engulfs prior bearish bar
   - Bearish Engulfing: bearish bar completely engulfs prior bullish bar
+  - Bullish Harami: small bullish bar contained within prior large bearish bar
+  - Bearish Harami: small bearish bar contained within prior large bullish bar
 
 Context matters: a doji after an uptrend is bearish (reversal), after a
 downtrend is bullish (reversal). An engulfing pattern's significance depends
@@ -121,6 +123,29 @@ class CandlestickPattern(BasePattern):
                     strength = 1.0 if in_uptrend else 0.5
                     detected.append(("bearish_engulfing", "bearish", strength))
 
+                # --- Harami Patterns (current body contained in previous body) ---
+                harami_body_ratio = float(self.config.get("harami_body_ratio", 0.5))
+
+                # Bullish harami: prev bearish with large body, curr bullish with small
+                # body fully inside prev body
+                if (prev_is_bearish and is_bullish_bar
+                        and prev_body > 0
+                        and body <= prev_body * harami_body_ratio
+                        and min(o, c) >= min(prev_o, prev_c)
+                        and max(o, c) <= max(prev_o, prev_c)):
+                    strength = 0.8 if in_downtrend else 0.4
+                    detected.append(("bullish_harami", "bullish", strength))
+
+                # Bearish harami: prev bullish with large body, curr bearish with small
+                # body fully inside prev body
+                if (prev_is_bullish and is_bearish_bar
+                        and prev_body > 0
+                        and body <= prev_body * harami_body_ratio
+                        and min(o, c) >= min(prev_o, prev_c)
+                        and max(o, c) <= max(prev_o, prev_c)):
+                    strength = 0.8 if in_uptrend else 0.4
+                    detected.append(("bearish_harami", "bearish", strength))
+
             for pat_name, signal, strength in detected:
                 patterns.append({
                     "bar_index": i,
@@ -183,6 +208,8 @@ class CandlestickPattern(BasePattern):
             "inverted_hammer": "Inv Hammer",
             "bullish_engulfing": "Bull Engulf",
             "bearish_engulfing": "Bear Engulf",
+            "bullish_harami": "Bull Harami",
+            "bearish_harami": "Bear Harami",
         }
         pat_label = pattern_labels.get(last["pattern"], last["pattern"])
         signal_icon = "\u2191" if last["signal"] == "bullish" else ("\u2193" if last["signal"] == "bearish" else "\u25CB")

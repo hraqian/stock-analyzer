@@ -460,6 +460,8 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | **Shooting Star** | Same shape as inverted hammer, but in uptrend | Bearish reversal |
 | **Bullish Engulfing** | Current bar's body fully engulfs previous bar's body, current is up | Bullish reversal |
 | **Bearish Engulfing** | Current bar's body fully engulfs previous bar's body, current is down | Bearish reversal |
+| **Bullish Harami** | Current bullish bar's body contained within previous bearish bar's body | Bullish reversal |
+| **Bearish Harami** | Current bearish bar's body contained within previous bullish bar's body | Bearish reversal |
 
 **Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish).
 
@@ -469,6 +471,7 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 |-----------|---------|-------------|
 | `doji_threshold` | 0.05 | Body/range ratio below this = doji |
 | `shadow_ratio` | 2.0 | Shadow must be this × body size for hammer/star |
+| `harami_body_ratio` | 0.5 | Current body must be ≤ previous body × this for harami |
 | `lookback` | 10 | Bars to search for recent patterns |
 | `trend_period` | 10 | Bars for trend direction detection |
 | `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
@@ -1130,6 +1133,7 @@ volume_range:
 candlesticks:
   doji_threshold: 0.05
   shadow_ratio: 2.0
+  harami_body_ratio: 0.5
   lookback: 10
   trend_period: 10
   max_signal_strength: 3.0

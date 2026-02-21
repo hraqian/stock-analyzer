@@ -198,6 +198,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "candlesticks": {
         "doji_threshold": 0.05,
         "shadow_ratio": 2.0,
+        "harami_body_ratio": 0.5,
         "lookback": 10,
         "trend_period": 10,
         "max_signal_strength": 3.0,
