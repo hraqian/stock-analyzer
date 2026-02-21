@@ -878,6 +878,49 @@ def render_trade_log(bt_result: BacktestResult) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True, height=400)
 
 
+def render_significant_patterns(bt_result: BacktestResult) -> None:
+    """Render significant patterns timeline as an expandable dataframe."""
+    patterns = bt_result.significant_patterns
+    if not patterns:
+        st.info("No significant patterns were detected during the backtest period.")
+        return
+
+    rows = []
+    for p in patterns:
+        # Color-code signal
+        if p.signal == "bullish":
+            signal_display = "\u2191 BULLISH"
+        elif p.signal == "bearish":
+            signal_display = "\u2193 BEARISH"
+        else:
+            signal_display = "\u25CB NEUTRAL"
+
+        rows.append({
+            "Date": p.date,
+            "Detector": p.detector,
+            "Pattern": p.pattern,
+            "Signal": signal_display,
+            "Strength": f"{p.strength:.2f}",
+            "Detail": p.detail,
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Summary stats
+    bullish_count = sum(1 for p in patterns if p.signal == "bullish")
+    bearish_count = sum(1 for p in patterns if p.signal == "bearish")
+
+    st.markdown(
+        f'<div style="font-size:0.85rem;color:#aaa;margin-bottom:8px;">'
+        f'Total: {len(patterns)} significant patterns &nbsp;'
+        f'(<span style="color:{COLOR_BULLISH};">{bullish_count} bullish</span>'
+        f'&nbsp;&nbsp;<span style="color:{COLOR_BEARISH};">{bearish_count} bearish</span>)'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True, height=400)
+
+
 def render_strategy_config(cfg: Config) -> None:
     """Render strategy configuration summary."""
     strat_cfg = cfg.section("strategy")
@@ -1057,6 +1100,11 @@ def main() -> None:
         # Trade log
         with st.expander(f"Trade Log ({bt_result.total_trades} trades)"):
             render_trade_log(bt_result)
+
+        # Significant patterns timeline
+        sig_count = len(bt_result.significant_patterns)
+        with st.expander(f"Significant Patterns Timeline ({sig_count} patterns)"):
+            render_significant_patterns(bt_result)
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.markdown("---")

@@ -36,6 +36,78 @@ def _mode_color(mode_value: str) -> str:
     return "red"  # hold_only
 
 
+def _signal_color(signal: str) -> str:
+    """Color for bullish/bearish signal labels."""
+    if signal == "bullish":
+        return "green"
+    if signal == "bearish":
+        return "red"
+    return "yellow"
+
+
+def _render_significant_patterns(result: "BacktestResult") -> None:
+    """Render a timeline table of all significant patterns detected."""
+    patterns = result.significant_patterns
+    if not patterns:
+        return
+
+    pat_table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold cyan",
+        expand=True,
+        padding=(0, 1),
+        title="[bold]Significant Patterns Timeline[/bold]",
+        title_style="bold white",
+    )
+    pat_table.add_column("Date", min_width=12, no_wrap=True)
+    pat_table.add_column("Detector", min_width=16, no_wrap=True)
+    pat_table.add_column("Pattern", min_width=24, no_wrap=True)
+    pat_table.add_column("Signal", min_width=10, no_wrap=True)
+    pat_table.add_column("Strength", min_width=10, no_wrap=True, justify="right")
+    pat_table.add_column("Detail", style="white", min_width=20, no_wrap=True)
+
+    # Truncate if too many patterns
+    display_patterns = patterns
+    truncated = False
+    max_display = 80
+    if len(patterns) > max_display:
+        half = max_display // 2
+        display_patterns = patterns[:half] + patterns[-half:]
+        truncated = True
+
+    for idx, p in enumerate(display_patterns):
+        color = _signal_color(p.signal)
+        signal_arrow = "\u2191" if p.signal == "bullish" else ("\u2193" if p.signal == "bearish" else "\u25CB")
+
+        pat_table.add_row(
+            p.date,
+            f"[dim]{p.detector}[/dim]",
+            p.pattern,
+            f"[{color}]{signal_arrow} {p.signal.upper()}[/{color}]",
+            f"{p.strength:.2f}",
+            p.detail,
+        )
+
+        # Insert separator when truncating
+        if truncated and idx == max_display // 2 - 1:
+            pat_table.add_section()
+            pat_table.add_row(
+                "", f"[dim]... {len(patterns) - max_display} more patterns ...[/dim]",
+                "", "", "", "",
+            )
+            pat_table.add_section()
+
+    # Summary line
+    bullish_count = sum(1 for p in patterns if p.signal == "bullish")
+    bearish_count = sum(1 for p in patterns if p.signal == "bearish")
+    console.print(pat_table)
+    console.print(
+        f"  [dim]Total: {len(patterns)} significant patterns  "
+        f"([green]{bullish_count} bullish[/green]  [red]{bearish_count} bearish[/red])[/dim]"
+    )
+
+
 def render_suitability(
     assessment: "SuitabilityAssessment",
     ticker: str,
@@ -287,6 +359,10 @@ def render_backtest(
         console.print(trade_table)
     else:
         console.print("\n  [dim]No trades were executed during the backtest period.[/dim]")
+
+    # ── Significant Patterns Timeline ───────────────────────────────────────
+    if result.significant_patterns:
+        _render_significant_patterns(result)
 
     # ── Equity Curve Summary ────────────────────────────────────────────────
     if result.equity_curve:

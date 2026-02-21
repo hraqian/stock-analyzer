@@ -1298,6 +1298,7 @@ backtest:
   commission_per_trade: 0.0
   slippage_pct: 0.001
   warmup_bars: 200
+  significant_pattern_min_strength: 0.5  # min strength to appear in timeline
 
 # ── Suitability Detection ───────────────────────────────────────
 
@@ -1456,9 +1457,20 @@ The backtest display includes:
    - Quantity, P&L dollar amount and percentage, exit reason
    - Up to 50 trades shown; if more, first 25 + last 25 with a count of omitted trades
 
-6. **Equity Curve** — Text-based checkpoints showing portfolio value at start, 25%, 50%, 75%, and end of the backtest period.
+6. **Significant Patterns Timeline** — A chronological table of all notable patterns detected during the backtest period (not just the ones the strategy acted on). This helps you spot entry/exit opportunities the strategy may have missed. Columns:
+   - **Date** — When the pattern was detected
+   - **Detector** — Which detector found it (Candlesticks, Gaps, Spikes, Inside/Outside Bars)
+   - **Pattern** — Specific pattern name (e.g., Hammer, Breakaway Gap UP, Spike DOWN)
+   - **Signal** — Bullish or Bearish with directional arrow
+   - **Strength** — Raw strength value (detector-specific)
+   - **Detail** — Extra context (e.g., gap percentage, z-score and confirmation status)
+   - Up to 80 patterns shown; if more, first 40 + last 40 with a count of omitted entries
+   - Summary line shows total count with bullish/bearish breakdown
+   - Minimum strength threshold is configurable via `backtest.significant_pattern_min_strength` (default: 0.5)
 
-7. **Backtest Disclaimer** — "Backtest results are hypothetical and do not guarantee future performance."
+7. **Equity Curve** — Text-based checkpoints showing portfolio value at start, 25%, 50%, 75%, and end of the backtest period.
+
+8. **Backtest Disclaimer** — "Backtest results are hypothetical and do not guarantee future performance."
 
 ---
 
@@ -1507,6 +1519,7 @@ This opens the dashboard in your default browser (usually at `http://localhost:8
    - Hover details for each trade
 4. **Strategy Configuration** — Expandable panel showing all active strategy parameters
 5. **Trade Log** — Full trade history in a scrollable table
+6. **Significant Patterns Timeline** — Expandable panel showing all notable patterns detected during the backtest period with bullish/bearish summary counts (same data as the CLI version)
 
 ### 15.3 Performance Notes
 

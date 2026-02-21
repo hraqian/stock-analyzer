@@ -37,6 +37,21 @@ from engine.suitability import TradingMode
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _format_pattern_name(raw: str) -> str:
+    """Convert snake_case pattern names to Title Case labels.
+
+    Examples:
+        ``"bullish_engulfing"`` → ``"Bullish Engulfing"``
+        ``"three_white_soldiers"`` → ``"Three White Soldiers"``
+        ``"inside_bar_bullish"`` → ``"Inside Bar Bullish"``
+    """
+    return raw.replace("_", " ").title()
+
+
+# ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
@@ -56,6 +71,22 @@ class BacktestTrade:
 
 
 @dataclass
+class SignificantPattern:
+    """A single significant pattern detected during the backtest period.
+
+    Used to build a timeline showing all noteworthy pattern events so
+    users can see potential entry/exit opportunities — including ones the
+    strategy may have missed.
+    """
+    date: str              # YYYY-MM-DD (or full timestamp for intraday)
+    detector: str          # detector name, e.g. "Candlesticks", "Gaps"
+    pattern: str           # specific pattern, e.g. "hammer", "breakaway"
+    signal: str            # "bullish", "bearish", or "neutral"
+    strength: float        # raw strength / magnitude (detector-specific)
+    detail: str = ""       # extra context, e.g. "gap_pct=1.2%" or "z=3.1 Confirmed"
+
+
+@dataclass
 class BacktestResult:
     """Aggregated results from a backtest run."""
     ticker: str
@@ -66,6 +97,9 @@ class BacktestResult:
     trades: list[BacktestTrade] = field(default_factory=list)
     equity_curve: list[dict[str, Any]] = field(default_factory=list)
     # equity_curve: list of {"date": str, "equity": float}
+
+    # Significant patterns detected during the backtest period
+    significant_patterns: list[SignificantPattern] = field(default_factory=list)
 
     # Performance metrics (populated by _compute_metrics)
     total_return_pct: float = 0.0
@@ -401,7 +435,11 @@ class BacktestEngine:
 
         final_equity = cash
 
-        # 5. Build result
+        # 5. Extract significant patterns from the full post-warmup data
+        post_warmup_df = df.iloc[self._warmup_bars:].copy()
+        significant_patterns = self._extract_significant_patterns(post_warmup_df)
+
+        # 6. Build result
         result = BacktestResult(
             ticker=ticker.upper(),
             period=period_label,
@@ -410,6 +448,7 @@ class BacktestEngine:
             final_equity=final_equity,
             trades=trades,
             equity_curve=equity_curve,
+            significant_patterns=significant_patterns,
         )
         self._compute_metrics(result, interval)
         self._strategy.on_end({"total_trades": len(trades)})
@@ -542,6 +581,121 @@ class BacktestEngine:
         pat_composite = pat_scorer.score(pat_results)
 
         return scores, composite["overall"], pat_composite["overall"]
+
+    # ------------------------------------------------------------------
+    # Significant patterns extraction
+    # ------------------------------------------------------------------
+
+    def _extract_significant_patterns(
+        self, df: pd.DataFrame
+    ) -> list[SignificantPattern]:
+        """Run all pattern detectors on the full data and extract individual events.
+
+        Each detector stores its raw pattern list in ``values``.  This method
+        normalises them into a flat :class:`SignificantPattern` list sorted by
+        date, filtering out neutral / low-strength entries.
+
+        The minimum strength threshold is configurable via
+        ``config.yaml → backtest → significant_pattern_min_strength`` (default 0.5).
+        """
+        bt_cfg = self._cfg.section("backtest")
+        min_strength = float(bt_cfg.get("significant_pattern_min_strength", 0.5))
+
+        pat_registry = PatternRegistry(self._cfg)
+        pat_results = pat_registry.run_all(df)
+
+        events: list[SignificantPattern] = []
+
+        for pr in pat_results:
+            if pr.error:
+                continue
+
+            # ── Candlesticks & Inside/Outside ───────────────────────────
+            # values["patterns"]: list of {bar_index, date, pattern, signal, strength}
+            if "patterns" in pr.values:
+                for p in pr.values["patterns"]:
+                    if p.get("signal", "neutral") == "neutral":
+                        continue
+                    strength = float(p.get("strength", 0.0))
+                    if strength < min_strength:
+                        continue
+                    events.append(SignificantPattern(
+                        date=p["date"],
+                        detector=pr.name,
+                        pattern=_format_pattern_name(p["pattern"]),
+                        signal=p["signal"],
+                        strength=strength,
+                    ))
+
+            # ── Gaps ────────────────────────────────────────────────────
+            # values["gaps"]: list of {bar_index, date, direction, gap_pct, gap_type, volume_surge}
+            if "gaps" in pr.values:
+                for g in pr.values["gaps"]:
+                    direction = g["direction"]
+                    gap_type = g["gap_type"]
+                    gap_pct = g["gap_pct"]
+
+                    # Map gap direction + type to signal
+                    if gap_type == "exhaustion":
+                        # Exhaustion gaps signal reversal
+                        signal = "bearish" if direction == "up" else "bullish"
+                    else:
+                        signal = "bullish" if direction == "up" else "bearish"
+
+                    # Use gap_pct as a proxy for strength (typical gaps are 0.5%-3%)
+                    strength = min(gap_pct * 100, 2.0)  # cap at 2.0
+                    if strength < min_strength:
+                        continue
+
+                    vol_tag = " [VOL]" if g["volume_surge"] else ""
+                    events.append(SignificantPattern(
+                        date=g["date"],
+                        detector=pr.name,
+                        pattern=f"{gap_type.capitalize()} Gap {direction.upper()}",
+                        signal=signal,
+                        strength=strength,
+                        detail=f"{gap_pct:.1%}{vol_tag}",
+                    ))
+
+            # ── Spikes ──────────────────────────────────────────────────
+            # values["spikes"]: list of {bar_index, date, direction, z_score, spike_level, confirmed}
+            if "spikes" in pr.values:
+                for s in pr.values["spikes"]:
+                    direction = s["direction"]
+                    confirmed = s["confirmed"]
+                    z_score = abs(s["z_score"])
+
+                    # Traps invert the signal
+                    if confirmed is False:
+                        signal = "bearish" if direction == "up" else "bullish"
+                        status = "Trap"
+                    elif confirmed is True:
+                        signal = "bullish" if direction == "up" else "bearish"
+                        status = "Confirmed"
+                    else:
+                        signal = "bullish" if direction == "up" else "bearish"
+                        status = "Pending"
+
+                    strength = min(z_score / 2.5, 2.0)  # normalise z-score
+                    if strength < min_strength:
+                        continue
+
+                    events.append(SignificantPattern(
+                        date=s["date"],
+                        detector=pr.name,
+                        pattern=f"Spike {direction.upper()}",
+                        signal=signal,
+                        strength=strength,
+                        detail=f"z={s['z_score']:.1f} {status}",
+                    ))
+
+            # ── Volume-Range ────────────────────────────────────────────
+            # This detector only returns aggregate regime, not per-bar events.
+            # Skip — no individual patterns to extract.
+
+        # Sort by date
+        events.sort(key=lambda e: e.date)
+        return events
 
     # ------------------------------------------------------------------
     # Performance metrics
