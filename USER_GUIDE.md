@@ -22,8 +22,9 @@
    - 6.2 [Candlesticks](#62-candlesticks)
    - 6.3 [Volume-Range Correlation](#63-volume-range-correlation)
    - 6.4 [Spikes](#64-spikes)
-   - 6.5 [Pattern Composite Scoring](#65-pattern-composite-scoring)
-   - 6.6 [Adding New Patterns](#66-adding-new-patterns)
+   - 6.5 [Inside/Outside Bars](#65-insideoutside-bars)
+   - 6.6 [Pattern Composite Scoring](#66-pattern-composite-scoring)
+   - 6.7 [Adding New Patterns](#67-adding-new-patterns)
 7. [Composite Scoring System](#7-composite-scoring-system)
 8. [Support and Resistance Levels](#8-support-and-resistance-levels)
 9. [Backtesting Engine](#9-backtesting-engine)
@@ -55,12 +56,12 @@
 
 ## 1. Overview
 
-The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects four types of pattern signals (also scored 0–10), calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with configurable strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
+The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects five types of pattern signals (also scored 0–10), calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with configurable strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
 
 **Key Features:**
 
 - **8 technical indicators** with configurable parameters, each scored 0 (strongly bearish) to 10 (strongly bullish)
-- **4 pattern signal detectors** — gaps, candlesticks, volume-range correlation, and spikes — scored independently from indicators
+- **5 pattern signal detectors** — gaps, candlesticks, volume-range correlation, spikes, and inside/outside bars — scored independently from indicators
 - **Dual composite scoring** — separate indicator and pattern composite scores, combined via configurable weighted blend or gate mode
 - **Support/resistance detection** using pivot points and/or fractal analysis
 - **Backtesting engine** with bar-by-bar simulation, stop-loss, take-profit, slippage, and commission modeling
@@ -451,7 +452,7 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 
 ### 6.2 Candlesticks
 
-**What it detects:** Classic single-bar and two-bar candlestick patterns, interpreted in context of the prevailing trend direction.
+**What it detects:** Classic single-bar, two-bar, and three-bar candlestick patterns, interpreted in context of the prevailing trend direction.
 
 **Detected patterns:**
 
@@ -464,12 +465,20 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | **Hanging Man** | Same shape as hammer, but in uptrend | Bearish reversal |
 | **Inverted Hammer** | Small body at bottom, long upper shadow, in downtrend | Bullish reversal |
 | **Shooting Star** | Same shape as inverted hammer, but in uptrend | Bearish reversal |
+| **Bullish Marubozu** | Bullish bar with body ≥ 90% of range, each shadow ≤ 5% | Bullish (strong conviction) |
+| **Bearish Marubozu** | Bearish bar with body ≥ 90% of range, each shadow ≤ 5% | Bearish (strong conviction) |
 | **Bullish Engulfing** | Current bar's body fully engulfs previous bar's body, current is up | Bullish reversal |
 | **Bearish Engulfing** | Current bar's body fully engulfs previous bar's body, current is down | Bearish reversal |
 | **Bullish Harami** | Current bullish bar's body contained within previous bearish bar's body | Bullish reversal |
 | **Bearish Harami** | Current bearish bar's body contained within previous bullish bar's body | Bearish reversal |
+| **Tweezer Top** | Two consecutive bars with matching highs in an uptrend | Bearish reversal |
+| **Tweezer Bottom** | Two consecutive bars with matching lows in a downtrend | Bullish reversal |
+| **Morning Star** | Bearish bar → small-body bar → bullish bar that closes above bar 1 midpoint | Bullish reversal (3-bar) |
+| **Evening Star** | Bullish bar → small-body bar → bearish bar that closes below bar 1 midpoint | Bearish reversal (3-bar) |
+| **Three White Soldiers** | Three consecutive strong bullish bars, each opening within prior body, closing higher | Bullish continuation (3-bar) |
+| **Three Black Crows** | Three consecutive strong bearish bars, each opening within prior body, closing lower | Bearish continuation (3-bar) |
 
-**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish). Dragonfly and gravestone doji carry inherent directional bias from their shadow structure (dragonfly = bullish, gravestone = bearish), with higher strength when confirmed by the prevailing trend.
+**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish). Dragonfly and gravestone doji carry inherent directional bias from their shadow structure (dragonfly = bullish, gravestone = bearish), with higher strength when confirmed by the prevailing trend. Marubozu patterns are stronger when trend-aligned (continuation). Tweezer patterns require the trend to be in the right direction (tweezer top needs uptrend, bottom needs downtrend). Morning/evening star and three soldiers/crows are strongest as reversal signals in the opposing trend.
 
 **Default Parameters:**
 
@@ -481,6 +490,12 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | `dragonfly_shadow_min` | 0.6 | Lower shadow must be ≥ range × this for dragonfly doji |
 | `gravestone_shadow_min` | 0.6 | Upper shadow must be ≥ range × this for gravestone doji |
 | `doji_tiny_shadow_max` | 0.1 | Opposite shadow must be ≤ range × this for dragonfly/gravestone |
+| `marubozu_body_min` | 0.90 | Body must fill ≥ this fraction of bar range for marubozu |
+| `marubozu_shadow_max` | 0.05 | Each shadow must be ≤ this fraction of bar range for marubozu |
+| `tweezer_tolerance` | 0.002 | Highs/lows match within this fraction of price for tweezer |
+| `star_middle_body_max` | 0.30 | Middle bar body must be ≤ this fraction of range for morning/evening star |
+| `soldiers_body_min` | 0.60 | Each bar body must be ≥ this fraction of range for 3 soldiers/crows |
+| `soldiers_shadow_max` | 0.30 | Upper/lower shadow must be ≤ this fraction of range for 3 soldiers/crows |
 | `lookback` | 10 | Bars to search for recent patterns |
 | `trend_period` | 10 | Bars for trend direction detection |
 | `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
@@ -537,7 +552,35 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | `trap_weight` | 0.7 | How strongly traps influence score (0-1) |
 | `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
 
-### 6.5 Pattern Composite Scoring
+### 6.5 Inside/Outside Bars
+
+**What it detects:** Structural bar patterns based on range containment or expansion between consecutive bars.
+
+**Detected patterns:**
+
+| Pattern | Criteria | Bullish/Bearish |
+|---------|----------|----------------|
+| **Inside Bar (Bullish)** | Current bar range contained within prior bar range, followed by upward breakout | Bullish (breakout setup) |
+| **Inside Bar (Bearish)** | Current bar range contained within prior bar range, followed by downward breakout | Bearish (breakout setup) |
+| **Inside Bar (Pending)** | Current bar range contained within prior bar range, no breakout yet | Neutral (consolidation) |
+| **Outside Bar (Bullish)** | Current bar range engulfs prior bar range, closes bullish | Bullish (volatility expansion) |
+| **Outside Bar (Bearish)** | Current bar range engulfs prior bar range, closes bearish | Bearish (volatility expansion) |
+
+**Inside Bar logic:** An inside bar signals consolidation — price is compressing. The breakout direction determines the signal. The detector checks `breakout_bars` subsequent bars (default 3) for a break above the prior high (bullish) or below the prior low (bearish). If no breakout has occurred yet, the pattern is marked as pending with minimal signal contribution.
+
+**Outside Bar logic:** An outside bar (also called an engulfing range bar) signals volatility expansion. Unlike engulfing candlestick patterns that compare bodies, this compares full bar ranges (high-to-low). The current bar's range must exceed the prior bar's range by `outside_range_min` (default 1.2×). The close direction determines the signal. Outside bars are stronger as reversal signals (bullish close in downtrend or bearish close in uptrend).
+
+**Default Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `lookback` | 20 | Bars to search for recent patterns |
+| `trend_period` | 10 | EMA period for trend context |
+| `breakout_bars` | 3 | Bars after inside bar to check for breakout |
+| `outside_range_min` | 1.2 | Current range / prior range must ≥ this for outside bar |
+| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
+
+### 6.6 Pattern Composite Scoring
 
 Pattern scores are combined into a weighted composite, independent of the indicator composite.
 
@@ -545,10 +588,11 @@ Pattern scores are combined into a weighted composite, independent of the indica
 
 | Pattern | Weight |
 |---------|--------|
-| Gaps | 0.25 |
-| Volume-Range | 0.30 |
+| Gaps | 0.20 |
+| Volume-Range | 0.25 |
 | Candlesticks | 0.25 |
-| Spikes | 0.20 |
+| Spikes | 0.15 |
+| Inside/Outside Bars | 0.15 |
 
 Weights are normalized to sum to 1.0, just like indicator weights.
 
@@ -614,7 +658,7 @@ Boost mode is recommended when you want indicators to drive decisions while patt
 | `boost_strength` | 0.5 | Multiplier for pattern deviation (boost mode) |
 | `boost_dead_zone` | 0.3 | Pattern score within 5.0 ± this → no boost (boost mode) |
 
-### 6.6 Adding New Patterns
+### 6.7 Adding New Patterns
 
 The pattern plugin architecture mirrors the indicator architecture. To add a new pattern:
 
@@ -1172,6 +1216,12 @@ candlesticks:
   dragonfly_shadow_min: 0.6
   gravestone_shadow_min: 0.6
   doji_tiny_shadow_max: 0.1
+  marubozu_body_min: 0.90
+  marubozu_shadow_max: 0.05
+  tweezer_tolerance: 0.002
+  star_middle_body_max: 0.30
+  soldiers_body_min: 0.60
+  soldiers_shadow_max: 0.30
   lookback: 10
   trend_period: 10
   max_signal_strength: 3.0
@@ -1185,12 +1235,20 @@ spikes:
   trap_weight: 0.7
   max_signal_strength: 3.0
 
+inside_outside:
+  lookback: 20
+  trend_period: 10
+  breakout_bars: 3
+  outside_range_min: 1.2
+  max_signal_strength: 3.0
+
 overall_patterns:
   weights:
-    gaps: 0.25
-    volume_range: 0.30
+    gaps: 0.20
+    volume_range: 0.25
     candlesticks: 0.25
-    spikes: 0.20
+    spikes: 0.15
+    inside_outside: 0.15
 
 # ── Display ──────────────────────────────────────────────────────
 

@@ -179,6 +179,12 @@ candlesticks:
   dragonfly_shadow_min: 0.6   # lower shadow must be >= range * this for dragonfly doji
   gravestone_shadow_min: 0.6  # upper shadow must be >= range * this for gravestone doji
   doji_tiny_shadow_max: 0.1   # opposite shadow must be <= range * this for dragonfly/gravestone
+  marubozu_body_min: 0.90     # body must fill >= this fraction of bar range for marubozu
+  marubozu_shadow_max: 0.05   # each shadow must be <= this fraction of bar range for marubozu
+  tweezer_tolerance: 0.002    # highs/lows match within this fraction of price for tweezer
+  star_middle_body_max: 0.30  # middle bar body must be <= this fraction of range for morning/evening star
+  soldiers_body_min: 0.60     # each bar body must be >= this fraction of range for 3 soldiers/crows
+  soldiers_shadow_max: 0.30   # upper/lower shadow must be <= this fraction of range for 3 soldiers/crows
   lookback: 10                # recent bars to scan for patterns
   trend_period: 10            # EMA period for trend context
   max_signal_strength: 3.0    # net signal beyond this = full score
@@ -192,13 +198,21 @@ spikes:
   trap_weight: 0.7            # weight of trap (failed breakout) inverse signal
   max_signal_strength: 3.0    # net signal beyond this = full score
 
+inside_outside:
+  lookback: 20                # recent bars to consider for scoring
+  trend_period: 10            # EMA period for trend context
+  breakout_bars: 3            # bars after inside bar to check for breakout direction
+  outside_range_min: 1.2      # current range / prev range must >= this for outside bar
+  max_signal_strength: 3.0    # net signal beyond this = full score
+
 overall_patterns:
   # Weights for pattern composite score — normalized if they don't sum to 1.0
   weights:
-    gaps: 0.25
-    volume_range: 0.30
+    gaps: 0.20
+    volume_range: 0.25
     candlesticks: 0.25
-    spikes: 0.20
+    spikes: 0.15
+    inside_outside: 0.15
 
 display:
   show_disclaimer: true
@@ -470,6 +484,18 @@ objectives:
       period: 10
       lookback: 15
       confirm_bars: 2
+    inside_outside:
+      lookback: 15
+      trend_period: 8
+      breakout_bars: 2
+
+    overall_patterns:
+      weights:
+        gaps: 0.15
+        volume_range: 0.20
+        candlesticks: 0.25
+        spikes: 0.15
+        inside_outside: 0.25   # breakout setups very relevant for swing trading
 
     overall:
       weights:
@@ -562,12 +588,18 @@ objectives:
       spike_std: 2.0            # lower threshold for intraday spikes
       lookback: 10
       confirm_bars: 2
+    inside_outside:
+      lookback: 10
+      trend_period: 5
+      breakout_bars: 2
+      outside_range_min: 1.15   # lower threshold intraday — smaller bars
     overall_patterns:
       weights:
-        gaps: 0.15              # gaps less meaningful intraday
-        volume_range: 0.35      # volume-range very important intraday
-        candlesticks: 0.30      # quick reversal patterns
-        spikes: 0.20
+        gaps: 0.10              # gaps less meaningful intraday
+        volume_range: 0.30      # volume-range very important intraday
+        candlesticks: 0.25      # quick reversal patterns
+        spikes: 0.15
+        inside_outside: 0.20    # breakout setups important intraday
 
     overall:
       weights:

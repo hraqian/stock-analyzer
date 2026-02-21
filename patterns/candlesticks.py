@@ -1,16 +1,30 @@
 """
 patterns/candlesticks.py — Candlestick pattern detection.
 
-Detects common single-bar and two-bar candlestick patterns:
+Detects common single-bar, two-bar, and three-bar candlestick patterns:
+
+Single-bar:
   - Doji: open ≈ close relative to bar range (indecision)
   - Dragonfly Doji: doji with long lower shadow, tiny upper shadow (bullish)
   - Gravestone Doji: doji with long upper shadow, tiny lower shadow (bearish)
   - Hammer / Hanging Man: small body at top, long lower shadow
   - Shooting Star / Inverted Hammer: small body at bottom, long upper shadow
+  - Bullish Marubozu: large bullish body with no/tiny shadows (strong conviction)
+  - Bearish Marubozu: large bearish body with no/tiny shadows (strong conviction)
+
+Two-bar:
   - Bullish Engulfing: bullish bar completely engulfs prior bearish bar
   - Bearish Engulfing: bearish bar completely engulfs prior bullish bar
   - Bullish Harami: small bullish bar contained within prior large bearish bar
   - Bearish Harami: small bearish bar contained within prior large bullish bar
+  - Tweezer Top: two bars with matching highs at a peak (bearish reversal)
+  - Tweezer Bottom: two bars with matching lows at a trough (bullish reversal)
+
+Three-bar:
+  - Morning Star: bearish → doji/small → bullish (bullish reversal)
+  - Evening Star: bullish → doji/small → bearish (bearish reversal)
+  - Three White Soldiers: three consecutive strong bullish bars (continuation)
+  - Three Black Crows: three consecutive strong bearish bars (continuation)
 
 Context matters: a doji after an uptrend is bearish (reversal), after a
 downtrend is bullish (reversal). Dragonfly and gravestone doji carry inherent
@@ -44,6 +58,16 @@ class CandlestickPattern(BasePattern):
         doji_tiny_shadow_max = float(self.config.get("doji_tiny_shadow_max", 0.1))
         lookback = int(self.config.get("lookback", 10))
         trend_period = int(self.config.get("trend_period", 10))
+        # Marubozu: body must fill >= this fraction of bar range, shadows <= max
+        marubozu_body_min = float(self.config.get("marubozu_body_min", 0.90))
+        marubozu_shadow_max = float(self.config.get("marubozu_shadow_max", 0.05))
+        # Tweezer: highs/lows match within this fraction of bar range
+        tweezer_tolerance = float(self.config.get("tweezer_tolerance", 0.002))
+        # Morning/Evening Star: middle bar body must be <= this fraction of avg
+        star_middle_body_max = float(self.config.get("star_middle_body_max", 0.30))
+        # Three Soldiers/Crows: each bar body must be >= this fraction of range
+        soldiers_body_min = float(self.config.get("soldiers_body_min", 0.60))
+        soldiers_shadow_max = float(self.config.get("soldiers_shadow_max", 0.30))
 
         if len(df) < trend_period + 2:
             return {"patterns": [], "recent_patterns": [], "net_signal": 0.0}
@@ -117,6 +141,19 @@ class CandlestickPattern(BasePattern):
                     # Inverted hammer = bullish reversal signal
                     detected.append(("inverted_hammer", "bullish", 0.8))
 
+            # --- Marubozu ---
+            # Full-body candle with no/tiny shadows — shows strong conviction
+            if body_pct >= marubozu_body_min and bar_range > 0:
+                upper_shadow_pct = upper_shadow / bar_range
+                lower_shadow_pct = lower_shadow / bar_range
+                if upper_shadow_pct <= marubozu_shadow_max and lower_shadow_pct <= marubozu_shadow_max:
+                    if is_bullish_bar:
+                        strength = 1.0 if in_uptrend else 0.7
+                        detected.append(("bullish_marubozu", "bullish", strength))
+                    elif is_bearish_bar:
+                        strength = 1.0 if in_downtrend else 0.7
+                        detected.append(("bearish_marubozu", "bearish", strength))
+
             # --- Engulfing Patterns (need previous bar) ---
             if i >= 1:
                 prev_o = float(df["open"].iloc[i - 1])
@@ -161,6 +198,116 @@ class CandlestickPattern(BasePattern):
                         and max(o, c) <= max(prev_o, prev_c)):
                     strength = 0.8 if in_uptrend else 0.4
                     detected.append(("bearish_harami", "bearish", strength))
+
+                # --- Tweezer Patterns ---
+                # Two consecutive bars with matching extremes → failed breakout / reversal
+                prev_h = float(df["high"].iloc[i - 1])
+                prev_l = float(df["low"].iloc[i - 1])
+                prev_price = max(prev_h, float(df["close"].iloc[i - 1]))
+                tol = prev_price * tweezer_tolerance if prev_price > 0 else 0.01
+
+                # Tweezer top: two bars with nearly matching highs in an uptrend
+                if abs(h - prev_h) <= tol and in_uptrend:
+                    strength = 0.9 if (prev_is_bullish and is_bearish_bar) else 0.6
+                    detected.append(("tweezer_top", "bearish", strength))
+
+                # Tweezer bottom: two bars with nearly matching lows in a downtrend
+                if abs(l - prev_l) <= tol and in_downtrend:
+                    strength = 0.9 if (prev_is_bearish and is_bullish_bar) else 0.6
+                    detected.append(("tweezer_bottom", "bullish", strength))
+
+            # --- Three-bar patterns (need 2 previous bars) ---
+            if i >= 2:
+                bar0_o = float(df["open"].iloc[i - 2])
+                bar0_h = float(df["high"].iloc[i - 2])
+                bar0_l = float(df["low"].iloc[i - 2])
+                bar0_c = float(df["close"].iloc[i - 2])
+                bar0_range = bar0_h - bar0_l
+                bar0_body = abs(bar0_c - bar0_o)
+
+                bar1_o = float(df["open"].iloc[i - 1])
+                bar1_h = float(df["high"].iloc[i - 1])
+                bar1_l = float(df["low"].iloc[i - 1])
+                bar1_c = float(df["close"].iloc[i - 1])
+                bar1_range = bar1_h - bar1_l
+                bar1_body = abs(bar1_c - bar1_o)
+
+                bar2_body = body       # current bar (i)
+                bar2_range = bar_range
+
+                # --- Morning Star ---
+                # Bar 0: strong bearish, Bar 1: small body (indecision), Bar 2: strong bullish
+                # Bullish reversal, best when preceded by downtrend
+                if (bar0_range > 0 and bar1_range > 0 and bar2_range > 0
+                        and bar0_c < bar0_o                             # bar 0 bearish
+                        and bar0_body / bar0_range >= 0.5               # bar 0 has solid body
+                        and bar1_body / bar1_range <= star_middle_body_max  # bar 1 small body
+                        and c > o                                       # bar 2 bullish
+                        and bar2_body / bar2_range >= 0.5               # bar 2 has solid body
+                        and c > (bar0_o + bar0_c) / 2):                 # bar 2 closes above bar 0 midpoint
+                    strength = 1.2 if in_downtrend else 0.6
+                    detected.append(("morning_star", "bullish", strength))
+
+                # --- Evening Star ---
+                # Bar 0: strong bullish, Bar 1: small body (indecision), Bar 2: strong bearish
+                # Bearish reversal, best when preceded by uptrend
+                if (bar0_range > 0 and bar1_range > 0 and bar2_range > 0
+                        and bar0_c > bar0_o                             # bar 0 bullish
+                        and bar0_body / bar0_range >= 0.5               # bar 0 has solid body
+                        and bar1_body / bar1_range <= star_middle_body_max  # bar 1 small body
+                        and c < o                                       # bar 2 bearish
+                        and bar2_body / bar2_range >= 0.5               # bar 2 has solid body
+                        and c < (bar0_o + bar0_c) / 2):                 # bar 2 closes below bar 0 midpoint
+                    strength = 1.2 if in_uptrend else 0.6
+                    detected.append(("evening_star", "bearish", strength))
+
+                # --- Three White Soldiers ---
+                # Three consecutive strong bullish bars, each opening within prior body
+                # and closing higher than prior close. Small upper shadows.
+                if (bar0_range > 0 and bar1_range > 0 and bar2_range > 0
+                        and bar0_c > bar0_o                                  # bar 0 bullish
+                        and bar1_c > bar1_o                                  # bar 1 bullish
+                        and c > o                                            # bar 2 bullish
+                        and bar0_body / bar0_range >= soldiers_body_min
+                        and bar1_body / bar1_range >= soldiers_body_min
+                        and bar2_body / bar2_range >= soldiers_body_min
+                        and bar1_c > bar0_c                                  # each closes higher
+                        and c > bar1_c
+                        and bar1_o >= bar0_o and bar1_o <= bar0_c            # opens within prior body
+                        and o >= bar1_o and o <= bar1_c):
+                    # Check small upper shadows
+                    bar0_upper = bar0_h - max(bar0_o, bar0_c)
+                    bar1_upper = bar1_h - max(bar1_o, bar1_c)
+                    bar2_upper = h - max(o, c)
+                    if (bar0_range > 0 and bar0_upper / bar0_range <= soldiers_shadow_max
+                            and bar1_range > 0 and bar1_upper / bar1_range <= soldiers_shadow_max
+                            and bar2_range > 0 and bar2_upper / bar2_range <= soldiers_shadow_max):
+                        strength = 1.3 if in_downtrend else 0.9
+                        detected.append(("three_white_soldiers", "bullish", strength))
+
+                # --- Three Black Crows ---
+                # Three consecutive strong bearish bars, each opening within prior body
+                # and closing lower than prior close. Small lower shadows.
+                if (bar0_range > 0 and bar1_range > 0 and bar2_range > 0
+                        and bar0_c < bar0_o                                  # bar 0 bearish
+                        and bar1_c < bar1_o                                  # bar 1 bearish
+                        and c < o                                            # bar 2 bearish
+                        and bar0_body / bar0_range >= soldiers_body_min
+                        and bar1_body / bar1_range >= soldiers_body_min
+                        and bar2_body / bar2_range >= soldiers_body_min
+                        and bar1_c < bar0_c                                  # each closes lower
+                        and c < bar1_c
+                        and bar1_o <= bar0_o and bar1_o >= bar0_c            # opens within prior body
+                        and o <= bar1_o and o >= bar1_c):
+                    # Check small lower shadows
+                    bar0_lower = min(bar0_o, bar0_c) - bar0_l
+                    bar1_lower = min(bar1_o, bar1_c) - bar1_l
+                    bar2_lower = min(o, c) - l
+                    if (bar0_range > 0 and bar0_lower / bar0_range <= soldiers_shadow_max
+                            and bar1_range > 0 and bar1_lower / bar1_range <= soldiers_shadow_max
+                            and bar2_range > 0 and bar2_lower / bar2_range <= soldiers_shadow_max):
+                        strength = 1.3 if in_uptrend else 0.9
+                        detected.append(("three_black_crows", "bearish", strength))
 
             for pat_name, signal, strength in detected:
                 patterns.append({
@@ -228,6 +375,14 @@ class CandlestickPattern(BasePattern):
             "bearish_engulfing": "Bear Engulf",
             "bullish_harami": "Bull Harami",
             "bearish_harami": "Bear Harami",
+            "bullish_marubozu": "Bull Marubozu",
+            "bearish_marubozu": "Bear Marubozu",
+            "tweezer_top": "Tweezer Top",
+            "tweezer_bottom": "Tweezer Bottom",
+            "morning_star": "Morning Star",
+            "evening_star": "Evening Star",
+            "three_white_soldiers": "3 White Soldiers",
+            "three_black_crows": "3 Black Crows",
         }
         pat_label = pattern_labels.get(last["pattern"], last["pattern"])
         signal_icon = "\u2191" if last["signal"] == "bullish" else ("\u2193" if last["signal"] == "bearish" else "\u25CB")
