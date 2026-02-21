@@ -40,7 +40,8 @@ class StrategyContext:
     bar: dict[str, float]               # OHLCV for the current bar
     indicators: dict[str, Any]          # raw values from each indicator
     scores: dict[str, float]            # per-indicator scores
-    overall_score: float                # composite score
+    overall_score: float                # composite indicator score
+    pattern_score: float = 5.0          # composite pattern score (5.0 = neutral)
     position: float = 0.0               # current position size (0 = flat)
     cash: float = 100_000.0             # available cash
     portfolio_value: float = 100_000.0  # total portfolio value

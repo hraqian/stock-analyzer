@@ -1,5 +1,5 @@
 """
-analysis/analyzer.py — Orchestrates all indicators, S/R levels, and scoring.
+analysis/analyzer.py — Orchestrates all indicators, patterns, S/R levels, and scoring.
 """
 
 from __future__ import annotations
@@ -11,8 +11,11 @@ import pandas as pd
 
 from indicators.registry import IndicatorRegistry
 from indicators.base import IndicatorResult
+from patterns.registry import PatternRegistry
+from patterns.base import PatternResult
 from analysis.support_resistance import calculate_levels, SRLevel
 from analysis.scorer import CompositeScorer
+from analysis.pattern_scorer import PatternCompositeScorer
 
 if TYPE_CHECKING:
     from config import Config
@@ -27,9 +30,11 @@ class AnalysisResult:
     period: str
     info: dict[str, Any]
     indicator_results: list[IndicatorResult]
+    pattern_results: list[PatternResult]
     support_levels: list[SRLevel]
     resistance_levels: list[SRLevel]
-    composite: dict[str, Any]   # from CompositeScorer.score()
+    composite: dict[str, Any]          # from CompositeScorer.score() (indicators)
+    pattern_composite: dict[str, Any]  # from PatternCompositeScorer.score()
     df: pd.DataFrame = field(repr=False)
 
 
@@ -54,7 +59,7 @@ class Analyzer:
         start: str | None = None,
         end: str | None = None,
     ) -> AnalysisResult:
-        """Fetch data, run all indicators, compute S/R, return AnalysisResult."""
+        """Fetch data, run all indicators + patterns, compute S/R, return AnalysisResult."""
 
         # 1. Fetch data and metadata
         df = self._provider.fetch(ticker, period=period, interval=interval, start=start, end=end)
@@ -74,21 +79,30 @@ class Analyzer:
         registry = IndicatorRegistry(self._cfg, only=self._only)
         indicator_results = registry.run_all(df)
 
-        # 3. Support / Resistance
+        # 3. Run pattern detectors
+        pattern_registry = PatternRegistry(self._cfg)
+        pattern_results = pattern_registry.run_all(df)
+
+        # 4. Support / Resistance
         sr_cfg = self._cfg.section("support_resistance")
         sr = calculate_levels(df, sr_cfg, current_price)
 
-        # 4. Composite score
+        # 5. Composite scores
         scorer = CompositeScorer(self._cfg)
         composite = scorer.score(indicator_results)
+
+        pattern_scorer = PatternCompositeScorer(self._cfg)
+        pattern_composite = pattern_scorer.score(pattern_results)
 
         return AnalysisResult(
             ticker=ticker.upper(),
             period=period_label,
             info=info,
             indicator_results=indicator_results,
+            pattern_results=pattern_results,
             support_levels=sr["support"],
             resistance_levels=sr["resistance"],
             composite=composite,
+            pattern_composite=pattern_composite,
             df=df,
         )

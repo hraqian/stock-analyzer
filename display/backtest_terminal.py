@@ -184,6 +184,20 @@ def render_backtest(
         config_rows.append(("Signal: HOLD when score <=", f"{thresholds.get('hold_below', 6.5)}"))
         config_rows.append(("Signal: LONG when score >", f"{thresholds.get('hold_below', 6.5)}"))
 
+    # ── Pattern-Indicator Combination ───────────────────────────────────
+    combo_mode = strat_cfg.get("combination_mode", "weighted")
+    config_rows.append(("Score Combination", combo_mode))
+    if combo_mode == "weighted":
+        ind_w = float(strat_cfg.get("indicator_weight", 0.7))
+        pat_w = float(strat_cfg.get("pattern_weight", 0.3))
+        config_rows.append(("  Indicator Weight", f"{ind_w:.0%}"))
+        config_rows.append(("  Pattern Weight", f"{pat_w:.0%}"))
+    else:
+        config_rows.append(("  Gate Ind. LONG >", f"{strat_cfg.get('gate_indicator_min', 5.5)}"))
+        config_rows.append(("  Gate Ind. SHORT <", f"{strat_cfg.get('gate_indicator_max', 4.5)}"))
+        config_rows.append(("  Gate Pat. LONG >", f"{strat_cfg.get('gate_pattern_min', 5.5)}"))
+        config_rows.append(("  Gate Pat. SHORT <", f"{strat_cfg.get('gate_pattern_max', 4.5)}"))
+
     config_rows += [
         ("Position Sizing", strat_cfg.get("position_sizing", "fixed")),
         ("Fixed Quantity", f"{strat_cfg.get('fixed_quantity', 100)} shares"),

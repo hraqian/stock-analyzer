@@ -151,12 +151,76 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "take_profit_pct": 0.20,
         "rebalance_interval": 5,
         "flatten_eod": False,  # force-close all positions at end of each trading day
+        # Pattern-indicator combination for strategy decisions
+        "combination_mode": "weighted",  # "weighted" or "gate"
+        "indicator_weight": 0.7,         # weight of indicator composite in blended score
+        "pattern_weight": 0.3,           # weight of pattern composite in blended score
+        # Gate mode: only trade if both scores pass their respective thresholds
+        "gate_indicator_min": 5.5,       # indicator score must exceed this for LONG
+        "gate_indicator_max": 4.5,       # indicator score must be below this for SHORT
+        "gate_pattern_min": 5.5,         # pattern score must exceed this for LONG
+        "gate_pattern_max": 4.5,         # pattern score must be below this for SHORT
     },
     "backtest": {
         "initial_cash": 100_000.0,
         "commission_per_trade": 0.0,
         "slippage_pct": 0.001,
         "warmup_bars": 200,
+    },
+    # ------------------------------------------------------------------
+    # Pattern Signal Detectors
+    # ------------------------------------------------------------------
+    "gaps": {
+        "lookback": 20,
+        "min_gap_pct": 0.005,
+        "volume_surge_mult": 1.5,
+        "trend_period": 20,
+        "type_weights": {
+            "common": 0.3,
+            "runaway": 0.7,
+            "breakaway": 1.0,
+            "exhaustion": 0.5,
+        },
+        "max_signal_strength": 3.0,
+    },
+    "volume_range": {
+        "period": 20,
+        "expansion_threshold": 1.5,
+        "contraction_threshold": 0.6,
+        "lookback": 10,
+        "scoring": {
+            "expansion_bull": 8.0,
+            "expansion_bear": 2.0,
+            "contraction": 5.0,
+            "divergence": 5.0,
+        },
+    },
+    "candlesticks": {
+        "doji_threshold": 0.05,
+        "shadow_ratio": 2.0,
+        "lookback": 10,
+        "trend_period": 10,
+        "max_signal_strength": 3.0,
+    },
+    "spikes": {
+        "period": 20,
+        "spike_std": 2.5,
+        "confirm_bars": 3,
+        "confirm_pct": 0.5,
+        "lookback": 20,
+        "trap_weight": 0.7,
+        "max_signal_strength": 3.0,
+    },
+    # ------------------------------------------------------------------
+    # Pattern composite scoring
+    # ------------------------------------------------------------------
+    "overall_patterns": {
+        "weights": {
+            "gaps": 0.25,
+            "volume_range": 0.30,
+            "candlesticks": 0.25,
+            "spikes": 0.20,
+        },
     },
     "suitability": {
         "mode_override": "auto",
@@ -228,6 +292,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "rebalance_interval": 10,
                 "stop_loss_pct": 0.08,
                 "take_profit_pct": 0.30,
+                "indicator_weight": 0.8,
+                "pattern_weight": 0.2,
             },
             "backtest": {
                 "warmup_bars": 250,
@@ -270,6 +336,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "fractal_lookback": 30,
                 "fractal_order": 3,
             },
+            "gaps": {
+                "lookback": 15,
+                "trend_period": 10,
+            },
+            "volume_range": {
+                "period": 10,
+                "lookback": 8,
+            },
+            "candlesticks": {
+                "lookback": 8,
+                "trend_period": 8,
+            },
+            "spikes": {
+                "period": 10,
+                "lookback": 15,
+                "confirm_bars": 2,
+            },
             "overall": {
                 "weights": {
                     "rsi": 0.15,
@@ -286,6 +369,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "rebalance_interval": 3,
                 "stop_loss_pct": 0.03,
                 "take_profit_pct": 0.10,
+                "indicator_weight": 0.6,
+                "pattern_weight": 0.4,
             },
             "backtest": {
                 "warmup_bars": 60,
@@ -329,6 +414,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "fractal_lookback": 20,
                 "fractal_order": 3,
             },
+            "gaps": {
+                "lookback": 10,
+                "min_gap_pct": 0.003,
+                "trend_period": 7,
+            },
+            "volume_range": {
+                "period": 10,
+                "lookback": 5,
+            },
+            "candlesticks": {
+                "lookback": 5,
+                "trend_period": 5,
+            },
+            "spikes": {
+                "period": 10,
+                "spike_std": 2.0,
+                "lookback": 10,
+                "confirm_bars": 2,
+            },
+            "overall_patterns": {
+                "weights": {
+                    "gaps": 0.15,
+                    "volume_range": 0.35,
+                    "candlesticks": 0.30,
+                    "spikes": 0.20,
+                },
+            },
             "overall": {
                 "weights": {
                     "rsi": 0.15,
@@ -346,6 +458,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "stop_loss_pct": 0.015,
                 "take_profit_pct": 0.03,
                 "flatten_eod": True,
+                "indicator_weight": 0.5,
+                "pattern_weight": 0.5,
             },
             "backtest": {
                 "warmup_bars": 30,
@@ -485,6 +599,19 @@ class Config:
         for k, v in weights.items():
             if not isinstance(v, (int, float)) or v < 0:
                 errors.append(f"overall.weights.{k} must be a non-negative number, got {v!r}")
+
+        # Pattern weights must be positive
+        pat_weights: dict = self._data.get("overall_patterns", {}).get("weights", {})
+        for k, v in pat_weights.items():
+            if not isinstance(v, (int, float)) or v < 0:
+                errors.append(f"overall_patterns.weights.{k} must be a non-negative number, got {v!r}")
+
+        # Strategy combination weights must sum sensibly
+        combo_mode = self._data.get("strategy", {}).get("combination_mode", "weighted")
+        if combo_mode not in ("weighted", "gate"):
+            errors.append(
+                f"strategy.combination_mode must be 'weighted' or 'gate', got {combo_mode!r}"
+            )
 
         # RSI thresholds
         rsi = self._data.get("rsi", {}).get("thresholds", {})
@@ -643,8 +770,19 @@ class Config:
         return self._data.get(key) or {}
 
     def normalized_weights(self) -> dict[str, float]:
-        """Return overall weights normalized so they sum to 1.0."""
+        """Return overall indicator weights normalized so they sum to 1.0."""
         weights = self._data["overall"]["weights"]
+        total = sum(weights.values())
+        if total == 0:
+            equal = 1.0 / len(weights)
+            return {k: equal for k in weights}
+        return {k: v / total for k, v in weights.items()}
+
+    def normalized_pattern_weights(self) -> dict[str, float]:
+        """Return overall pattern weights normalized so they sum to 1.0."""
+        weights = self._data.get("overall_patterns", {}).get("weights", {})
+        if not weights:
+            return {}
         total = sum(weights.values())
         if total == 0:
             equal = 1.0 / len(weights)

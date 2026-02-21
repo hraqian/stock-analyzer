@@ -140,6 +140,62 @@ overall:
     volume: 0.10
     fibonacci: 0.10
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern Signal Detectors
+# ─────────────────────────────────────────────────────────────────────────────
+# Patterns measure *what just happened* (a gap, a reversal candle, a volume
+# spike) — a separate layer from indicators which measure *where the stock is*.
+# Each pattern scores 0-10 (bearish to bullish), with 5.0 = no pattern / neutral.
+# The pattern composite is displayed alongside but independent of the indicator
+# composite.
+
+gaps:
+  lookback: 20               # number of recent bars to consider for scoring
+  min_gap_pct: 0.005          # minimum gap size as fraction of price (0.5%)
+  volume_surge_mult: 1.5      # volume > avg * this = surge (for gap classification)
+  trend_period: 20            # EMA period for trend detection
+  type_weights:               # weight of each gap type in net signal
+    common: 0.3
+    runaway: 0.7
+    breakaway: 1.0
+    exhaustion: 0.5           # exhaustion gaps get inverse signal (reversal)
+  max_signal_strength: 3.0    # net signal beyond this = full score (0.5 or 9.5)
+
+volume_range:
+  period: 20                  # rolling average period for range and volume
+  expansion_threshold: 1.5    # range/volume ratio >= this = expansion
+  contraction_threshold: 0.6  # range/volume ratio <= this = contraction
+  lookback: 10                # recent bars to count expansions/contractions
+  scoring:
+    expansion_bull: 8.0       # bullish expansion base score
+    expansion_bear: 2.0       # bearish expansion base score
+    contraction: 5.0          # contraction = neutral
+    divergence: 5.0           # range/volume divergence = neutral
+
+candlesticks:
+  doji_threshold: 0.05        # body/range <= this = doji
+  shadow_ratio: 2.0           # shadow must be >= body * this for hammer/star
+  lookback: 10                # recent bars to scan for patterns
+  trend_period: 10            # EMA period for trend context
+  max_signal_strength: 3.0    # net signal beyond this = full score
+
+spikes:
+  period: 20                  # rolling mean/std period
+  spike_std: 2.5              # z-score threshold for spike detection
+  confirm_bars: 3             # number of bars to check for confirmation
+  confirm_pct: 0.5            # fraction of confirm_bars that must hold level
+  lookback: 20                # recent bars to consider for scoring
+  trap_weight: 0.7            # weight of trap (failed breakout) inverse signal
+  max_signal_strength: 3.0    # net signal beyond this = full score
+
+overall_patterns:
+  # Weights for pattern composite score — normalized if they don't sum to 1.0
+  weights:
+    gaps: 0.25
+    volume_range: 0.30
+    candlesticks: 0.25
+    spikes: 0.20
+
 display:
   show_disclaimer: true
   score_decimal_places: 1
@@ -191,6 +247,26 @@ strategy:
   # Day trading: force-close all positions at the end of each trading day
   # (only applies when using intraday intervals like 1m, 5m, 15m, etc.)
   flatten_eod: false
+
+  # ── Pattern-Indicator Combination ──────────────────────────────────────
+  # How the strategy combines indicator composite and pattern composite:
+  #
+  # "weighted" mode (default):
+  #   blended_score = indicator_weight * indicator_composite + pattern_weight * pattern_composite
+  #   Then the blended score is used for the same threshold logic as before.
+  #
+  # "gate" mode:
+  #   Only trade LONG if indicator_score > gate_indicator_min AND pattern_score > gate_pattern_min
+  #   Only trade SHORT if indicator_score < gate_indicator_max AND pattern_score < gate_pattern_max
+  #   Otherwise HOLD.
+  combination_mode: "weighted"
+  indicator_weight: 0.7       # weight of indicator composite in blended score
+  pattern_weight: 0.3         # weight of pattern composite in blended score
+  # Gate mode thresholds (only used when combination_mode = "gate")
+  gate_indicator_min: 5.5     # indicator score must exceed this for LONG
+  gate_indicator_max: 4.5     # indicator score must be below this for SHORT
+  gate_pattern_min: 5.5       # pattern score must exceed this for LONG
+  gate_pattern_max: 4.5       # pattern score must be below this for SHORT
 
 backtest:
   initial_cash: 100000.0    # starting portfolio cash
@@ -314,6 +390,8 @@ objectives:
       rebalance_interval: 10    # less frequent re-evaluation
       stop_loss_pct: 0.08       # wider stop (8%)
       take_profit_pct: 0.30     # wider target (30%)
+      indicator_weight: 0.8     # long-term: indicators matter more
+      pattern_weight: 0.2
 
     backtest:
       warmup_bars: 250          # need more data for slower indicators
@@ -364,6 +442,20 @@ objectives:
       fractal_lookback: 30
       fractal_order: 3          # fewer confirmation bars needed
 
+    gaps:
+      lookback: 15
+      trend_period: 10
+    volume_range:
+      period: 10
+      lookback: 8
+    candlesticks:
+      lookback: 8
+      trend_period: 8
+    spikes:
+      period: 10
+      lookback: 15
+      confirm_bars: 2
+
     overall:
       weights:
         rsi: 0.15
@@ -379,6 +471,8 @@ objectives:
       rebalance_interval: 3     # more frequent re-evaluation
       stop_loss_pct: 0.03       # tighter stop (3%)
       take_profit_pct: 0.10     # tighter target (10%)
+      indicator_weight: 0.6     # short-term: patterns matter more than long-term
+      pattern_weight: 0.4
 
     backtest:
       warmup_bars: 60           # much less data needed (no SMA200)
@@ -438,6 +532,28 @@ objectives:
       fractal_lookback: 20
       fractal_order: 3
 
+    gaps:
+      lookback: 10
+      min_gap_pct: 0.003        # smaller gaps matter intraday
+      trend_period: 7
+    volume_range:
+      period: 10
+      lookback: 5
+    candlesticks:
+      lookback: 5
+      trend_period: 5
+    spikes:
+      period: 10
+      spike_std: 2.0            # lower threshold for intraday spikes
+      lookback: 10
+      confirm_bars: 2
+    overall_patterns:
+      weights:
+        gaps: 0.15              # gaps less meaningful intraday
+        volume_range: 0.35      # volume-range very important intraday
+        candlesticks: 0.30      # quick reversal patterns
+        spikes: 0.20
+
     overall:
       weights:
         rsi: 0.15
@@ -454,6 +570,8 @@ objectives:
       stop_loss_pct: 0.015      # tight stop (1.5%)
       take_profit_pct: 0.03     # tight target (3%)
       flatten_eod: true         # force-close all positions at end of each day
+      indicator_weight: 0.5     # day trading: equal weight to patterns
+      pattern_weight: 0.5
 
     backtest:
       warmup_bars: 30           # minimal warmup for fast indicators

@@ -105,7 +105,7 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
     )
     table.add_column("Indicator",    style="bold white", min_width=18, no_wrap=True)
     table.add_column("Value",        style="white",      min_width=26, no_wrap=True)
-    table.add_column("Detail",       style="dim white",  ratio=3,      no_wrap=True)
+    table.add_column("Detail",       style="white",      ratio=3,      no_wrap=True)
     table.add_column("Score / Bar",  min_width=20,       no_wrap=True)
 
     for r in result.indicator_results:
@@ -139,6 +139,56 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
     )
 
     console.print(table)
+
+    # ── Pattern Signals Table ────────────────────────────────────────────────
+    if result.pattern_results:
+        pat_table = Table(
+            box=box.SIMPLE_HEAD,
+            show_header=True,
+            header_style="bold cyan",
+            expand=True,
+            padding=(0, 1),
+            title="[bold]Pattern Signals[/bold]",
+            title_style="bold white",
+        )
+        pat_table.add_column("Pattern",      style="bold white", min_width=18, no_wrap=True)
+        pat_table.add_column("Signal",        style="white",      min_width=26, no_wrap=True)
+        pat_table.add_column("Detail",        style="white",      ratio=3,      no_wrap=True)
+        pat_table.add_column("Score / Bar",   min_width=20,       no_wrap=True)
+
+        for r in result.pattern_results:
+            color = _score_color(r.score, color_thresholds)
+            score_str = f"{r.score:.{score_dp}f}"
+            bar = _score_bar(r.score)
+
+            if r.error:
+                pat_table.add_row(
+                    r.name,
+                    "[red]ERROR[/red]",
+                    f"[red]{r.error[:50]}[/red]",
+                    f"[dim]{score_str}[/dim]",
+                )
+            else:
+                pat_table.add_row(
+                    r.name,
+                    r.display.get("value_str", ""),
+                    r.display.get("detail_str", ""),
+                    f"[{color}]{score_str}  {bar}[/{color}]",
+                )
+
+        # Pattern overall score row
+        pat_overall = result.pattern_composite["overall"]
+        pat_color = _score_color(pat_overall, color_thresholds)
+        pat_bar = _score_bar(pat_overall)
+        pat_table.add_section()
+        pat_table.add_row(
+            "[bold]PATTERN SCORE[/bold]",
+            "",
+            f"[dim]({result.pattern_composite['n_scored']} patterns weighted)[/dim]",
+            f"[bold {pat_color}]{pat_overall:.{score_dp}f}  {pat_bar}[/bold {pat_color}]",
+        )
+
+        console.print(pat_table)
 
     # ── Support & Resistance ─────────────────────────────────────────────────
     sr_table = Table(

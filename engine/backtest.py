@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
 from indicators.registry import IndicatorRegistry
 from analysis.scorer import CompositeScorer
+from patterns.registry import PatternRegistry
+from analysis.pattern_scorer import PatternCompositeScorer
 from engine.strategy import Signal, StrategyContext, TradeOrder
 from engine.suitability import TradingMode
 
@@ -226,6 +228,7 @@ class BacktestEngine:
         # Last computed scores (reused between rebalance bars)
         last_scores: dict[str, float] = {}
         last_overall: float = 5.0
+        last_pattern_overall: float = 5.0
 
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
@@ -284,7 +287,7 @@ class BacktestEngine:
                 # Trailing data up to current bar (inclusive) — no lookahead
                 trailing_df = df.iloc[: i + 1].copy()
 
-                last_scores, last_overall = self._compute_scores(trailing_df)
+                last_scores, last_overall, last_pattern_overall = self._compute_scores(trailing_df)
 
             # Build context and ask strategy for order
             portfolio_value = cash
@@ -300,6 +303,7 @@ class BacktestEngine:
                 indicators={},       # raw values not needed for score strategy
                 scores=last_scores,
                 overall_score=last_overall,
+                pattern_score=last_pattern_overall,
                 position=position.quantity * (1 if position.side == "long" else -1)
                 if position
                 else 0.0,
@@ -509,8 +513,13 @@ class BacktestEngine:
 
     def _compute_scores(
         self, trailing_df: pd.DataFrame
-    ) -> tuple[dict[str, float], float]:
-        """Run all indicators on *trailing_df* and return per-indicator scores + overall."""
+    ) -> tuple[dict[str, float], float, float]:
+        """Run all indicators and patterns on *trailing_df*.
+
+        Returns:
+            (per_indicator_scores, indicator_composite, pattern_composite)
+        """
+        # Indicator scores
         registry = IndicatorRegistry(self._cfg)
         results = registry.run_all(trailing_df)
 
@@ -518,7 +527,15 @@ class BacktestEngine:
         composite = scorer.score(results)
 
         scores = {r.config_key: r.score for r in results if not r.error}
-        return scores, composite["overall"]
+
+        # Pattern scores
+        pat_registry = PatternRegistry(self._cfg)
+        pat_results = pat_registry.run_all(trailing_df)
+
+        pat_scorer = PatternCompositeScorer(self._cfg)
+        pat_composite = pat_scorer.score(pat_results)
+
+        return scores, composite["overall"], pat_composite["overall"]
 
     # ------------------------------------------------------------------
     # Performance metrics

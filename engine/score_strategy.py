@@ -1,8 +1,15 @@
 """
 engine/score_strategy.py — Score-based trading strategy.
 
-Maps composite indicator scores to LONG / SHORT / HOLD signals
-using configurable thresholds from config.yaml.
+Maps composite indicator scores (and optionally pattern scores) to
+LONG / SHORT / HOLD signals using configurable thresholds from config.yaml.
+
+Two combination modes for indicator + pattern scores:
+  "weighted" (default):
+    blended_score = indicator_weight * indicator_composite + pattern_weight * pattern_composite
+    Then the blended score follows the same threshold logic below.
+  "gate":
+    Only trade if both indicator and pattern scores pass their thresholds.
 
 Fixed mode (threshold_mode: "fixed"):
     composite score <= short_below  → SHORT
@@ -38,6 +45,10 @@ class ScoreBasedStrategy(Strategy):
         "fixed"      — absolute score thresholds (default)
         "percentile" — rolling percentile-based adaptive thresholds
 
+    Supports two combination modes for indicator + pattern scores:
+        "weighted" — blended_score = w_ind * indicator_score + w_pat * pattern_score
+        "gate"     — both scores must independently pass thresholds to trade
+
     Parameters (loaded from ``config.yaml`` → ``strategy`` section):
         threshold_mode               : str    — "fixed" or "percentile"
         score_thresholds.short_below : float  — score at or below → SHORT (fixed mode)
@@ -45,6 +56,13 @@ class ScoreBasedStrategy(Strategy):
         percentile_thresholds.short_percentile : int — bottom N% → SHORT (percentile mode)
         percentile_thresholds.long_percentile  : int — top N% → LONG (percentile mode)
         percentile_thresholds.lookback_bars    : int — rolling window size
+        combination_mode             : str    — "weighted" or "gate"
+        indicator_weight             : float  — weight of indicator composite (weighted mode)
+        pattern_weight               : float  — weight of pattern composite (weighted mode)
+        gate_indicator_min           : float  — indicator score must exceed this for LONG (gate mode)
+        gate_indicator_max           : float  — indicator score must be below this for SHORT (gate mode)
+        gate_pattern_min             : float  — pattern score must exceed this for LONG (gate mode)
+        gate_pattern_max             : float  — pattern score must be below this for SHORT (gate mode)
         position_sizing              : str    — "fixed" or "percent_equity"
         fixed_quantity               : int    — shares per trade (fixed mode)
         percent_equity               : float  — fraction of equity per trade
@@ -80,6 +98,17 @@ class ScoreBasedStrategy(Strategy):
         # Rolling score window for percentile mode
         self._score_window: deque[float] = deque(maxlen=self._lookback_bars)
 
+        # ── Indicator + Pattern combination ─────────────────────────────
+        self._combination_mode: str = self.params.get("combination_mode", "weighted")
+        self._indicator_weight: float = float(self.params.get("indicator_weight", 0.7))
+        self._pattern_weight: float = float(self.params.get("pattern_weight", 0.3))
+
+        # Gate mode thresholds
+        self._gate_indicator_min: float = float(self.params.get("gate_indicator_min", 5.5))
+        self._gate_indicator_max: float = float(self.params.get("gate_indicator_max", 4.5))
+        self._gate_pattern_min: float = float(self.params.get("gate_pattern_min", 5.5))
+        self._gate_pattern_max: float = float(self.params.get("gate_pattern_max", 4.5))
+
         # Position sizing
         self._sizing: str = self.params.get("position_sizing", "fixed")
         self._fixed_qty: int = int(self.params.get("fixed_quantity", 100))
@@ -100,13 +129,33 @@ class ScoreBasedStrategy(Strategy):
     # ------------------------------------------------------------------
 
     def on_bar(self, ctx: StrategyContext) -> TradeOrder:
-        """Decide action based on composite score and current position."""
-        score = ctx.overall_score
+        """Decide action based on composite score and current position.
 
-        # Update rolling window (always, regardless of mode — cheap to maintain)
-        self._score_window.append(score)
+        In "weighted" mode, blends indicator and pattern scores into a single
+        effective score, then applies the normal threshold logic.
 
-        signal = self._score_to_signal(score)
+        In "gate" mode, both indicator and pattern scores must independently
+        pass their gate thresholds for a trade signal to fire; otherwise HOLD.
+        """
+        ind_score = ctx.overall_score
+        pat_score = ctx.pattern_score
+
+        if self._combination_mode == "gate":
+            signal = self._gate_signal(ind_score, pat_score)
+            effective_score = ind_score  # for notes
+        else:
+            # Weighted blend
+            w_total = self._indicator_weight + self._pattern_weight
+            if w_total > 0:
+                effective_score = (
+                    self._indicator_weight * ind_score
+                    + self._pattern_weight * pat_score
+                ) / w_total
+            else:
+                effective_score = ind_score
+            # Update rolling window with the blended score
+            self._score_window.append(effective_score)
+            signal = self._score_to_signal(effective_score)
 
         # ── Apply trading mode constraints ──────────────────────────────
         signal = self._constrain_signal(signal, ctx.position)
@@ -124,7 +173,10 @@ class ScoreBasedStrategy(Strategy):
         return TradeOrder(
             signal=signal,
             quantity=quantity,
-            notes=f"score={score:.2f} mode={self._trading_mode.value}",
+            notes=(
+                f"ind={ind_score:.2f} pat={pat_score:.2f} "
+                f"eff={effective_score:.2f} mode={self._trading_mode.value}"
+            ),
         )
 
     def on_start(self, metadata: dict[str, Any]) -> None:
@@ -134,6 +186,28 @@ class ScoreBasedStrategy(Strategy):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _gate_signal(self, ind_score: float, pat_score: float) -> Signal:
+        """Gate mode: both scores must independently agree for a trade signal.
+
+        LONG  requires: ind_score > gate_indicator_min AND pat_score > gate_pattern_min
+        SHORT requires: ind_score < gate_indicator_max AND pat_score < gate_pattern_max
+        Otherwise: HOLD
+
+        The rolling window is updated with the indicator score (since gate
+        mode doesn't produce a single blended number).
+        """
+        self._score_window.append(ind_score)
+
+        # Check LONG gate
+        if ind_score > self._gate_indicator_min and pat_score > self._gate_pattern_min:
+            return Signal.BUY
+
+        # Check SHORT gate
+        if ind_score < self._gate_indicator_max and pat_score < self._gate_pattern_max:
+            return Signal.SELL
+
+        return Signal.HOLD
 
     def _score_to_signal(self, score: float) -> Signal:
         if self._threshold_mode == "percentile":
