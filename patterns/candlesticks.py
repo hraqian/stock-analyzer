@@ -3,6 +3,8 @@ patterns/candlesticks.py — Candlestick pattern detection.
 
 Detects common single-bar and two-bar candlestick patterns:
   - Doji: open ≈ close relative to bar range (indecision)
+  - Dragonfly Doji: doji with long lower shadow, tiny upper shadow (bullish)
+  - Gravestone Doji: doji with long upper shadow, tiny lower shadow (bearish)
   - Hammer / Hanging Man: small body at top, long lower shadow
   - Shooting Star / Inverted Hammer: small body at bottom, long upper shadow
   - Bullish Engulfing: bullish bar completely engulfs prior bearish bar
@@ -11,8 +13,8 @@ Detects common single-bar and two-bar candlestick patterns:
   - Bearish Harami: small bearish bar contained within prior large bullish bar
 
 Context matters: a doji after an uptrend is bearish (reversal), after a
-downtrend is bullish (reversal). An engulfing pattern's significance depends
-on the preceding trend direction.
+downtrend is bullish (reversal). Dragonfly and gravestone doji carry inherent
+directional bias from their shadow structure, amplified when trend-confirmed.
 
 Scoring:
   Recent bullish patterns → score > 5
@@ -37,6 +39,9 @@ class CandlestickPattern(BasePattern):
     def detect(self, df: pd.DataFrame) -> dict[str, Any]:
         doji_threshold = float(self.config.get("doji_threshold", 0.05))
         shadow_ratio = float(self.config.get("shadow_ratio", 2.0))
+        dragonfly_shadow_min = float(self.config.get("dragonfly_shadow_min", 0.6))
+        gravestone_shadow_min = float(self.config.get("gravestone_shadow_min", 0.6))
+        doji_tiny_shadow_max = float(self.config.get("doji_tiny_shadow_max", 0.1))
         lookback = int(self.config.get("lookback", 10))
         trend_period = int(self.config.get("trend_period", 10))
 
@@ -72,9 +77,20 @@ class CandlestickPattern(BasePattern):
 
             detected = []
 
-            # --- Doji ---
+            # --- Doji (generic, dragonfly, gravestone) ---
             if body_pct <= doji_threshold:
-                if in_uptrend:
+                # Dragonfly doji: long lower shadow, tiny upper shadow
+                # Inherently bullish (buyers pushed price back up)
+                if lower_shadow >= bar_range * dragonfly_shadow_min and upper_shadow <= bar_range * doji_tiny_shadow_max:
+                    strength = 0.9 if in_downtrend else 0.6
+                    detected.append(("dragonfly_doji", "bullish", strength))
+                # Gravestone doji: long upper shadow, tiny lower shadow
+                # Inherently bearish (sellers pushed price back down)
+                elif upper_shadow >= bar_range * gravestone_shadow_min and lower_shadow <= bar_range * doji_tiny_shadow_max:
+                    strength = 0.9 if in_uptrend else 0.6
+                    detected.append(("gravestone_doji", "bearish", strength))
+                # Generic doji: shadows balanced or short
+                elif in_uptrend:
                     detected.append(("doji", "bearish", 0.7))
                 elif in_downtrend:
                     detected.append(("doji", "bullish", 0.7))
@@ -202,6 +218,8 @@ class CandlestickPattern(BasePattern):
         last = recent[-1]
         pattern_labels = {
             "doji": "Doji",
+            "dragonfly_doji": "Dragonfly Doji",
+            "gravestone_doji": "Gravestone Doji",
             "hammer": "Hammer",
             "hanging_man": "Hanging Man",
             "shooting_star": "Shooting Star",

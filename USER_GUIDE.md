@@ -457,7 +457,9 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 
 | Pattern | Criteria | Bullish/Bearish |
 |---------|----------|----------------|
-| **Doji** | Body size < 5% of bar range | Neutral (reversal hint) |
+| **Doji** | Body size < 5% of bar range, balanced shadows | Neutral (reversal hint based on trend) |
+| **Dragonfly Doji** | Doji with long lower shadow (≥ 60% of range), tiny upper shadow (≤ 10%) | Bullish (stronger when in downtrend) |
+| **Gravestone Doji** | Doji with long upper shadow (≥ 60% of range), tiny lower shadow (≤ 10%) | Bearish (stronger when in uptrend) |
 | **Hammer** | Small body at top, long lower shadow (≥ 2× body), in downtrend | Bullish reversal |
 | **Hanging Man** | Same shape as hammer, but in uptrend | Bearish reversal |
 | **Inverted Hammer** | Small body at bottom, long upper shadow, in downtrend | Bullish reversal |
@@ -467,7 +469,7 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | **Bullish Harami** | Current bullish bar's body contained within previous bearish bar's body | Bullish reversal |
 | **Bearish Harami** | Current bearish bar's body contained within previous bullish bar's body | Bearish reversal |
 
-**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish).
+**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish). Dragonfly and gravestone doji carry inherent directional bias from their shadow structure (dragonfly = bullish, gravestone = bearish), with higher strength when confirmed by the prevailing trend.
 
 **Default Parameters:**
 
@@ -476,6 +478,9 @@ All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0*
 | `doji_threshold` | 0.05 | Body/range ratio below this = doji |
 | `shadow_ratio` | 2.0 | Shadow must be this × body size for hammer/star |
 | `harami_body_ratio` | 0.5 | Current body must be ≤ previous body × this for harami |
+| `dragonfly_shadow_min` | 0.6 | Lower shadow must be ≥ range × this for dragonfly doji |
+| `gravestone_shadow_min` | 0.6 | Upper shadow must be ≥ range × this for gravestone doji |
+| `doji_tiny_shadow_max` | 0.1 | Opposite shadow must be ≤ range × this for dragonfly/gravestone |
 | `lookback` | 10 | Bars to search for recent patterns |
 | `trend_period` | 10 | Bars for trend direction detection |
 | `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
@@ -1164,6 +1169,9 @@ candlesticks:
   doji_threshold: 0.05
   shadow_ratio: 2.0
   harami_body_ratio: 0.5
+  dragonfly_shadow_min: 0.6
+  gravestone_shadow_min: 0.6
+  doji_tiny_shadow_max: 0.1
   lookback: 10
   trend_period: 10
   max_signal_strength: 3.0

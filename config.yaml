@@ -176,6 +176,9 @@ candlesticks:
   doji_threshold: 0.05        # body/range <= this = doji
   shadow_ratio: 2.0           # shadow must be >= body * this for hammer/star
   harami_body_ratio: 0.5      # current body must be <= prev body * this for harami
+  dragonfly_shadow_min: 0.6   # lower shadow must be >= range * this for dragonfly doji
+  gravestone_shadow_min: 0.6  # upper shadow must be >= range * this for gravestone doji
+  doji_tiny_shadow_max: 0.1   # opposite shadow must be <= range * this for dragonfly/gravestone
   lookback: 10                # recent bars to scan for patterns
   trend_period: 10            # EMA period for trend context
   max_signal_strength: 3.0    # net signal beyond this = full score
