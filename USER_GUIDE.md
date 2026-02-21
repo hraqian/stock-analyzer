@@ -44,8 +44,12 @@
     - 12.3 [Generating and Validating Config](#123-generating-and-validating-config)
 13. [Data Provider and Limitations](#13-data-provider-and-limitations)
 14. [Display and Output](#14-display-and-output)
-15. [Extending the Tool: Adding New Indicators](#15-extending-the-tool-adding-new-indicators)
-16. [Troubleshooting](#16-troubleshooting)
+15. [Graphical Dashboard (Streamlit)](#15-graphical-dashboard-streamlit)
+    - 15.1 [Running the Dashboard](#151-running-the-dashboard)
+    - 15.2 [Dashboard Features](#152-dashboard-features)
+    - 15.3 [Performance Notes](#153-performance-notes)
+16. [Extending the Tool: Adding New Indicators](#16-extending-the-tool-adding-new-indicators)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -1392,7 +1396,62 @@ The backtest display includes:
 
 ---
 
-## 15. Extending the Tool: Adding New Indicators
+## 15. Graphical Dashboard (Streamlit)
+
+The tool includes a browser-based graphical dashboard built with [Streamlit](https://streamlit.io/) and [Plotly](https://plotly.com/python/). It provides the same analysis and backtesting capabilities as the CLI, but with interactive charts and visual layouts that make config tuning easier.
+
+### 15.1 Running the Dashboard
+
+```bash
+# From the project directory:
+streamlit run dashboard.py
+
+# Or with full Python path if needed:
+/Users/aleqian/miniconda3/bin/python -m streamlit run dashboard.py
+```
+
+This opens the dashboard in your default browser (usually at `http://localhost:8501`).
+
+### 15.2 Dashboard Features
+
+**Sidebar Controls:**
+- **Ticker** — Enter any stock symbol (e.g., AAPL, TSLA, MSFT)
+- **Range mode** — Choose between Period (1mo, 3mo, 6mo, ...) or Custom dates (start/end date pickers)
+- **Interval** — All intervals from 1m to 3mo
+- **Objective preset** — Select long_term, short_term, day_trading, or none
+- **Run backtest** — Toggle backtesting on/off with trading mode selection
+
+**Analysis View:**
+1. **Header** — Ticker name, price, indicator composite score, pattern composite score
+2. **Candlestick Price Chart** — Interactive OHLCV chart with:
+   - Support/resistance levels (dashed lines)
+   - Volume bars (colored by direction)
+   - Indicator and pattern score time-series overlay (bottom panel)
+   - Threshold markers showing where LONG/SHORT/HOLD boundaries are
+3. **Indicator Breakdown Table** — Each indicator's value, detail, score (with progress bar), and weight
+4. **Pattern Signals Table** — Each pattern's signal, detail, score, and weight
+5. **Score Distribution Histogram** — Distribution of indicator and pattern scores over the full period, with threshold markers
+
+**Backtest View (when enabled):**
+1. **Suitability Assessment** — Trading mode, avg volume, ADX, ATR% metrics with reason explanations
+2. **Performance Metrics** — Total return, annualized return, max drawdown, Sharpe ratio, win rate, profit factor, etc.
+3. **Equity Curve Chart** — Strategy equity vs. buy-and-hold benchmark with:
+   - Entry markers (triangles for long/short)
+   - Exit markers (X symbols, colored by win/loss)
+   - Hover details for each trade
+4. **Strategy Configuration** — Expandable panel showing all active strategy parameters
+5. **Trade Log** — Full trade history in a scrollable table
+
+### 15.3 Performance Notes
+
+- **Data caching**: Results are cached for 5 minutes (`@st.cache_data(ttl=300)`). Changing any sidebar input automatically re-runs the computation.
+- **Score timeseries**: Computing scores at every bar is expensive. The dashboard samples at ~150 evenly-spaced points for responsiveness. For a 2-year daily dataset (~500 bars), this means scores are computed roughly every 3-4 bars.
+- **Backtest**: The backtest runs the same engine as the CLI — identical results are expected for the same inputs.
+- **Dashboard is read-only** (Phase 1): You cannot edit config parameters from the dashboard. Edit `config.yaml` directly and refresh the page.
+
+---
+
+## 16. Extending the Tool: Adding New Indicators
 
 The plugin architecture makes it straightforward to add new indicators without modifying any existing code.
 
@@ -1499,7 +1558,7 @@ All indicators inherit these from `BaseIndicator`:
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### "No data found for ticker"
 
