@@ -986,6 +986,19 @@ def main() -> None:
         st.subheader("Pattern Signals")
         render_pattern_table(result, cfg)
 
+    # Score legend
+    st.markdown(
+        f'<div style="text-align:center;font-size:0.85rem;padding:4px 0 8px 0;color:#aaa;">'
+        f'Score legend: '
+        f'<span style="color:{COLOR_BEARISH};font-weight:600;">0 – 3.5 Bearish</span>'
+        f'&nbsp;&nbsp;'
+        f'<span style="color:{COLOR_NEUTRAL};font-weight:600;">3.5 – 6.5 Neutral</span>'
+        f'&nbsp;&nbsp;'
+        f'<span style="color:{COLOR_BULLISH};font-weight:600;">6.5 – 10 Bullish</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     # ── Score Distribution ────────────────────────────────────────────────
     if score_df is not None and not score_df.empty:
         st.subheader("Score Distribution")
