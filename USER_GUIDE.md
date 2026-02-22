@@ -1,2005 +1,893 @@
-# Stock Technical Analysis Tool — User Guide
+# Stock Technical Analysis — User Guide
+
+Complete reference for the CLI tool, Streamlit dashboard, and every
+configurable parameter in `config.yaml`.
 
 ---
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
-2. [Installation](#2-installation)
-3. [Quick Start](#3-quick-start)
-4. [Command-Line Reference](#4-command-line-reference)
-5. [Technical Indicators](#5-technical-indicators)
-   - 5.1 [RSI (Relative Strength Index)](#51-rsi-relative-strength-index)
-   - 5.2 [MACD (Moving Average Convergence Divergence)](#52-macd-moving-average-convergence-divergence)
-   - 5.3 [Bollinger Bands](#53-bollinger-bands)
-   - 5.4 [Moving Averages](#54-moving-averages)
-   - 5.5 [Stochastic Oscillator](#55-stochastic-oscillator)
-   - 5.6 [ADX (Average Directional Index)](#56-adx-average-directional-index)
-   - 5.7 [Volume (OBV)](#57-volume-obv)
-   - 5.8 [Fibonacci Retracement](#58-fibonacci-retracement)
-6. [Pattern Signal Detection](#6-pattern-signal-detection)
-   - 6.1 [Gaps](#61-gaps)
-   - 6.2 [Candlesticks](#62-candlesticks)
-   - 6.3 [Volume-Range Correlation](#63-volume-range-correlation)
-   - 6.4 [Spikes](#64-spikes)
-   - 6.5 [Inside/Outside Bars](#65-insideoutside-bars)
-   - 6.6 [Pattern Composite Scoring](#66-pattern-composite-scoring)
-   - 6.7 [Adding New Patterns](#67-adding-new-patterns)
-7. [Composite Scoring System](#7-composite-scoring-system)
-8. [Support and Resistance Levels](#8-support-and-resistance-levels)
-9. [Backtesting Engine](#9-backtesting-engine)
-   - 9.1 [How Backtesting Works](#91-how-backtesting-works)
-   - 9.2 [Strategy: Signal Generation](#92-strategy-signal-generation)
-   - 9.3 [Position Management](#93-position-management)
-   - 9.4 [Risk Management](#94-risk-management)
-   - 9.5 [Performance Metrics](#95-performance-metrics)
-   - 9.6 [Market Regime Classification](#96-market-regime-classification)
-   - 9.7 [Regime-Adaptive Strategy](#97-regime-adaptive-strategy)
-10. [Trading Mode Suitability Detection](#10-trading-mode-suitability-detection)
-11. [Trading Objective Presets](#11-trading-objective-presets)
-    - 11.1 [Long-Term (Position Trading)](#111-long-term-position-trading)
-    - 11.2 [Short-Term (Swing Trading)](#112-short-term-swing-trading)
-    - 11.3 [Day Trading (Intraday)](#113-day-trading-intraday)
-    - 11.4 [Custom Presets](#114-custom-presets)
-12. [Configuration](#12-configuration)
-    - 12.1 [Config File Loading](#121-config-file-loading)
-    - 12.2 [Full Configuration Reference](#122-full-configuration-reference)
-    - 12.3 [Generating and Validating Config](#123-generating-and-validating-config)
-13. [Data Provider and Limitations](#13-data-provider-and-limitations)
-14. [Display and Output](#14-display-and-output)
-15. [Graphical Dashboard (Streamlit)](#15-graphical-dashboard-streamlit)
-    - 15.1 [Running the Dashboard](#151-running-the-dashboard)
-    - 15.2 [Dashboard Features](#152-dashboard-features)
-    - 15.3 [Performance Notes](#153-performance-notes)
-16. [Extending the Tool: Adding New Indicators](#16-extending-the-tool-adding-new-indicators)
-17. [Troubleshooting](#17-troubleshooting)
+1. [Quick Start](#quick-start)
+2. [CLI Reference](#cli-reference)
+3. [Streamlit Dashboard](#streamlit-dashboard)
+4. [Configuration Overview](#configuration-overview)
+5. [Indicator Parameters](#indicator-parameters)
+6. [Pattern Detector Parameters](#pattern-detector-parameters)
+7. [Composite Scoring](#composite-scoring)
+8. [Display Settings](#display-settings)
+9. [Strategy Parameters](#strategy-parameters)
+10. [Backtest Parameters](#backtest-parameters)
+11. [Market Regime Classification](#market-regime-classification)
+12. [Trading Mode Suitability](#trading-mode-suitability)
+13. [Objective Presets](#objective-presets)
+14. [Tips & Troubleshooting](#tips--troubleshooting)
 
 ---
 
-## 1. Overview
-
-The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects five types of pattern signals (also scored 0–10), classifies the market regime, calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with regime-adaptive strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
-
-**Key Features:**
-
-- **8 technical indicators** with configurable parameters, each scored 0 (strongly bearish) to 10 (strongly bullish)
-- **5 pattern signal detectors** — gaps, candlesticks, volume-range correlation, spikes, and inside/outside bars — scored independently from indicators
-- **Dual composite scoring** — separate indicator and pattern composite scores, combined via configurable weighted blend or gate mode
-- **Market regime classification** — detects Strong Trend, Mean-Reverting, Volatile/Choppy, or Breakout/Transition environments, adapting the backtest strategy accordingly
-- **Support/resistance detection** using pivot points and/or fractal analysis
-- **Backtesting engine** with bar-by-bar simulation, ATR-adaptive stops, trend confirmation, regime-adaptive strategy, slippage, and commission modeling
-- **Trading mode auto-detection** that determines whether a stock is suitable for long/short trading, long-only, or hold-only
-- **Trading objective presets** for long-term, short-term, and day trading — each overriding indicator periods, strategy thresholds, and weights
-- **Plugin architecture** — add new indicators or patterns by dropping a file into the `indicators/` or `patterns/` directory
-- **Fully configurable** via `config.yaml` — all scoring thresholds, weights, strategy parameters, indicator settings, and pattern parameters can be tuned without touching code
-
----
-
-## 2. Installation
-
-### Prerequisites
-
-- Python 3.10 or later
-- pip (Python package manager)
-
-### Steps
-
-1. Clone or download the project to your local machine.
-
-2. Install dependencies:
+## Quick Start
 
 ```bash
-pip install -r requirements.txt
-```
-
-The required packages are:
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| yfinance | >= 0.2.31 | Market data from Yahoo Finance |
-| pandas | >= 2.0.0 | Data manipulation |
-| numpy | >= 1.24.0 | Numerical computation |
-| ta | >= 0.11.0 | Technical analysis library |
-| rich | >= 13.0.0 | Terminal formatting and display |
-| pyyaml | >= 6.0.1 | YAML configuration parsing |
-| scipy | >= 1.11.0 | Scientific computation |
-
-3. (Optional) Generate a default configuration file:
-
-```bash
-python main.py --generate-config
-```
-
-This creates `config.yaml` in the current directory with all default settings.
-
----
-
-## 3. Quick Start
-
-### Basic Analysis
-
-Run a 6-month analysis (the default) for Apple:
-
-```bash
+# Basic analysis (6-month default)
 python main.py AAPL
-```
 
-Run a 1-year analysis for Tesla:
+# 2-year analysis
+python main.py TSLA --period 2y
 
-```bash
-python main.py TSLA --period 1y
-```
-
-Run analysis for a custom date range:
-
-```bash
-python main.py MSFT --start 2020-01-01 --end 2023-12-31
-```
-
-### Selective Indicators
-
-Run only RSI, MACD, and ADX:
-
-```bash
-python main.py AAPL --indicators rsi,macd,adx
-```
-
-### Backtesting
-
-Run a backtest over 2 years:
-
-```bash
+# Run a backtest
 python main.py AAPL --backtest --period 2y
-```
 
-Run a backtest with a specific trading mode:
+# Use a preset objective
+python main.py AAPL --objective long_term -b --period 5y
 
-```bash
-python main.py AAPL --backtest --mode long_only
-```
+# Day trading (requires intraday interval)
+python main.py AAPL -o day_trading -b -i 5m --start 2026-02-17
 
-### Objective Presets
-
-Use long-term indicator settings:
-
-```bash
-python main.py AAPL --objective long_term
-```
-
-Day trading backtest with 5-minute bars:
-
-```bash
-python main.py AAPL -o day_trading -b -i 5m --start 2026-02-10
+# Launch the interactive dashboard
+streamlit run dashboard.py
 ```
 
 ---
 
-## 4. Command-Line Reference
+## CLI Reference
 
 ```
-usage: stock_analyzer [-h] [--period PERIOD] [--interval INTERVAL]
-                      [--indicators LIST] [--start DATE] [--end DATE]
-                      [--backtest] [--mode MODE] [--objective NAME]
-                      [--config PATH] [--generate-config] [--validate-config]
-                      [--list-indicators]
-                      [TICKER]
+stock_analyzer [-h] [TICKER] [options]
 ```
 
-### Arguments
+### Positional argument
 
-| Argument | Short | Default | Description |
-|----------|-------|---------|-------------|
-| `TICKER` | — | *(required for analysis)* | Stock ticker symbol (e.g., `AAPL`, `TSLA`, `MSFT`). Not required for `--generate-config`, `--validate-config`, or `--list-indicators`. |
-| `--period` | `-p` | `6mo` | Data period to fetch. Options: `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `ytd`, `max`. |
-| `--interval` | `-i` | `1d` | Bar interval. **Daily+:** `1d`, `5d`, `1wk`, `1mo`, `3mo`. **Intraday:** `1m`, `2m`, `5m`, `15m`, `30m`, `60m`, `90m`, `1h`. |
-| `--indicators` | — | all | Comma-separated list of indicators to run (e.g., `rsi,macd,adx`). |
-| `--start` | `-s` | — | Start date in `YYYY-MM-DD` format. Overrides `--period` when specified. |
-| `--end` | `-e` | today | End date in `YYYY-MM-DD` format. Only used when `--start` is specified. |
-| `--backtest` | `-b` | off | Run a backtest using the score-based strategy. |
-| `--mode` | `-m` | — | Force trading mode for backtest: `auto`, `long_short`, `long_only`, `hold_only`. Overrides config. |
-| `--objective` | `-o` | — | Apply a trading objective preset (e.g., `long_term`, `short_term`, `day_trading`). |
-| `--config` | `-c` | — | Path to a custom `config.yaml` file. |
-| `--generate-config` | — | — | Generate a fresh default `config.yaml` in the current directory and exit. |
-| `--validate-config` | — | — | Validate `config.yaml` and report any issues, then exit. |
-| `--list-indicators` | — | — | List all available indicator keys and exit. |
-
-### Validation Rules
-
-- The `day_trading` objective requires an intraday interval (`-i 5m`, `-i 15m`, etc.). The tool will exit with an error if you use `day_trading` with a daily interval.
-- Intraday intervals with `--period` are validated against yfinance data limits (see [Section 13](#13-data-provider-and-limitations)).
-- `--end` requires `--start` to be specified.
-
----
-
-## 5. Technical Indicators
-
-All indicators produce a score from **0.0** (strongly bearish) to **10.0** (strongly bullish), with **5.0** being neutral. Every scoring parameter is configurable in `config.yaml`.
-
-### 5.1 RSI (Relative Strength Index)
-
-**What it measures:** A momentum oscillator (0–100) that measures the speed and magnitude of recent price changes to evaluate overbought or oversold conditions.
-
-**Interpretation:** Low RSI (oversold) suggests a potential bullish reversal opportunity, so it receives a high score. High RSI (overbought) suggests a potential bearish reversal, so it receives a low score.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | 14 | RSI lookback window (bars) |
-| `thresholds.oversold` | 30 | RSI below this is oversold |
-| `thresholds.overbought` | 70 | RSI above this is overbought |
-| `scores.oversold_score` | 9.0 | Score when RSI ≤ oversold |
-| `scores.overbought_score` | 1.0 | Score when RSI ≥ overbought |
-| `scores.neutral_score` | 5.0 | Score when RSI = 50 |
-
-**Scoring logic:**
-
-- RSI ≤ 30 → score 9.0
-- RSI 30–50 → linearly interpolated from 9.0 down to 5.0
-- RSI 50–70 → linearly interpolated from 5.0 down to 1.0
-- RSI ≥ 70 → score 1.0
-
-### 5.2 MACD (Moving Average Convergence Divergence)
-
-**What it measures:** A trend-following momentum indicator that shows the relationship between two exponential moving averages of price. The histogram (MACD line minus signal line) indicates momentum strength and direction.
-
-**Interpretation:** A positive histogram indicates bullish momentum; a negative histogram indicates bearish momentum. Recent crossovers (histogram changing sign) add conviction.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `fast_period` | 12 | Fast EMA period |
-| `slow_period` | 26 | Slow EMA period |
-| `signal_period` | 9 | Signal line EMA period |
-| `scoring.strong_bullish_pct` | 0.005 | Histogram > 0.5% of price → strong bullish |
-| `scoring.moderate_bullish_pct` | 0.001 | Histogram > 0.1% of price → moderate bullish |
-| `scoring.strong_bearish_pct` | -0.005 | Histogram < -0.5% of price → strong bearish |
-| `scoring.moderate_bearish_pct` | -0.001 | Histogram < -0.1% of price → moderate bearish |
-| `scoring.crossover_lookback` | 5 | Bars to check for recent crossover |
-| `scoring.bullish_cross_bonus` | 1.5 | Score bonus for bullish crossover |
-| `scoring.bearish_cross_penalty` | 1.5 | Score penalty for bearish crossover |
-
-**Scoring logic:**
-
-1. The histogram is normalized as a percentage of price.
-2. The normalized value is mapped to a base score across six linear zones (0–10 scale, with thresholds at the configured percentages).
-3. If a bullish crossover occurred within the lookback window (histogram went from negative to positive), +1.5 is added to the score.
-4. If a bearish crossover occurred, -1.5 is subtracted.
-5. The final score is clamped to [0, 10].
-
-### 5.3 Bollinger Bands
-
-**What it measures:** Volatility indicator using standard deviation bands around a simple moving average. The %B metric measures where the current price sits relative to the bands (0 = at lower band, 1 = at upper band).
-
-**Interpretation:** Price near the lower band suggests oversold conditions (high score); price near the upper band suggests overbought conditions (low score). A volatility squeeze (narrow bands) can signal an impending breakout.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | 20 | SMA period for the middle band |
-| `std_dev` | 2.0 | Standard deviations for band width |
-| `scoring.lower_zone` | 0.20 | %B below this → near support (score 7.5–9.5) |
-| `scoring.upper_zone` | 0.80 | %B above this → near resistance (score 0.5–2.5) |
-| `scoring.squeeze_threshold` | 0.02 | Band width / price below this = squeeze |
-
-**Scoring logic:**
-
-| %B Range | Score Range |
+| Argument | Description |
 |----------|-------------|
-| ≤ 0.0 (below lower band) | 9.5 |
-| 0.0 – 0.20 | 9.5 → 7.5 |
-| 0.20 – 0.50 | 7.5 → 5.0 |
-| 0.50 – 0.80 | 5.0 → 2.5 |
-| 0.80 – 1.0 | 2.5 → 0.5 |
-| > 1.0 (above upper band) | 0.5 |
+| `TICKER` | Stock ticker symbol (e.g. `AAPL`, `TSLA`). Optional when using utility flags. |
 
-### 5.4 Moving Averages
+### Analysis options
 
-**What it measures:** Trend direction and strength based on the price's position relative to multiple moving averages (SMA or EMA), the alignment of the averages with each other, and the occurrence of golden/death crosses.
-
-**Interpretation:** Price above all MAs with bullish alignment (shorter MA > longer MA) is strongly bullish. A golden cross (50-day MA crossing above 200-day MA) adds conviction; a death cross subtracts.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `periods` | [20, 50, 200] | MA periods to compute |
-| `type` | "sma" | "sma" or "ema" |
-| `scoring.price_above_ma_points` | 1.5 | Points per MA that price is above |
-| `scoring.ma_aligned_bullish_points` | 1.0 | Points per consecutive bullish alignment |
-| `scoring.golden_cross_bonus` | 2.0 | Bonus for golden cross within lookback |
-| `scoring.death_cross_penalty` | 2.0 | Penalty for death cross within lookback |
-| `scoring.cross_lookback` | 10 | Bars to search for golden/death cross |
-| `scoring.max_raw_score` | 9.5 | Maximum score before normalization |
-
-**Scoring logic:**
-
-1. Start at 0 raw points.
-2. Add 1.5 points for each MA that the current price is above.
-3. Add 1.0 point for each consecutive pair of MAs in bullish alignment (shorter > longer).
-4. Add 2.0 for a golden cross; subtract 2.0 for a death cross.
-5. Compute the theoretical maximum possible raw score.
-6. Normalize: `score = (raw / theoretical_max) × 9.5`, clamped to [0, 10].
-
-> **Note:** When data is too short for a given MA (e.g., 6 months of data is insufficient for SMA-200), that MA is shown as "N/A" and excluded from scoring.
-
-### 5.5 Stochastic Oscillator
-
-**What it measures:** A momentum indicator that compares a stock's closing price to its high-low range over a period. %K is the fast line (0–100); %D is the smoothed signal line.
-
-**Interpretation:** Like RSI — low values (oversold) score high; high values (overbought) score low. Crossovers of %K above/below %D add/subtract conviction.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `k_period` | 14 | %K lookback period |
-| `d_period` | 3 | %D smoothing period |
-| `smooth_k` | 3 | Additional %K smoothing |
-| `thresholds.oversold` | 20 | %K below this is oversold |
-| `thresholds.overbought` | 80 | %K above this is overbought |
-| `scores.oversold_score` | 9.0 | Score at oversold |
-| `scores.overbought_score` | 1.0 | Score at overbought |
-| `scores.neutral_score` | 5.0 | Score at midpoint |
-| `scores.bullish_cross_bonus` | 1.0 | Bonus when %K crosses above %D |
-| `scores.bearish_cross_penalty` | 1.0 | Penalty when %K crosses below %D |
-
-### 5.6 ADX (Average Directional Index)
-
-**What it measures:** Trend strength (ADX value) and trend direction (+DI vs. -DI). ADX itself only measures *how strong* a trend is, not its direction. The directional indicators (+DI and -DI) determine whether bulls or bears are dominant.
-
-**Interpretation:** The score combines direction (+DI vs. -DI spread) with a strength multiplier (ADX value). In a strong uptrend (+DI >> -DI, high ADX), the score is high. In a strong downtrend, it is low. In a weak/trendless market, the score is pulled toward 5.0 (neutral).
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | 14 | ADX/DI calculation period |
-| `thresholds.weak` | 20 | ADX below this → weak trend |
-| `thresholds.moderate` | 40 | ADX 20–40 → moderate trend |
-| `scoring.weak_multiplier` | 0.6 | Multiplier for weak trends |
-| `scoring.moderate_multiplier` | 0.85 | Multiplier for moderate trends |
-| `scoring.strong_multiplier` | 1.0 | Multiplier for strong trends |
-| `scoring.max_directional_spread` | 25 | +DI − -DI spread for full score |
-
-**Scoring logic:**
-
-1. Compute a directional score from the DI spread: linear interpolation from 0 to 10 based on `(+DI − -DI)` ranging from `-25` to `+25`.
-2. Determine a multiplier based on ADX value (0.6 for weak, up to 1.0 for strong).
-3. Final score: `5.0 + (directional_score − 5.0) × multiplier`. This pulls the score toward 5.0 in trendless markets and allows full directional expression in strong trends.
-
-### 5.7 Volume (OBV)
-
-**What it measures:** On-Balance Volume (OBV) trends relative to price trends. OBV adds volume on up days and subtracts on down days, creating a cumulative volume flow indicator.
-
-**Interpretation:** When OBV confirms the price trend (both rising or both falling), the volume supports the move, producing a strong directional score. When OBV diverges from price, the score is neutral (5.0), suggesting the move may lack conviction.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `obv_trend_period` | 20 | EMA period for OBV trend |
-| `price_trend_period` | 20 | EMA period for price trend |
-| `scoring.confirmation_bullish_max` | 9.5 | Strong bullish confirmation score |
-| `scoring.confirmation_bullish_min` | 6.5 | Weak bullish confirmation score |
-| `scoring.confirmation_bearish_max` | 3.5 | Weak bearish confirmation score |
-| `scoring.confirmation_bearish_min` | 0.5 | Strong bearish confirmation score |
-| `scoring.divergence_score` | 5.0 | Score when OBV diverges from price |
-| `scoring.obv_strong_change_pct` | 10.0 | OBV change ≥ 10% → strong reading |
-| `scoring.obv_weak_change_pct` | 1.0 | OBV change ≤ 1% → weak reading |
-
-**Scoring logic:**
-
-- If OBV and price trends **diverge**: score = 5.0.
-- If both are **rising** (bullish confirmation): score scaled from 6.5 to 9.5 based on OBV change magnitude (1%–10%).
-- If both are **falling** (bearish confirmation): score scaled from 3.5 to 0.5 based on OBV change magnitude.
-
-### 5.8 Fibonacci Retracement
-
-**What it measures:** Where the current price sits relative to Fibonacci retracement levels calculated from the swing high/low over the lookback period.
-
-**Interpretation:** Shallow retracements (near 0.236) suggest the prior trend is still strong (bullish score). Deep retracements (near 0.786) suggest the trend may be reversing (bearish score). If price is not near any specific Fibonacci level, scoring falls back to the overall position within the swing range.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `swing_lookback` | 60 | Bars to find swing high/low |
-| `levels` | [0.236, 0.382, 0.5, 0.618, 0.786] | Fibonacci retracement levels |
-| `scoring.proximity_pct` | 0.015 | Within 1.5% of a level = "at that level" |
-| `scoring.level_scores` | {0.236: 8.0, 0.382: 7.0, 0.5: 5.0, 0.618: 3.0, 0.786: 1.5} | Score per level |
-| `scoring.no_level_score` | 5.0 | Default when not near any level |
-| `scoring.range_low_score` | 2.0 | Score at bottom of swing range |
-| `scoring.range_high_score` | 8.0 | Score at top of swing range |
-
-**Scoring logic:**
-
-1. If price is within 1.5% of a Fibonacci level, return that level's score (e.g., near 0.236 → 8.0, near 0.618 → 3.0).
-2. If not near any level, compute the price's position within the swing range (0 = swing low, 1 = swing high) and linearly interpolate from 2.0 (bottom) to 8.0 (top).
-
----
-
-## 6. Pattern Signal Detection
-
-Patterns form a **second scoring axis** alongside the indicator composite. While indicators measure *where the stock is* (overbought, trending, near support), patterns measure *what just happened* (a gap, a reversal candle, a volume spike). The two systems are scored independently and combined in the strategy layer.
-
-All pattern detectors produce a score from **0.0** (strongly bearish) to **10.0** (strongly bullish), with **5.0** meaning no pattern detected or neutral. Every parameter is configurable in `config.yaml`.
-
-### 6.1 Gaps
-
-**What it detects:** Price gaps between consecutive bars — where the open of one bar is meaningfully above or below the close of the previous bar.
-
-**Gap classification:**
-
-| Type | Criteria | Significance |
-|------|----------|-------------|
-| **Breakaway** | Gap with volume surge AND trend-aligned direction | Strong trend initiation signal |
-| **Runaway** | Gap in the direction of the existing trend (no volume surge needed) | Trend continuation |
-| **Exhaustion** | Gap against the current trend | Possible trend reversal |
-| **Common** | Gap with low volume, no clear trend context | Low significance |
-
-**Scoring logic:** Recent gaps (within the lookback window) are weighted by recency (more recent = higher weight) and type weight. Bullish gaps push the score above 5.0; bearish gaps push below. The `max_signal_strength` config caps the maximum deviation from neutral.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `lookback` | 20 | Bars to search for gaps |
-| `min_gap_pct` | 0.005 | Minimum gap size (0.5% of price) to qualify |
-| `volume_surge_mult` | 1.5 | Volume must be this × average for breakaway |
-| `trend_period` | 20 | Period for determining trend direction |
-| `type_weights` | common: 0.3, runaway: 0.7, breakaway: 1.0, exhaustion: 0.5 | Weight per gap type |
-| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
-
-### 6.2 Candlesticks
-
-**What it detects:** Classic single-bar, two-bar, and three-bar candlestick patterns, interpreted in context of the prevailing trend direction.
-
-**Detected patterns:**
-
-| Pattern | Criteria | Bullish/Bearish |
-|---------|----------|----------------|
-| **Doji** | Body size < 5% of bar range, balanced shadows | Neutral (reversal hint based on trend) |
-| **Dragonfly Doji** | Doji with long lower shadow (≥ 60% of range), tiny upper shadow (≤ 10%) | Bullish (stronger when in downtrend) |
-| **Gravestone Doji** | Doji with long upper shadow (≥ 60% of range), tiny lower shadow (≤ 10%) | Bearish (stronger when in uptrend) |
-| **Hammer** | Small body at top, long lower shadow (≥ 2× body), in downtrend | Bullish reversal |
-| **Hanging Man** | Same shape as hammer, but in uptrend | Bearish reversal |
-| **Inverted Hammer** | Small body at bottom, long upper shadow, in downtrend | Bullish reversal |
-| **Shooting Star** | Same shape as inverted hammer, but in uptrend | Bearish reversal |
-| **Bullish Marubozu** | Bullish bar with body ≥ 90% of range, each shadow ≤ 5% | Bullish (strong conviction) |
-| **Bearish Marubozu** | Bearish bar with body ≥ 90% of range, each shadow ≤ 5% | Bearish (strong conviction) |
-| **Bullish Engulfing** | Current bar's body fully engulfs previous bar's body, current is up | Bullish reversal |
-| **Bearish Engulfing** | Current bar's body fully engulfs previous bar's body, current is down | Bearish reversal |
-| **Bullish Harami** | Current bullish bar's body contained within previous bearish bar's body | Bullish reversal |
-| **Bearish Harami** | Current bearish bar's body contained within previous bullish bar's body | Bearish reversal |
-| **Tweezer Top** | Two consecutive bars with matching highs in an uptrend | Bearish reversal |
-| **Tweezer Bottom** | Two consecutive bars with matching lows in a downtrend | Bullish reversal |
-| **Morning Star** | Bearish bar → small-body bar → bullish bar that closes above bar 1 midpoint | Bullish reversal (3-bar) |
-| **Evening Star** | Bullish bar → small-body bar → bearish bar that closes below bar 1 midpoint | Bearish reversal (3-bar) |
-| **Three White Soldiers** | Three consecutive strong bullish bars, each opening within prior body, closing higher | Bullish continuation (3-bar) |
-| **Three Black Crows** | Three consecutive strong bearish bars, each opening within prior body, closing lower | Bearish continuation (3-bar) |
-
-**Context awareness:** Trend direction (computed over `trend_period` bars) determines whether a pattern is a reversal signal. A hammer in a downtrend is bullish; the same shape in an uptrend is a hanging man (bearish). Dragonfly and gravestone doji carry inherent directional bias from their shadow structure (dragonfly = bullish, gravestone = bearish), with higher strength when confirmed by the prevailing trend. Marubozu patterns are stronger when trend-aligned (continuation). Tweezer patterns require the trend to be in the right direction (tweezer top needs uptrend, bottom needs downtrend). Morning/evening star and three soldiers/crows are strongest as reversal signals in the opposing trend.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `doji_threshold` | 0.05 | Body/range ratio below this = doji |
-| `shadow_ratio` | 2.0 | Shadow must be this × body size for hammer/star |
-| `harami_body_ratio` | 0.5 | Current body must be ≤ previous body × this for harami |
-| `dragonfly_shadow_min` | 0.6 | Lower shadow must be ≥ range × this for dragonfly doji |
-| `gravestone_shadow_min` | 0.6 | Upper shadow must be ≥ range × this for gravestone doji |
-| `doji_tiny_shadow_max` | 0.1 | Opposite shadow must be ≤ range × this for dragonfly/gravestone |
-| `marubozu_body_min` | 0.90 | Body must fill ≥ this fraction of bar range for marubozu |
-| `marubozu_shadow_max` | 0.05 | Each shadow must be ≤ this fraction of bar range for marubozu |
-| `tweezer_tolerance` | 0.002 | Highs/lows match within this fraction of price for tweezer |
-| `star_middle_body_max` | 0.30 | Middle bar body must be ≤ this fraction of range for morning/evening star |
-| `soldiers_body_min` | 0.60 | Each bar body must be ≥ this fraction of range for 3 soldiers/crows |
-| `soldiers_shadow_max` | 0.30 | Upper/lower shadow must be ≤ this fraction of range for 3 soldiers/crows |
-| `lookback` | 10 | Bars to search for recent patterns |
-| `trend_period` | 10 | Bars for trend direction detection |
-| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
-
-### 6.3 Volume-Range Correlation
-
-**What it detects:** The relationship between price range (high - low) and volume, identifying expansion, contraction, and divergence regimes.
-
-**Regimes:**
-
-| Regime | Condition | Interpretation |
-|--------|-----------|----------------|
-| **Expansion** | Both range and volume above average | Strong directional move with conviction |
-| **Contraction** | Both range and volume below average | Consolidation / indecision |
-| **Divergence** | Range and volume disagree (one high, one low) | Move may lack conviction |
-
-**Scoring:** Expansion during a bullish move scores high; expansion during a bearish move scores low. Contraction and divergence score near 5.0 (neutral).
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | 20 | Lookback for average range and volume |
-| `expansion_threshold` | 1.5 | Ratio above this = expansion |
-| `contraction_threshold` | 0.6 | Ratio below this = contraction |
-| `lookback` | 10 | Bars to analyze for current regime |
-| `scoring.expansion_bull` | 8.0 | Score for bullish expansion |
-| `scoring.expansion_bear` | 2.0 | Score for bearish expansion |
-| `scoring.contraction` | 5.0 | Score for contraction |
-| `scoring.divergence` | 5.0 | Score for divergence |
-
-### 6.4 Spikes
-
-**What it detects:** Abnormal price moves (z-score > threshold), then classifies them as confirmed breakouts or failed traps.
-
-**Detection logic:**
-
-1. Compute a z-score of the current bar's return vs. rolling mean/std.
-2. If z-score exceeds `spike_std` (default 2.5), a spike is detected.
-3. **Confirmation:** If price holds above/below the spike level for `confirm_bars` (default 3) bars, the move is confirmed.
-4. **Trap:** If price reverses back through the spike level, it's classified as a failed breakout. Traps generate an *inverse* signal (bullish spike that fails = bearish signal).
-
-**Scoring:** Confirmed bullish spikes push the score above 5.0; confirmed bearish spikes push below. Traps push the score in the opposite direction. The `trap_weight` config controls how strongly traps influence the score.
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `period` | 20 | Lookback for mean/std of returns |
-| `spike_std` | 2.5 | Z-score threshold for spike detection |
-| `confirm_bars` | 3 | Bars to wait for confirmation |
-| `confirm_pct` | 0.5 | Price must hold this % of spike move |
-| `lookback` | 20 | Bars to search for recent spikes |
-| `trap_weight` | 0.7 | How strongly traps influence score (0-1) |
-| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
-
-### 6.5 Inside/Outside Bars
-
-**What it detects:** Structural bar patterns based on range containment or expansion between consecutive bars.
-
-**Detected patterns:**
-
-| Pattern | Criteria | Bullish/Bearish |
-|---------|----------|----------------|
-| **Inside Bar (Bullish)** | Current bar range contained within prior bar range, followed by upward breakout | Bullish (breakout setup) |
-| **Inside Bar (Bearish)** | Current bar range contained within prior bar range, followed by downward breakout | Bearish (breakout setup) |
-| **Inside Bar (Pending)** | Current bar range contained within prior bar range, no breakout yet | Neutral (consolidation) |
-| **Outside Bar (Bullish)** | Current bar range engulfs prior bar range, closes bullish | Bullish (volatility expansion) |
-| **Outside Bar (Bearish)** | Current bar range engulfs prior bar range, closes bearish | Bearish (volatility expansion) |
-
-**Inside Bar logic:** An inside bar signals consolidation — price is compressing. The breakout direction determines the signal. The detector checks `breakout_bars` subsequent bars (default 3) for a break above the prior high (bullish) or below the prior low (bearish). If no breakout has occurred yet, the pattern is marked as pending with minimal signal contribution.
-
-**Outside Bar logic:** An outside bar (also called an engulfing range bar) signals volatility expansion. Unlike engulfing candlestick patterns that compare bodies, this compares full bar ranges (high-to-low). The current bar's range must exceed the prior bar's range by `outside_range_min` (default 1.2×). The close direction determines the signal. Outside bars are stronger as reversal signals (bullish close in downtrend or bearish close in uptrend).
-
-**Default Parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `lookback` | 20 | Bars to search for recent patterns |
-| `trend_period` | 10 | EMA period for trend context |
-| `breakout_bars` | 3 | Bars after inside bar to check for breakout |
-| `outside_range_min` | 1.2 | Current range / prior range must ≥ this for outside bar |
-| `max_signal_strength` | 3.0 | Max score deviation from 5.0 |
-
-### 6.6 Pattern Composite Scoring
-
-Pattern scores are combined into a weighted composite, independent of the indicator composite.
-
-**Default Pattern Weights:**
-
-| Pattern | Weight |
-|---------|--------|
-| Gaps | 0.20 |
-| Volume-Range | 0.25 |
-| Candlesticks | 0.25 |
-| Spikes | 0.15 |
-| Inside/Outside Bars | 0.15 |
-
-Weights are normalized to sum to 1.0, just like indicator weights.
-
-**How patterns combine with indicators in the strategy:**
-
-The strategy supports three combination modes (configured in the `strategy` section):
-
-#### Weighted Mode (default)
-
-```
-effective_score = (indicator_weight × indicator_composite + pattern_weight × pattern_composite) / (indicator_weight + pattern_weight)
-```
-
-The effective score is then used with the normal threshold logic (fixed or percentile) to generate BUY/SELL/HOLD signals.
-
-Default weights: indicator 70%, pattern 30%. Objective presets adjust these (e.g., day_trading uses 50/50).
-
-**Caveat:** When no patterns fire (most of the time), `pattern_score = 5.0`, and the blend dilutes the indicator signal toward neutral. For example, `0.7 × 7.0 + 0.3 × 5.0 = 6.4` — the strong indicator signal of 7.0 gets pulled down. See Boost Mode below for an alternative.
-
-#### Gate Mode
-
-Both scores must independently pass their thresholds:
-
-- **BUY** requires: indicator score > `gate_indicator_min` AND pattern score > `gate_pattern_min`
-- **SELL** requires: indicator score < `gate_indicator_max` AND pattern score < `gate_pattern_max`
-- Otherwise: **HOLD**
-
-Gate mode is more conservative — it only trades when both systems agree. The downside is that it misses indicator-only signals entirely (when no patterns are active, pattern score ≈ 5.0, which won't pass the gate).
-
-#### Boost Mode
-
-Indicator score is the base signal that always passes through. Patterns only amplify or dampen it when active.
-
-```
-if abs(pattern_score - 5.0) <= boost_dead_zone:
-    effective_score = indicator_score              # no pattern activity → pass through
-else:
-    effective_deviation = (pattern_score - 5.0) - dead_zone_sign
-    boost = effective_deviation × boost_strength
-    effective_score = clamp(indicator_score + boost, 0, 10)
-```
-
-- **Dead zone** (default ±0.3 around 5.0): pattern scores between 4.7 and 5.3 are treated as "no pattern activity" and the indicator score is used as-is.
-- **Boost strength** (default 0.5): multiplier on the pattern deviation. Higher values make patterns more influential when they do fire.
-- The boost ramps smoothly from the dead zone edge, so there's no discontinuity.
-
-**Example:** indicator=6.0, pattern=7.5 → deviation=2.5, effective=2.2 (after dead zone), boost=1.1 → effective_score=7.1
-**Example:** indicator=6.0, pattern=5.1 → deviation=0.1, within dead zone → effective_score=6.0 (unchanged)
-
-Boost mode is recommended when you want indicators to drive decisions while patterns add conviction only when they fire. The `day_trading` preset overrides `boost_strength: 0.7` and `boost_dead_zone: 0.2` (stronger boost, narrower dead zone) since patterns are more meaningful on intraday data.
-
-**Configuration:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `combination_mode` | "weighted" | "weighted", "gate", or "boost" |
-| `indicator_weight` | 0.7 | Indicator weight in blended score (weighted mode) |
-| `pattern_weight` | 0.3 | Pattern weight in blended score (weighted mode) |
-| `gate_indicator_min` | 5.5 | Indicator must exceed this for BUY (gate mode) |
-| `gate_indicator_max` | 4.5 | Indicator must be below this for SELL (gate mode) |
-| `gate_pattern_min` | 5.5 | Pattern must exceed this for BUY (gate mode) |
-| `gate_pattern_max` | 4.5 | Pattern must be below this for SELL (gate mode) |
-| `boost_strength` | 0.5 | Multiplier for pattern deviation (boost mode) |
-| `boost_dead_zone` | 0.3 | Pattern score within 5.0 ± this → no boost (boost mode) |
-
-### 6.7 Adding New Patterns
-
-The pattern plugin architecture mirrors the indicator architecture. To add a new pattern:
-
-1. Create `patterns/my_pattern.py`
-2. Subclass `BasePattern` and implement `detect()`, `score()`, `summary()`
-3. Set class attributes: `name`, `config_key`
-4. Add configuration in `config.yaml` and `config.py`
-5. Add a weight in `overall_patterns.weights`
-
-The `PatternRegistry` auto-discovers the new class — no other code changes needed. See [Section 15](#15-extending-the-tool-adding-new-indicators) for the equivalent indicator walkthrough.
-
----
-
-## 7. Composite Scoring System
-
-The composite score is a **weighted average** of all indicator scores.
-
-### Default Weights
-
-| Indicator | Weight |
-|-----------|--------|
-| RSI | 0.15 |
-| MACD | 0.15 |
-| Bollinger Bands | 0.10 |
-| Moving Averages | 0.20 |
-| Stochastic | 0.10 |
-| ADX | 0.10 |
-| Volume (OBV) | 0.10 |
-| Fibonacci | 0.10 |
-
-Weights are automatically **normalized** to sum to 1.0. If you change a single weight, all others adjust proportionally.
-
-### Score Distribution
-
-Because the composite score is an average of eight indicators, its variance is naturally lower than individual indicators. Typical composite scores range from roughly **3.5 to 6.5**. This is expected behavior — the strategy thresholds (see [Section 9.2](#92-strategy-signal-generation)) are calibrated for this narrower range.
-
-### Interpreting the Score
-
-| Score Range | Interpretation | Color |
-|-------------|---------------|-------|
-| 0.0 – 3.5 | Bearish | Red |
-| 3.5 – 6.5 | Neutral | Yellow |
-| 6.5 – 10.0 | Bullish | Green |
-
-> **Important:** The composite score shows the current technical posture of the stock. It is not a recommendation. Recommendations only emerge through the backtesting strategy system.
-
----
-
-## 8. Support and Resistance Levels
-
-The tool identifies key price levels where the stock has historically found support (price floor) or resistance (price ceiling).
-
-### Detection Methods
-
-**Pivot Points** — Classic calculation using the last completed bar's High, Low, and Close:
-- Pivot (P) = (H + L + C) / 3
-- Support levels: S1, S2, S3 (calculated below pivot)
-- Resistance levels: R1, R2, R3 (calculated above pivot)
-
-**Fractal Analysis** — Detects local extrema (swing highs and lows) over the lookback window:
-- A local high is confirmed when it is the highest point within N bars on each side.
-- A local low is confirmed when it is the lowest point within N bars on each side.
-
-**Both** (default) — Combines pivot and fractal methods, then clusters nearby levels.
-
-### Clustering
-
-Levels within 1.5% of each other are merged into a single cluster. The cluster's price is the average of its constituent levels, and the number of constituent levels is reported as "touches" (more touches = stronger level).
-
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `method` | "both" | "pivot", "fractal", or "both" |
-| `fractal_lookback` | 60 | Bars for fractal detection |
-| `fractal_order` | 5 | Bars on each side for local extremum |
-| `num_levels` | 4 | Support and resistance levels to display |
-| `cluster_pct` | 0.015 | Merge levels within 1.5% |
-| `min_touches` | 1 | Minimum touches to confirm a level |
-
----
-
-## 9. Backtesting Engine
-
-The backtesting engine simulates trading a score-based strategy over historical data to evaluate how well the indicator system would have performed.
-
-### 9.1 How Backtesting Works
-
-1. **Data Fetch:** The full historical OHLCV dataset is loaded for the specified period/date range and interval.
-2. **Warmup Period:** The first N bars (default: 200) are used to initialize indicator calculations. No trades are executed during warmup. **Proportional warmup** automatically reduces this if the dataset is short — warmup cannot exceed `max_warmup_ratio` (default 50%) of total bars, with a hard floor of 20 bars. This prevents warmup from consuming all available data on short periods like `6mo`.
-3. **Bar-by-Bar Simulation:** Starting after warmup, the engine processes each bar sequentially:
-   - Check stop-loss, take-profit, and ATR-adaptive stops on every bar.
-   - Every N bars (the rebalance interval), re-compute all indicators, the composite score, and re-classify the market regime.
-   - Generate a trade signal (BUY, SELL, or HOLD) based on the score, with regime-specific adaptations and trend confirmation filtering.
-   - Execute the trade order with simulated slippage and commission.
-4. **Final Close:** Any open position at the end of the data is closed automatically.
-5. **Metrics:** Performance statistics are calculated from the equity curve and trade history.
-
-> **No Look-Ahead Bias:** At each bar, the engine only uses data up to and including that bar. It never looks at future prices. Regime classification uses the trailing data window, not the full dataset.
-
-**Proportional Warmup Configuration:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `warmup_bars` | 200 | Base warmup period (bars) |
-| `max_warmup_ratio` | 0.5 | Warmup cannot exceed this fraction of total bars |
-
-### 9.2 Strategy: Signal Generation
-
-The score-based strategy supports two threshold modes:
-
-#### Fixed Mode (default)
-
-The composite score is compared directly against fixed thresholds:
-
-| Composite Score | Signal |
-|----------------|--------|
-| ≤ 3.5 | **SELL** (enter short or close long) |
-| 3.5 – 6.5 | **HOLD** (maintain current position) |
-| > 6.5 | **BUY** (enter long or close short) |
-
-#### Percentile Mode
-
-Instead of fixed thresholds, the strategy ranks the current score against a rolling window of recent scores:
-
-| Percentile Rank | Signal |
-|----------------|--------|
-| ≤ 25th percentile | **SELL** |
-| ≥ 75th percentile | **BUY** |
-| In between | **HOLD** |
-
-Percentile mode is **self-calibrating** — it adapts to each stock's actual score distribution. If the rolling window has insufficient data (< 80% of the required samples), it falls back to fixed thresholds.
-
-**Configuration:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `threshold_mode` | "fixed" | "fixed" or "percentile" |
-| `score_thresholds.short_below` | 3.5 | Fixed: SELL when score ≤ this |
-| `score_thresholds.hold_below` | 6.5 | Fixed: HOLD when score ≤ this; BUY above |
-| `percentile_thresholds.short_percentile` | 25 | Percentile: SELL at or below this rank |
-| `percentile_thresholds.long_percentile` | 75 | Percentile: BUY at or above this rank |
-| `percentile_thresholds.lookback_bars` | 60 | Rolling window size |
-
-#### Trend Confirmation Filter
-
-After the score-based signal is generated, a **trend confirmation filter** can prevent entries against the short-term trend. This reduces whipsaw trades where the score says BUY but the price is falling.
-
-**How it works:** An EMA of the configured period is computed. When the strategy generates a new BUY signal (no existing position), the signal is converted to HOLD if the current price is below the trend EMA. Likewise, a new SELL signal is converted to HOLD if price is above the trend EMA. Existing positions are not affected — the filter only gates new entries.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `trend_confirm_enabled` | true | Enable trend confirmation on new entries |
-| `trend_confirm_period` | 20 | EMA period for the trend filter |
-
-Objective presets adjust the confirmation period: `long_term` uses 50 (slower confirmation), `short_term` and `day_trading` use 10 (faster).
-
-#### Re-entry Grace Period
-
-After a position is force-closed (by stop-loss, take-profit, or trailing stop), the trend confirmation filter is temporarily bypassed for `reentry_grace_bars` bars. This allows faster re-entry in trending markets — without the grace period, a stop-out during a brief pullback could prevent the strategy from re-entering because price is temporarily below the trend EMA, causing it to miss the subsequent recovery.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `reentry_grace_bars` | 10 | Bars after a forced exit during which trend confirmation is skipped |
-
-### 9.3 Position Management
-
-**Position Sizing:**
-
-| Mode | Default | Description |
+| Flag | Default | Description |
 |------|---------|-------------|
-| `"percent_equity"` | 80% of equity | Allocates a fraction of portfolio value per trade |
-| `"fixed"` | 100 shares | Fixed number of shares per trade |
-
-**Slippage and Commission:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `slippage_pct` | 0.001 (0.1%) | Price slippage applied against the trader (buys fill higher, sells fill lower) |
-| `commission_per_trade` | 0.0 | Flat fee per trade |
-
-**Rebalance Interval:**
-
-The strategy only re-evaluates (re-runs all indicators and generates a new signal) every N bars. Between rebalance points, the only actions are stop-loss and take-profit checks.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `rebalance_interval` | 5 | Re-score every N bars |
-
-### 9.4 Risk Management
-
-**Fixed Stop-Loss and Take-Profit** are checked on every bar (not just rebalance bars):
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `stop_loss_pct` | 0.05 (5%) | Close position if unrealized loss exceeds this |
-| `take_profit_pct` | 0.50 (50%) | Close position if unrealized gain exceeds this (disabled in strong_trend regime) |
-
-#### ATR-Adaptive Stop Loss
-
-Instead of using a fixed percentage stop, the engine can compute a **volatility-adjusted stop** based on the stock's Average True Range (ATR) at the time of entry. This automatically gives wider stops to volatile stocks and tighter stops to stable ones.
-
-**How it works:**
-
-1. When a position is opened, the current ATR value is recorded.
-2. The ATR stop distance is computed as: `atr_stop = atr_stop_multiplier × entry_atr / entry_price`.
-3. The effective stop is the **wider** of the fixed `stop_loss_pct` and the ATR-derived stop: `max(fixed_%, atr_stop)`. The fixed stop acts as a safety floor — the ATR stop can make the stop wider for volatile stocks, but the position always has at least the fixed percentage as a minimum stop distance.
-4. In the **Volatile/Choppy** regime (see [Section 9.7](#97-regime-adaptive-strategy)), the effective stop is widened by a configurable multiplier to avoid premature stop-outs from noisy price action.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `atr_stop_enabled` | true | Use ATR-based stop in combination with fixed % |
-| `atr_stop_multiplier` | 3.0 | Stop distance = max(fixed %, N x ATR at entry time) |
-| `atr_stop_period` | 14 | ATR calculation period |
-
-Objective presets adjust the multiplier: `long_term` uses 3.0 (wider), `short_term` uses 2.0 (tighter), `day_trading` uses 1.5 (tightest) with a shorter ATR period of 10.
-
-#### Trailing Stop
-
-When the regime's strategy adaptation enables a trailing stop (e.g., in Strong Trend), the engine tracks the **high-water mark** of the position — the best unrealized P&L reached since entry. The trailing stop distance is computed as `trailing_stop_atr_mult × ATR_at_entry / entry_price`. If the position's unrealized gain retraces beyond this distance from the high-water mark, the position is closed.
-
-The high-water mark resets each time a new position is opened. The trailing stop interacts with the fixed `stop_loss_pct` — whichever triggers first closes the position. For AAPL 5y, the trailing stop at 4.0×ATR was the primary exit mechanism (13 out of 15 exits).
-
-> **Note:** Widening the trailing stop beyond 4.0×ATR was tested and made performance worse, because the fixed `stop_loss_pct` (5%) becomes the binding constraint — trades hit the fixed stop at deeper losses before the wider trailing stop can activate.
-
-#### Consecutive Loss Cooldown
-
-After repeated losing trades, the strategy tightens entry requirements to avoid bleeding capital during extended pullbacks or adverse market conditions.
-
-**How it works:**
-
-1. The strategy tracks the count of consecutive losing trades (trades where `pnl_pct < 0`).
-2. When the count reaches `cooldown_max_losses` (default 2), cooldown mode activates.
-3. During cooldown:
-   - `min_distance` is multiplied by `cooldown_distance_mult` (default 2.0) — the price must move further from the trend MA before a new entry triggers.
-   - `min_score` is raised to `cooldown_min_score` (default 4.5) — indicators must be more favorable before entry is allowed.
-4. Cooldown resets immediately on the first winning trade.
-
-This prevents the strategy from repeatedly entering during a pullback where each entry gets stopped out, which was a significant source of losses in the 2022 bear market within AAPL's longer uptrend.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `cooldown_max_losses` | 2 | Consecutive losses before cooldown activates |
-| `cooldown_distance_mult` | 2.0 | Multiply `min_distance` by this during cooldown |
-| `cooldown_min_score` | 4.5 | Minimum composite score required during cooldown |
-
-#### Global Directional Bias
-
-When the regime's trailing total return over the analysis window is strongly directional, the strategy suppresses counter-trend entries across **all** regimes — not just Strong Trend.
-
-**How it works:**
-
-1. On each rebalance bar, the backtest engine passes `regime_total_return` (the total return computed from trailing data up to the current bar) to the strategy context.
-2. If `global_trend_bias` is enabled and `|regime_total_return| >= global_bias_threshold`:
-   - When total return is positive (bullish bias), SHORT entries are suppressed (converted to HOLD).
-   - When total return is negative (bearish bias), LONG entries are suppressed.
-3. This applies after the score-based signal is generated, overriding it if needed.
-
-**Why this matters:** Without global bias, the strategy can enter short positions during brief mean-reverting windows within a large uptrend. For example, AAPL's +115% 5-year trend occasionally has regime windows that classify as mean_reverting (when the trailing total return temporarily drops). The mean-reverting adaptation narrows thresholds, making short entries easier to trigger. Global directional bias prevents this — if the trailing total return is above 10%, no shorts are allowed regardless of the current regime classification.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `global_trend_bias` | true | Enable global directional bias |
-| `global_bias_threshold` | 0.10 | `|total_return|` above this suppresses counter-trend entries |
-
-**EOD Flattening** (for intraday/day trading):
-
-When `flatten_eod` is enabled, all open positions are force-closed at the end of each trading day. This ensures no overnight risk. On end-of-day bars, only position-closing orders are accepted — no new positions are opened.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `flatten_eod` | false | Force-close all positions at end of each day |
-
-### 9.5 Performance Metrics
-
-The backtest report includes these metrics:
-
-| Metric | Description |
-|--------|-------------|
-| Total Return % | Overall gain/loss from initial capital |
-| Annualized Return % | Return normalized to a yearly rate |
-| Max Drawdown % | Largest peak-to-trough decline in equity |
-| Sharpe Ratio | Risk-adjusted return (annualized mean return / standard deviation) |
-| Win Rate % | Percentage of trades that were profitable |
-| Profit Factor | Gross profit / gross loss (higher is better; > 1.0 means profitable overall) |
-| Avg Trade P&L % | Average percentage gain/loss per trade |
-| Best Trade P&L % | Highest single-trade return |
-| Worst Trade P&L % | Lowest single-trade return |
-
-**Annualization for intraday data:** The Sharpe ratio and annualized return use `bars_per_day × 252 trading days` to convert bar-level returns to annual figures.
-
-| Interval | Bars Per Day |
-|----------|-------------|
-| 1m | 390 |
-| 2m | 195 |
-| 5m | 78 |
-| 15m | 26 |
-| 30m | 13 |
-| 60m / 1h | 6 |
-| 90m | 4 |
-| 1d (daily+) | 1 |
-
-### 9.6 Market Regime Classification
-
-The backtesting engine includes a **market regime classifier** that analyzes the price data to determine the current market environment. The detected regime drives strategy adaptations (see [Section 9.7](#97-regime-adaptive-strategy)) — adjusting entries, exits, position sizing, and stop-loss behavior to match market conditions.
-
-The regime is also displayed in the analysis view (both CLI and dashboard) as an informational panel, even when backtesting is not enabled.
-
-#### Four Regime Types
-
-| Regime | Characteristics | Optimal approach |
-|--------|----------------|------------------|
-| **Strong Trend** | High total return, high ADX, price consistently above/below MA | Buy-and-hold or wide trailing stop |
-| **Mean-Reverting / Range-Bound** | Low total return, low ADX, price oscillates around MA | Swing trade support/resistance |
-| **Volatile / Choppy** | High ATR%, frequent direction changes, no clear trend | Reduce position size, widen stops |
-| **Breakout / Transition** | Narrowing volatility (BB squeeze) followed by expansion | Momentum entry on breakout confirmation |
-
-#### How Classification Works
-
-The classifier computes six metrics from the data, then scores each regime type. The regime with the highest score wins.
-
-**Metrics computed:**
-
-| Metric | Description |
-|--------|-------------|
-| Total return | `(last_close - first_close) / first_close` — the overall price change across the entire period. This is the **primary signal**. |
-| ADX (current) | Latest ADX value — measures current trend strength |
-| ADX (rolling mean) | Average ADX over the full period — captures trend strength even when current ADX dips during consolidations |
-| % above MA | Fraction of bars where close > trend MA — measures trend consistency |
-| ATR% | ATR / price — measures volatility relative to price level |
-| Direction changes | Fraction of bars that reverse direction — measures choppiness |
-| BB width percentile | Current Bollinger Band width vs. recent history — detects squeezes and expansions |
-
-**Total return as primary signal:** A stock with 30%+ absolute return over the analysis period is classified as trending regardless of current ADX. This prevents misclassification of stocks in short-term consolidations within strong long-term trends (e.g., AAPL up 46% over 2 years but with a low current ADX of 19.7 during a pullback). The classifier uses `effective_adx = max(current_adx, rolling_adx_mean)` to reduce sensitivity to temporary ADX dips.
-
-**Confidence:** The winning regime's score divided by the sum of all regime scores. A confidence of 89% means the winner strongly dominates; 44% means the classification is less certain with other regimes scoring comparably.
-
-**Period dependence:** The regime reflects the data you asked it to analyze. The same stock can be "Strong Trend" on a 2-year period and "Mean-Reverting" on a 6-month period if it's been consolidating recently within a longer uptrend. This is intentional — the regime drives strategy adaptation for the analysis window you selected.
-
-#### Regime Re-Evaluation During Backtesting
-
-The regime is **not** set once at the start. It is re-classified every `rebalance_interval` bars (default: 5) on the trailing data up to the current bar. This means the strategy can adapt mid-backtest if market conditions change — for example, transitioning from a trend-following mode to a swing-trading mode as a trend exhausts.
-
-If classification fails on any bar (exception), the previous regime is silently retained.
-
-A final classification on the **complete** dataset is performed after the simulation loop ends, and this is what appears in the backtest report.
-
-#### Classification Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `trend_ma_period` | 50 | MA period for trend consistency and direction |
-| `adx_strong_trend` | 30.0 | ADX above this = strong trend signal |
-| `adx_weak` | 20.0 | ADX below this = weak/no trend |
-| `trend_consistency_high` | 70.0 | % above MA exceeding this = strong trend bias |
-| `trend_consistency_low` | 40.0 | % above MA below this = trend weakness |
-| `atr_pct_high` | 0.03 | ATR% above this = high volatility |
-| `atr_pct_low` | 0.01 | ATR% below this = low volatility |
-| `atr_period` | 14 | ATR calculation period |
-| `bb_period` | 20 | Bollinger Band period |
-| `bb_std_dev` | 2.0 | Bollinger Band standard deviation |
-| `bb_squeeze_percentile` | 20.0 | BB width below this percentile = squeeze |
-| `bb_expansion_percentile` | 80.0 | BB width above this percentile = expansion |
-| `direction_change_high` | 0.55 | Direction changes above this = choppy |
-| `direction_change_period` | 20 | Lookback for counting direction changes |
-| `price_ma_distance_extended` | 0.10 | Price > this % from MA = extended trend |
-| `total_return_strong` | 0.30 | Absolute return above this = definitively trending |
-| `total_return_moderate` | 0.15 | Absolute return above this = moderate trend signal |
-
-### 9.7 Regime-Adaptive Strategy
-
-When backtesting is enabled, the detected regime adapts the strategy's behavior automatically. Each regime type has its own set of configurable adaptations under `regime.strategy_adaptation` in the config.
-
-#### Strong Trend Adaptations
-
-In a strong trend, the strategy shifts from score-based trading to trend-following. The entry and hold logic uses the **total return** over the analysis period as the primary directional signal, rather than relying on current ADX or trend MA position (which can be temporarily misleading during consolidations within a larger trend).
-
-**Entry logic (`_strong_trend_entry`):**
-
-When `ignore_score_entries` is enabled, the strategy uses a specialized entry mechanism instead of score thresholds:
-
-1. **Direction from total return:** If the regime's `total_return` is positive, bias is LONG; if negative, bias is SHORT. If total return is near zero (`|total_return| < 0.05`), falls back to trend MA direction.
-2. **Minimum distance gate (`min_distance`):** Price must be at least 1% away from the trend MA in the direction of the bias before entry triggers. This prevents entering during tight consolidation right around the MA.
-3. **Minimum score gate (`min_score`):** Even though score thresholds are bypassed, the strategy still requires the composite score to be above `min_score` (default 3.5) for longs (or below `10 - min_score` for shorts). This prevents entering when indicators are strongly counter-trend.
-4. **Trend direction respect (`respect_trend_direction`):** When enabled, the strategy only enters in the direction dictated by total return. A +115% stock will never trigger short entries via this mechanism.
-
-**Hold logic (`_strong_trend_hold`):**
-
-When `hold_with_trend` is enabled, the strategy uses an `effective_bias` derived from total return (same as entry) to decide whether to hold:
-
-- **With-trend positions** are held unless the score reaches an extreme reversal (±1.5 points beyond the threshold). For example, a long position in a bullish trend only exits if the score drops to `short_below - 1.5`.
-- **Counter-trend positions** are closed immediately. If total return is positive but the position is SHORT, it's closed on the next rebalance bar.
-- **Trailing stop** manages the actual exit in most cases — an ATR-based trailing stop (`trailing_stop_atr_mult × ATR`) tracks the high-water mark and exits when price retraces beyond the stop distance.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `use_trailing_stop` | true | Trail stop with trend instead of score-based exits |
-| `trailing_stop_atr_mult` | 4.0 | Trailing stop distance = N x ATR (wider = hold longer through pullbacks) |
-| `ignore_score_entries` | true | Skip score thresholds; enter based on trend direction and total return |
-| `hold_with_trend` | true | Hold position as long as trend persists; close counter-trend positions immediately |
-| `min_distance` | 0.01 | Price must be this fraction (1%) away from trend MA for entry |
-| `min_score` | 3.5 | Minimum composite score required even when bypassing thresholds |
-| `respect_trend_direction` | true | Only enter in the direction of the long-term trend (from total return) |
-
-#### Mean-Reverting Adaptations
-
-In a range-bound market, the strategy generates more frequent swing trades:
-
-- **Thresholds:** The HOLD zone is narrowed by `threshold_adjustment` on each side. For example, if base thresholds are `short_below=4.5, hold_below=5.5`, mean-reverting adjusts them to `short_below=4.8, hold_below=5.2`. This makes it easier for the score to trigger BUY and SELL signals at the range extremes.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `tighten_thresholds` | true | Narrow the HOLD zone for more swing trades |
-| `threshold_adjustment` | 0.3 | How much to narrow thresholds on each side |
-
-#### Volatile/Choppy Adaptations
-
-In choppy markets, the strategy becomes defensive:
-
-- **Position sizing:** Reduced by `position_size_mult` (default 0.5), so each trade uses half the normal size.
-- **Stop-loss:** The effective stop-loss distance is widened by `stop_loss_mult` (default 1.5x) to prevent frequent stop-outs from noisy price action.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `reduce_position_size` | true | Halve position size to limit risk |
-| `position_size_mult` | 0.5 | Position size multiplier (0.1-1.0) |
-| `widen_stops` | true | Widen stop loss to avoid frequent stop-outs |
-| `stop_loss_mult` | 1.5 | Stop loss multiplier (1.0-3.0) |
-
-#### Breakout/Transition Adaptations
-
-During a potential breakout, the strategy gates entries with confirmation signals:
-
-- **Momentum entry:** When the score-based logic generates a BUY or SELL signal, it must pass a momentum check before executing. The bar's directional move (`|close - open|`) must be at least 40% of the bar's total range (`high - low`), filtering out wicks and noise.
-- **Volume confirmation:** Optionally requires the bar's volume to exceed the average by `volume_surge_mult` (default 1.3x).
-
-If confirmation fails, the signal is converted to HOLD.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `use_momentum_entry` | true | Enter on breakout confirmation instead of score alone |
-| `breakout_atr_mult` | 1.5 | Price must move N x ATR from squeeze level |
-| `require_volume_surge` | true | Require above-average volume to confirm breakout |
-| `volume_surge_mult` | 1.3 | Volume must exceed average by this multiplier |
+| `--period`, `-p` | `6mo` | Data period. Options: `1mo 3mo 6mo 1y 2y 5y ytd max` |
+| `--interval`, `-i` | `1d` | Bar interval. Daily: `1d 5d 1wk 1mo 3mo`. Intraday: `1m 2m 5m 15m 30m 60m 90m 1h` |
+| `--indicators` | all | Comma-separated indicator list, e.g. `rsi,macd,adx` |
+| `--start`, `-s` | — | Start date `YYYY-MM-DD`. Overrides `--period`. |
+| `--end`, `-e` | today | End date `YYYY-MM-DD`. Only used with `--start`. |
+
+### Backtest options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--backtest`, `-b` | off | Run a backtest instead of (or alongside) analysis |
+| `--mode`, `-m` | auto | Trading mode: `auto`, `long_short`, `long_only`, `hold_only` |
+| `--objective`, `-o` | — | Apply a preset: `long_term`, `short_term`, `day_trading` (or custom) |
+
+### Config & utility
+
+| Flag | Description |
+|------|-------------|
+| `--config`, `-c` | Path to a custom `config.yaml` |
+| `--generate-config` | Write a fresh default `config.yaml` and exit |
+| `--validate-config` | Check `config.yaml` for errors and exit |
+| `--list-indicators` | List all available indicator keys and exit |
+| `--list-patterns` | List all available pattern detector keys and exit |
+
+### yfinance data limits (intraday)
+
+| Interval | Maximum history |
+|----------|----------------|
+| `1m` | ~7 days |
+| `5m`, `15m`, `30m` | ~60 days |
+| `1h` | ~730 days |
+| `1d` and above | unlimited |
+
+Supported period values: `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `ytd`, `max`.
+Note: `10y` and day-count periods like `60d` are **not** supported by yfinance.
 
 ---
 
-## 10. Trading Mode Suitability Detection
+## Streamlit Dashboard
 
-Before running a backtest, the tool can automatically assess whether a stock is suitable for different trading strategies. This prevents backtesting a short-selling strategy on a stock that fundamentally does not support it.
+Launch with:
 
-### Three Modes
+```bash
+streamlit run dashboard.py
+```
 
-| Mode | Description | What's Allowed |
-|------|-------------|---------------|
-| **LONG SHORT** | Stock has sufficient liquidity, trend strength, and volatility | Long and short positions |
-| **LONG ONLY** | Stock can be traded long but shorting is not viable | Long positions only; sells only to close |
-| **HOLD ONLY** | Stock is unsuitable for active trading | No trades; analysis display only |
+The dashboard provides:
 
-### Priority Order
+- **Sidebar controls** for every config parameter, grouped into collapsible
+  sections (Indicators, Patterns, Strategy, Backtest, Regime, Suitability).
+- **Default hints** below each widget: small gray text showing the default
+  value and a brief description.
+- **Live analysis and backtesting** — change a parameter and re-run
+  instantly.
+- **Config export** — download your tuned configuration as YAML.
 
-The trading mode is determined by (highest priority first):
-
-1. **`--mode` CLI flag** — if specified, overrides everything else
-2. **`config.yaml suitability.mode_override`** — if set to something other than "auto"
-3. **Auto-detection** — the tool analyzes the stock's characteristics
-
-> **Intraday intervals** skip auto-detection entirely and default to **LONG SHORT**, because the suitability thresholds are calibrated for daily bars.
-
-### Auto-Detection Logic
-
-The detector computes four metrics and applies checks in order:
-
-| Metric | How It's Computed |
-|--------|-------------------|
-| Average Daily Volume | Mean of all volume bars |
-| ATR % | Average True Range (14-period) as a percentage of the last closing price |
-| ADX | Average Directional Index (14-period) |
-| % Above 200-Day MA | Percentage of bars where close > SMA(200) |
-
-**Step 1 — Check for HOLD ONLY (most restrictive):**
-
-| Condition | Threshold | Reason |
-|-----------|-----------|--------|
-| Avg volume < min_volume | 100,000 | Too illiquid for active trading |
-| ATR % < min_atr_pct | 0.5% | Price movement too low for active trading |
-
-If either triggers → **HOLD ONLY**.
-
-**Step 2 — Check for LONG ONLY:**
-
-| Condition | Threshold | Reason |
-|-----------|-----------|--------|
-| ADX < min_adx_for_short | 25.0 | Trend too weak for effective shorting |
-| ATR % < min_atr_for_short | 1.0% | Volatility too low for short-term shorts |
-| Avg volume < min_volume_for_short | 500,000 | Insufficient liquidity for shorting |
-| % above MA > max_pct_above_ma | 65% | Long-term uptrend makes shorting unprofitable |
-
-If any triggers → **LONG ONLY**.
-
-**Step 3 — Otherwise → LONG SHORT.**
-
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `mode_override` | "auto" | Force a specific mode (bypasses auto-detection) |
-| `min_volume` | 100,000 | Hold-only threshold for avg daily volume |
-| `min_atr_pct` | 0.005 | Hold-only threshold for ATR/price |
-| `min_adx_for_short` | 25.0 | Long-only threshold for ADX |
-| `min_atr_for_short` | 0.01 | Long-only threshold for ATR/price |
-| `min_volume_for_short` | 500,000 | Long-only threshold for avg volume |
-| `trend_ma_period` | 200 | MA period for trend direction check |
-| `max_pct_above_ma` | 65.0 | If price above MA for > this %, force long-only |
-| `atr_period` | 14 | ATR calculation period |
+All parameter changes are applied via `Config.from_dict()` and are
+equivalent to editing `config.yaml` directly.
 
 ---
 
-## 11. Trading Objective Presets
-
-Objective presets are **partial configuration overrides** that adapt the tool to different trading horizons. When you apply a preset, only the settings specified in the preset are changed — everything else keeps its base value.
-
-### 11.1 Long-Term (Position Trading)
-
-```bash
-python main.py AAPL --objective long_term
-python main.py AAPL --objective long_term --backtest --period 5y
-```
-
-**Designed for:** Holding periods of weeks to months.
-
-**Key changes from base:**
-
-| Category | Base → Long-Term |
-|----------|-----------------|
-| Indicator periods | Standard → ~1.5× longer (RSI 14→21, MACD 12/26→19/39, Bollinger 20→30) |
-| Moving Average periods | [20, 50, 200] → [50, 100, 200] |
-| Weight emphasis | Balanced → Heavier on trend indicators (MA 25%, ADX 15%, Volume 15%) |
-| Stop-loss / Take-profit | 5% / 20% → 8% / 30% |
-| Rebalance interval | 5 bars → 10 bars |
-| Warmup bars | 200 → 250 |
-
-### 11.2 Short-Term (Swing Trading)
-
-```bash
-python main.py AAPL --objective short_term
-python main.py AAPL --objective short_term --backtest --period 6mo
-```
-
-**Designed for:** Holding periods of days to weeks.
-
-**Key changes from base:**
-
-| Category | Base → Short-Term |
-|----------|------------------|
-| Indicator periods | Standard → ~0.7× shorter (RSI 14→9, MACD 12/26→8/17, Bollinger 20→14) |
-| Moving Average periods | [20, 50, 200] → [10, 20, 50] |
-| Weight emphasis | Balanced → Heavier on momentum (MACD 20%, Stochastic 15%, Bollinger 15%) |
-| Stop-loss / Take-profit | 5% / 20% → 3% / 10% |
-| Rebalance interval | 5 bars → 3 bars |
-| Warmup bars | 200 → 60 |
-
-### 11.3 Day Trading (Intraday)
-
-```bash
-python main.py AAPL -o day_trading -b -i 5m --start 2026-02-10
-python main.py AAPL -o day_trading -b -i 15m --period 1mo
-```
-
-**Designed for:** Intraday positions only — all positions closed by end of day.
-
-**Requirements:** Must use an intraday interval (`-i 5m`, `-i 15m`, etc.). The tool will reject daily intervals with the `day_trading` objective.
-
-**Key changes from base:**
-
-| Category | Base → Day Trading |
-|----------|-------------------|
-| Indicator periods | Standard → Very fast (RSI 14→5, MACD 12/26→5/13, Bollinger 20→10) |
-| Moving Average periods | [20, 50, 200] → [5, 10, 20] |
-| Weight emphasis | Balanced → Momentum-heavy (MACD 25%, Stochastic 20%) |
-| Stop-loss / Take-profit | 5% / 20% → **1.5% / 3%** |
-| Rebalance interval | 5 bars → **1 bar** (every single bar) |
-| EOD Flattening | Off → **On** (force-close all positions at end of each day) |
-| Warmup bars | 200 → 30 |
-
-### 11.4 Custom Presets
-
-You can define your own presets by adding entries under the `objectives` section in `config.yaml`. A preset is simply a partial config — only the keys you specify are overridden.
-
-**Example:** Adding a "scalping" preset:
-
-```yaml
-objectives:
-  scalping:
-    description: "Ultra-fast scalping — sub-minute trades."
-
-    rsi:
-      period: 3
-
-    macd:
-      fast_period: 3
-      slow_period: 8
-      signal_period: 4
-
-    moving_averages:
-      periods: [3, 5, 10]
-
-    strategy:
-      rebalance_interval: 1
-      stop_loss_pct: 0.005    # 0.5% stop
-      take_profit_pct: 0.01   # 1% target
-      flatten_eod: true
-
-    backtest:
-      warmup_bars: 15
-```
-
-Then use it:
-
-```bash
-python main.py AAPL -o scalping -b -i 1m --start 2026-02-18
-```
-
----
-
-## 12. Configuration
-
-### 12.1 Config File Loading
-
-The tool looks for configuration in this order:
-
-1. **`--config PATH`** — if you specify a custom path, that file is loaded.
-2. **`config.yaml` in the project directory** — next to `config.py`.
-3. **`config.yaml` in the current working directory** — where you run the command.
-4. **Built-in defaults** — if no config file is found, all built-in defaults are used.
-
-Loaded configuration is **deep-merged** with built-in defaults. This means you only need to include the settings you want to change in your `config.yaml` — any missing keys automatically fall back to defaults.
-
-### 12.2 Full Configuration Reference
-
-Below is the complete configuration structure with all sections and their defaults:
-
-```yaml
-# ── Indicator Configuration ──────────────────────────────────────
-
-rsi:
-  period: 14
-  thresholds:
-    oversold: 30
-    overbought: 70
-  scores:
-    oversold_score: 9.0
-    overbought_score: 1.0
-    neutral_score: 5.0
-
-macd:
-  fast_period: 12
-  slow_period: 26
-  signal_period: 9
-  scoring:
-    strong_bullish_pct: 0.005
-    moderate_bullish_pct: 0.001
-    strong_bearish_pct: -0.005
-    moderate_bearish_pct: -0.001
-    crossover_lookback: 5
-    bullish_cross_bonus: 1.5
-    bearish_cross_penalty: 1.5
-
-bollinger_bands:
-  period: 20
-  std_dev: 2.0
-  scoring:
-    lower_zone: 0.20
-    upper_zone: 0.80
-    squeeze_threshold: 0.02
-
-moving_averages:
-  periods: [20, 50, 200]
-  type: "sma"                # "sma" or "ema"
-  scoring:
-    price_above_ma_points: 1.5
-    ma_aligned_bullish_points: 1.0
-    golden_cross_bonus: 2.0
-    death_cross_penalty: 2.0
-    cross_lookback: 10
-    max_raw_score: 9.5
-
-stochastic:
-  k_period: 14
-  d_period: 3
-  smooth_k: 3
-  thresholds:
-    oversold: 20
-    overbought: 80
-  scores:
-    oversold_score: 9.0
-    overbought_score: 1.0
-    neutral_score: 5.0
-    bullish_cross_bonus: 1.0
-    bearish_cross_penalty: 1.0
-
-adx:
-  period: 14
-  thresholds:
-    weak: 20
-    moderate: 40
-  scoring:
-    weak_multiplier: 0.6
-    moderate_multiplier: 0.85
-    strong_multiplier: 1.0
-    max_directional_spread: 25
-
-volume:
-  obv_trend_period: 20
-  price_trend_period: 20
-  scoring:
-    confirmation_bullish_max: 9.5
-    confirmation_bullish_min: 6.5
-    confirmation_bearish_max: 3.5
-    confirmation_bearish_min: 0.5
-    divergence_score: 5.0
-    obv_strong_change_pct: 10.0
-    obv_weak_change_pct: 1.0
-
-fibonacci:
-  swing_lookback: 60
-  levels: [0.236, 0.382, 0.5, 0.618, 0.786]
-  scoring:
-    proximity_pct: 0.015
-    level_scores:
-      0.236: 8.0
-      0.382: 7.0
-      0.5: 5.0
-      0.618: 3.0
-      0.786: 1.5
-    no_level_score: 5.0
-    range_low_score: 2.0
-    range_high_score: 8.0
-
-# ── Support/Resistance ───────────────────────────────────────────
-
-support_resistance:
-  method: "both"             # "pivot", "fractal", or "both"
-  pivot_levels: ["S1", "S2", "S3", "P", "R1", "R2", "R3"]
-  fractal_lookback: 60
-  fractal_order: 5
-  num_levels: 4
-  cluster_pct: 0.015
-  min_touches: 1
-
-# ── Composite Scoring ────────────────────────────────────────────
-
-overall:
-  weights:
-    rsi: 0.15
-    macd: 0.15
-    bollinger_bands: 0.10
-    moving_averages: 0.20
-    stochastic: 0.10
-    adx: 0.10
-    volume: 0.10
-    fibonacci: 0.10
-
-# ── Pattern Signal Detectors ─────────────────────────────────────
-
-gaps:
-  lookback: 20
-  min_gap_pct: 0.005
-  volume_surge_mult: 1.5
-  trend_period: 20
-  type_weights:
-    common: 0.3
-    runaway: 0.7
-    breakaway: 1.0
-    exhaustion: 0.5
-  max_signal_strength: 3.0
-
-volume_range:
-  period: 20
-  expansion_threshold: 1.5
-  contraction_threshold: 0.6
-  lookback: 10
-  scoring:
-    expansion_bull: 8.0
-    expansion_bear: 2.0
-    contraction: 5.0
-    divergence: 5.0
-
-candlesticks:
-  doji_threshold: 0.05
-  shadow_ratio: 2.0
-  harami_body_ratio: 0.5
-  dragonfly_shadow_min: 0.6
-  gravestone_shadow_min: 0.6
-  doji_tiny_shadow_max: 0.1
-  marubozu_body_min: 0.90
-  marubozu_shadow_max: 0.05
-  tweezer_tolerance: 0.002
-  star_middle_body_max: 0.30
-  soldiers_body_min: 0.60
-  soldiers_shadow_max: 0.30
-  lookback: 10
-  trend_period: 10
-  max_signal_strength: 3.0
-
-spikes:
-  period: 20
-  spike_std: 2.5
-  confirm_bars: 3
-  confirm_pct: 0.5
-  lookback: 20
-  trap_weight: 0.7
-  max_signal_strength: 3.0
-
-inside_outside:
-  lookback: 20
-  trend_period: 10
-  breakout_bars: 3
-  outside_range_min: 1.2
-  max_signal_strength: 3.0
-
-overall_patterns:
-  weights:
-    gaps: 0.20
-    volume_range: 0.25
-    candlesticks: 0.25
-    spikes: 0.15
-    inside_outside: 0.15
-
-# ── Display ──────────────────────────────────────────────────────
-
-display:
-  show_disclaimer: true
-  score_decimal_places: 1
-  price_decimal_places: 2
-  color_thresholds:
-    bearish_max: 3.5
-    neutral_max: 6.5
-
-# ── Strategy ─────────────────────────────────────────────────────
-
-strategy:
-  threshold_mode: "fixed"    # "fixed" or "percentile"
-  score_thresholds:
-    short_below: 3.5
-    hold_below: 6.5
-  percentile_thresholds:
-    short_percentile: 25
-    long_percentile: 75
-    lookback_bars: 60
-  position_sizing: "percent_equity"
-  fixed_quantity: 100
-  percent_equity: 0.80
-  stop_loss_pct: 0.05
-  take_profit_pct: 0.50         # disabled in strong_trend regime (trailing stop manages exit)
-  rebalance_interval: 5
-  flatten_eod: false
-  # ATR-Adaptive Stop
-  atr_stop_enabled: true
-  atr_stop_multiplier: 3.0      # stop = max(fixed %, N × ATR) at entry time
-  atr_stop_period: 14
-  # Trend Confirmation
-  trend_confirm_enabled: true
-  trend_confirm_period: 20
-  # Re-entry Grace Period
-  reentry_grace_bars: 10         # skip trend confirmation for N bars after forced exit
-  # Consecutive Loss Cooldown
-  cooldown_max_losses: 2         # consecutive losses before cooldown activates
-  cooldown_distance_mult: 2.0    # multiply min_distance by this during cooldown
-  cooldown_min_score: 4.5        # minimum score required during cooldown
-  # Global Directional Bias
-  global_trend_bias: true        # suppress counter-trend entries when total return is large
-  global_bias_threshold: 0.10    # |total_return| above this → suppress counter-trend
-  # Pattern-Indicator Combination
-  combination_mode: "weighted"   # "weighted", "gate", or "boost"
-  indicator_weight: 0.7          # indicator weight in blended score
-  pattern_weight: 0.3            # pattern weight in blended score
-  # Gate mode thresholds (only used when combination_mode = "gate")
-  gate_indicator_min: 5.5
-  gate_indicator_max: 4.5
-  gate_pattern_min: 5.5
-  gate_pattern_max: 4.5
-  # Boost mode parameters (only used when combination_mode = "boost")
-  boost_strength: 0.5            # multiplier for pattern deviation from 5.0
-  boost_dead_zone: 0.3           # pattern score within 5.0 ± this → no boost
-
-# ── Backtesting ──────────────────────────────────────────────────
-
-backtest:
-  initial_cash: 100000.0
-  commission_per_trade: 0.0
-  slippage_pct: 0.001
-  warmup_bars: 200
-  max_warmup_ratio: 0.5            # warmup can't exceed this fraction of total data
-  significant_pattern_min_strength: 0.5  # min strength to appear in timeline
-
-# ── Suitability Detection ───────────────────────────────────────
-
-suitability:
-  mode_override: "auto"
-  min_volume: 100000
-  min_atr_pct: 0.005
-  min_adx_for_short: 25.0
-  min_atr_for_short: 0.01
-  min_volume_for_short: 500000
-  trend_ma_period: 200
-  max_pct_above_ma: 65.0
-  atr_period: 14
-
-# ── Market Regime Classification ────────────────────────────────
-
-regime:
-  trend_ma_period: 50
-  adx_strong_trend: 30.0
-  adx_weak: 20.0
-  trend_consistency_high: 70.0
-  trend_consistency_low: 40.0
-  atr_pct_high: 0.03
-  atr_pct_low: 0.01
-  atr_period: 14
-  bb_period: 20
-  bb_std_dev: 2.0
-  bb_squeeze_percentile: 20.0
-  bb_expansion_percentile: 80.0
-  direction_change_high: 0.55
-  direction_change_period: 20
-  price_ma_distance_extended: 0.10
-  total_return_strong: 0.30
-  total_return_moderate: 0.15
-  strategy_adaptation:
-    strong_trend:
-      use_trailing_stop: true
-      trailing_stop_atr_mult: 4.0   # wider trail to hold through pullbacks
-      ignore_score_entries: true
-      hold_with_trend: true
-      min_distance: 0.01            # price must be 1%+ from MA for trend entry
-      min_score: 3.5                # don't enter when indicators are strongly bearish
-      respect_trend_direction: true  # only enter in direction of long-term trend
-    mean_reverting:
-      use_trailing_stop: false
-      tighten_thresholds: true
-      threshold_adjustment: 0.3
-    volatile_choppy:
-      reduce_position_size: true
-      position_size_mult: 0.5
-      widen_stops: true
-      stop_loss_mult: 1.5
-    breakout_transition:
-      use_momentum_entry: true
-      breakout_atr_mult: 1.5
-      require_volume_surge: true
-      volume_surge_mult: 1.3
-
-# ── Objective Presets ────────────────────────────────────────────
-
-objectives:
-  long_term:
-    description: "Position trading — weeks to months."
-    # ... (partial overrides for indicators, patterns, strategy, backtest)
-  short_term:
-    description: "Swing trading — days to weeks."
-    # ... (partial overrides for indicators, patterns, strategy, backtest)
-  day_trading:
-    description: "Day trading — intraday positions only."
-    # ... (partial overrides for indicators, patterns, overall_patterns, strategy, backtest)
-```
-
-### 12.3 Generating and Validating Config
-
-**Generate a fresh config file:**
+## Configuration Overview
+
+All parameters live in `config.yaml` (or the built-in `DEFAULT_CONFIG`
+fallback). The config is a flat YAML dict with top-level sections:
+
+| Section | Purpose |
+|---------|---------|
+| `rsi`, `macd`, `bollinger_bands`, ... | Per-indicator tuning |
+| `gaps`, `candlesticks`, `spikes`, ... | Per-pattern-detector tuning |
+| `overall` | Indicator composite weights |
+| `overall_patterns` | Pattern composite weights |
+| `display` | Terminal output formatting |
+| `strategy` | Trading decision thresholds, position sizing, risk management |
+| `backtest` | Engine parameters (cash, slippage, warmup) |
+| `regime` | Market regime classification thresholds and scoring weights |
+| `suitability` | Trading mode auto-detection thresholds |
+| `objectives` | Named presets that override base values |
+
+To regenerate a fresh config:
 
 ```bash
 python main.py --generate-config
 ```
 
-This writes a complete `config.yaml` with all defaults and comments to the current directory.
-
-**Validate your config:**
+To validate your config:
 
 ```bash
 python main.py --validate-config
 ```
 
-This checks for common errors including:
-- Invalid threshold ordering (e.g., oversold > overbought)
-- Negative weights
-- Invalid position sizing mode
-- Invalid threshold mode
-- Out-of-range percentile values
-- Non-positive backtest parameters
-- Invalid suitability mode override
+---
+
+## Indicator Parameters
+
+All scores range from **0** (strongly bearish) to **10** (strongly bullish).
+
+### RSI (Relative Strength Index)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `rsi.period` | 14 | RSI calculation lookback period |
+| `rsi.thresholds.oversold` | 30 | RSI below this = oversold (potential reversal up) |
+| `rsi.thresholds.overbought` | 70 | RSI above this = overbought (potential reversal down) |
+| `rsi.scores.oversold_score` | 9.0 | Score when RSI <= oversold |
+| `rsi.scores.overbought_score` | 1.0 | Score when RSI >= overbought |
+| `rsi.scores.neutral_score` | 5.0 | Score at RSI = 50 |
+
+### MACD (Moving Average Convergence Divergence)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `macd.fast_period` | 12 | Fast EMA period |
+| `macd.slow_period` | 26 | Slow EMA period |
+| `macd.signal_period` | 9 | Signal line EMA period |
+| `macd.scoring.strong_bullish_pct` | 0.005 | Histogram > price * this = strong bullish |
+| `macd.scoring.moderate_bullish_pct` | 0.001 | Histogram > price * this = moderate bullish |
+| `macd.scoring.strong_bearish_pct` | -0.005 | Histogram < price * this = strong bearish |
+| `macd.scoring.moderate_bearish_pct` | -0.001 | Histogram < price * this = moderate bearish |
+| `macd.scoring.crossover_lookback` | 5 | Bars to look back for signal crossover |
+| `macd.scoring.bullish_cross_bonus` | 1.5 | Score bonus for bullish crossover |
+| `macd.scoring.bearish_cross_penalty` | 1.5 | Score penalty for bearish crossover |
+
+### Bollinger Bands
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `bollinger_bands.period` | 20 | SMA period for band calculation |
+| `bollinger_bands.std_dev` | 2.0 | Standard deviation multiplier |
+| `bollinger_bands.scoring.lower_zone` | 0.20 | %B below this = near support (score 8-10) |
+| `bollinger_bands.scoring.upper_zone` | 0.80 | %B above this = near resistance (score 0-2) |
+| `bollinger_bands.scoring.squeeze_threshold` | 0.02 | Band width / price below this = volatility squeeze |
+
+### Moving Averages
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `moving_averages.periods` | [20, 50, 200] | MA periods (must be ascending) |
+| `moving_averages.type` | "sma" | "sma" or "ema" |
+| `moving_averages.scoring.price_above_ma_points` | 1.5 | Points per MA that price is above |
+| `moving_averages.scoring.ma_aligned_bullish_points` | 1.0 | Points per bullish MA alignment (20>50, 50>200) |
+| `moving_averages.scoring.golden_cross_bonus` | 2.0 | Bonus when 50 MA crosses above 200 MA |
+| `moving_averages.scoring.death_cross_penalty` | 2.0 | Penalty when 50 MA crosses below 200 MA |
+| `moving_averages.scoring.cross_lookback` | 10 | Bars to look back for golden/death cross |
+| `moving_averages.scoring.max_raw_score` | 9.5 | Cap before normalization to 0-10 |
+
+### Stochastic Oscillator
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `stochastic.k_period` | 14 | %K calculation period |
+| `stochastic.d_period` | 3 | %D smoothing period |
+| `stochastic.smooth_k` | 3 | %K smoothing factor |
+| `stochastic.thresholds.oversold` | 20 | %K below this = oversold |
+| `stochastic.thresholds.overbought` | 80 | %K above this = overbought |
+| `stochastic.scores.oversold_score` | 9.0 | Score when oversold |
+| `stochastic.scores.overbought_score` | 1.0 | Score when overbought |
+| `stochastic.scores.neutral_score` | 5.0 | Score at midpoint |
+| `stochastic.scores.bullish_cross_bonus` | 1.0 | Bonus when %K crosses above %D |
+| `stochastic.scores.bearish_cross_penalty` | 1.0 | Penalty when %K crosses below %D |
+
+### ADX (Average Directional Index)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `adx.period` | 14 | ADX calculation period |
+| `adx.thresholds.weak` | 20 | ADX below this = weak/no trend |
+| `adx.thresholds.moderate` | 40 | ADX 20-40 = moderate trend |
+| `adx.scoring.weak_multiplier` | 0.6 | Directional score multiplier in weak trends |
+| `adx.scoring.moderate_multiplier` | 0.85 | Multiplier in moderate trends |
+| `adx.scoring.strong_multiplier` | 1.0 | Multiplier in strong trends |
+| `adx.scoring.max_directional_spread` | 25 | +DI minus -DI spread for full directional score |
+
+**Note:** ADX measures current trend *strength*, not long-term trajectory.
+A stock in a powerful multi-year uptrend can have low ADX during consolidation.
+
+### Volume (OBV-based)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `volume.obv_trend_period` | 20 | EMA period for OBV trend |
+| `volume.price_trend_period` | 20 | EMA period for price trend comparison |
+| `volume.scoring.confirmation_bullish_max` | 9.5 | Max score when OBV confirms bullish price |
+| `volume.scoring.confirmation_bullish_min` | 6.5 | Min score when OBV weakly confirms bullish |
+| `volume.scoring.confirmation_bearish_max` | 3.5 | Score when OBV weakly confirms bearish |
+| `volume.scoring.confirmation_bearish_min` | 0.5 | Score when OBV strongly confirms bearish |
+| `volume.scoring.divergence_score` | 5.0 | Score when OBV diverges from price |
+| `volume.scoring.obv_strong_change_pct` | 10.0 | OBV change % for max confirmation score |
+| `volume.scoring.obv_weak_change_pct` | 1.0 | OBV change % for min confirmation score |
+
+### Fibonacci Retracement
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `fibonacci.swing_lookback` | 60 | Bars to look back for swing high/low |
+| `fibonacci.levels` | [0.236, 0.382, 0.5, 0.618, 0.786] | Fibonacci retracement levels |
+| `fibonacci.scoring.proximity_pct` | 0.015 | Within 1.5% of a level = "at that level" |
+| `fibonacci.scoring.level_scores` | {0.236: 8.0, ..., 0.786: 1.5} | Score for each Fibonacci level |
+| `fibonacci.scoring.no_level_score` | 5.0 | Score when not near any level |
+| `fibonacci.scoring.range_low_score` | 2.0 | Score at bottom of swing range |
+| `fibonacci.scoring.range_high_score` | 8.0 | Score at top of swing range |
+
+### Support & Resistance (display only, not scored)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `support_resistance.method` | "both" | Detection method: "pivot", "fractal", or "both" |
+| `support_resistance.pivot_levels` | ["S1"..."R3"] | Classic pivot levels to compute |
+| `support_resistance.fractal_lookback` | 60 | Bars to scan for fractal extrema |
+| `support_resistance.fractal_order` | 5 | Bars each side for local extremum |
+| `support_resistance.num_levels` | 4 | Number of support AND resistance levels to show |
+| `support_resistance.cluster_pct` | 0.015 | Merge levels within 1.5% of each other |
+| `support_resistance.min_touches` | 1 | Minimum price touches to confirm a level |
 
 ---
 
-## 13. Data Provider and Limitations
+## Pattern Detector Parameters
 
-The tool uses **Yahoo Finance** (via the `yfinance` library) as its data source.
+Pattern detectors measure *what just happened* (a gap, a reversal candle, a
+volume spike) — a separate layer from indicators which measure *where the
+stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 
-### Supported Periods
+### Gaps
 
-| Period | Description |
-|--------|-------------|
-| `1mo` | 1 month |
-| `3mo` | 3 months |
-| `6mo` | 6 months (default) |
-| `1y` | 1 year |
-| `2y` | 2 years |
-| `5y` | 5 years |
-| `ytd` | Year to date |
-| `max` | All available history |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `gaps.lookback` | 20 | Recent bars to consider for scoring |
+| `gaps.min_gap_pct` | 0.005 | Minimum gap size as fraction of price (0.5%) |
+| `gaps.volume_surge_mult` | 1.5 | Volume > avg * this = surge (for gap classification) |
+| `gaps.trend_period` | 20 | EMA period for trend detection |
+| `gaps.type_weights.common` | 0.3 | Weight of common gaps in net signal |
+| `gaps.type_weights.runaway` | 0.7 | Weight of runaway (continuation) gaps |
+| `gaps.type_weights.breakaway` | 1.0 | Weight of breakaway gaps |
+| `gaps.type_weights.exhaustion` | 0.5 | Weight of exhaustion gaps (inverse signal) |
+| `gaps.max_signal_strength` | 3.0 | Net signal beyond this = full score (0.5 or 9.5) |
 
-> **Note:** yfinance does not support `10y`. For periods longer than 5 years, use `--start` with a specific date.
+### Volume-Range Analysis
 
-### Custom Date Ranges
+| Key | Default | Description |
+|-----|---------|-------------|
+| `volume_range.period` | 20 | Rolling average period for range and volume |
+| `volume_range.expansion_threshold` | 1.5 | Range/volume ratio >= this = expansion |
+| `volume_range.contraction_threshold` | 0.6 | Range/volume ratio <= this = contraction |
+| `volume_range.lookback` | 10 | Recent bars to count expansions/contractions |
+| `volume_range.scoring.expansion_bull` | 8.0 | Bullish expansion base score |
+| `volume_range.scoring.expansion_bear` | 2.0 | Bearish expansion base score |
+| `volume_range.scoring.contraction` | 5.0 | Contraction = neutral |
+| `volume_range.scoring.divergence` | 5.0 | Range/volume divergence = neutral |
 
-Use `--start` and optionally `--end` for precise date ranges:
+### Candlestick Patterns
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `candlesticks.doji_threshold` | 0.05 | Body/range <= this = doji |
+| `candlesticks.shadow_ratio` | 2.0 | Shadow must be >= body * this for hammer/star |
+| `candlesticks.harami_body_ratio` | 0.5 | Current body <= prev body * this for harami |
+| `candlesticks.dragonfly_shadow_min` | 0.6 | Lower shadow >= range * this for dragonfly doji |
+| `candlesticks.gravestone_shadow_min` | 0.6 | Upper shadow >= range * this for gravestone doji |
+| `candlesticks.doji_tiny_shadow_max` | 0.1 | Opposite shadow <= range * this for dragonfly/gravestone |
+| `candlesticks.marubozu_body_min` | 0.90 | Body fills >= this fraction of range for marubozu |
+| `candlesticks.marubozu_shadow_max` | 0.05 | Each shadow <= this fraction of range for marubozu |
+| `candlesticks.tweezer_tolerance` | 0.002 | Highs/lows match within this fraction for tweezer |
+| `candlesticks.star_middle_body_max` | 0.30 | Middle bar body <= this fraction for morning/evening star |
+| `candlesticks.soldiers_body_min` | 0.60 | Each bar body >= this fraction for 3 soldiers/crows |
+| `candlesticks.soldiers_shadow_max` | 0.30 | Shadow <= this fraction for 3 soldiers/crows |
+| `candlesticks.lookback` | 10 | Recent bars to scan for patterns |
+| `candlesticks.trend_period` | 10 | EMA period for trend context |
+| `candlesticks.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+
+### Spike Detection
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `spikes.period` | 20 | Rolling mean/std calculation period |
+| `spikes.spike_std` | 2.5 | Z-score threshold for spike detection |
+| `spikes.confirm_bars` | 3 | Bars to check for post-spike confirmation |
+| `spikes.confirm_pct` | 0.5 | Fraction of confirm bars that must hold level |
+| `spikes.lookback` | 20 | Recent bars to consider for scoring |
+| `spikes.trap_weight` | 0.7 | Weight of trap (failed breakout) inverse signal |
+| `spikes.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+
+### Inside/Outside Bars
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `inside_outside.lookback` | 20 | Recent bars to consider for scoring |
+| `inside_outside.trend_period` | 10 | EMA period for trend context |
+| `inside_outside.breakout_bars` | 3 | Bars after inside bar to check for breakout |
+| `inside_outside.outside_range_min` | 1.2 | Current range / prev range >= this for outside bar |
+| `inside_outside.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+
+---
+
+## Composite Scoring
+
+### Indicator Composite Weights
+
+Section: `overall.weights`
+
+Each indicator's 0-10 score is multiplied by its weight, then all weighted
+scores are summed and normalized. Weights don't need to sum to 1.0 — they
+are auto-normalized.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `overall.weights.rsi` | 0.15 | RSI weight |
+| `overall.weights.macd` | 0.15 | MACD weight |
+| `overall.weights.bollinger_bands` | 0.10 | Bollinger Bands weight |
+| `overall.weights.moving_averages` | 0.20 | Moving Averages weight (highest default) |
+| `overall.weights.stochastic` | 0.10 | Stochastic weight |
+| `overall.weights.adx` | 0.10 | ADX weight |
+| `overall.weights.volume` | 0.10 | Volume weight |
+| `overall.weights.fibonacci` | 0.10 | Fibonacci weight |
+
+**Score compression note:** Averaging 8 indicators crushes variance. The
+effective composite score stdev is ~0.50, so almost all scores fall in the
+3.5-6.5 range. Set strategy thresholds within that actual range, or use
+`threshold_mode: "percentile"` for self-calibrating thresholds.
+
+### Pattern Composite Weights
+
+Section: `overall_patterns.weights`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `overall_patterns.weights.gaps` | 0.20 | Gap detector weight |
+| `overall_patterns.weights.volume_range` | 0.25 | Volume-range weight |
+| `overall_patterns.weights.candlesticks` | 0.25 | Candlestick weight |
+| `overall_patterns.weights.spikes` | 0.15 | Spike detector weight |
+| `overall_patterns.weights.inside_outside` | 0.15 | Inside/outside bar weight |
+
+---
+
+## Display Settings
+
+Section: `display`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `display.show_disclaimer` | true | Show disclaimer text in analysis output |
+| `display.score_decimal_places` | 1 | Decimal places for score display |
+| `display.price_decimal_places` | 2 | Decimal places for price display |
+| `display.color_thresholds.bearish_max` | 3.5 | Score <= this = red (bearish) |
+| `display.color_thresholds.neutral_max` | 6.5 | Score <= this = yellow (neutral), above = green (bullish) |
+
+---
+
+## Strategy Parameters
+
+Section: `strategy`
+
+The strategy maps composite scores to trading decisions (LONG, SHORT, HOLD).
+
+### Threshold Mode
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.threshold_mode` | "fixed" | "fixed" = absolute score values; "percentile" = rolling percentile ranks |
+
+#### Fixed thresholds
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.score_thresholds.short_below` | 3.5 | Score <= this = SHORT signal |
+| `strategy.score_thresholds.hold_below` | 6.5 | Score <= this = HOLD; above = LONG |
+
+#### Percentile thresholds (when `threshold_mode: "percentile"`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.percentile_thresholds.short_percentile` | 25 | Score in bottom 25% = SHORT |
+| `strategy.percentile_thresholds.long_percentile` | 75 | Score in top 25% = LONG |
+| `strategy.percentile_thresholds.lookback_bars` | 60 | Rolling window for percentile calculation |
+| `strategy.percentile_min_fill_ratio` | 0.8 | Min fraction of window before percentile activates |
+
+### Position Sizing
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.position_sizing` | "percent_equity" | "fixed" or "percent_equity" |
+| `strategy.fixed_quantity` | 100 | Shares per trade (when sizing = "fixed") |
+| `strategy.percent_equity` | 0.80 | Fraction of equity per trade (when sizing = "percent_equity") |
+
+### Risk Management
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.stop_loss_pct` | 0.05 | Exit if position loses this fraction (5%) |
+| `strategy.take_profit_pct` | 0.50 | Exit if position gains this fraction (50%) |
+| `strategy.atr_stop_enabled` | true | Use ATR-adaptive stop (widens beyond fixed %) |
+| `strategy.atr_stop_multiplier` | 3.0 | Stop = N x ATR at entry |
+| `strategy.atr_stop_period` | 14 | ATR calculation lookback |
+
+The effective stop is `max(fixed_stop, ATR_stop)` — the ATR can only widen,
+never tighten, the stop.
+
+### Trend Confirmation
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.trend_confirm_enabled` | true | Require price on correct side of MA for entry |
+| `strategy.trend_confirm_period` | 20 | EMA period for trend filter |
+| `strategy.trend_confirm_ma_type` | "ema" | "ema" or "sma" |
+| `strategy.trend_confirm_tolerance_pct` | 0.0 | Tolerance band around MA (0 = exact) |
+
+BUY requires `close > EMA(period)`. SHORT requires `close < EMA(period)`.
+
+### Rebalancing & Re-entry
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.rebalance_interval` | 5 | Re-score every N bars |
+| `strategy.reentry_grace_bars` | 10 | After exit, skip trend confirmation for N bars |
+
+### Consecutive Loss Cooldown
+
+After repeated losing trades, entry requirements tighten to avoid bleeding
+capital.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.cooldown_max_losses` | 2 | Consecutive losses before cooldown activates |
+| `strategy.cooldown_distance_mult` | 2.0 | Multiply `min_distance` by this during cooldown |
+| `strategy.cooldown_min_score` | 4.5 | Minimum score required during cooldown |
+| `strategy.cooldown_reset_on_breakeven` | true | Whether 0% PnL resets the loss counter |
+
+### Global Trend Bias
+
+Suppresses counter-trend entries when the overall period return is strongly
+directional.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.global_trend_bias` | true | Enable global directional bias |
+| `strategy.global_bias_threshold` | 0.10 | \|total_return\| above this = suppress counter-trend entries |
+
+### Strong Trend Behavior
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.trend_bias_return_threshold` | 0.15 | \|total_return\| >= this = definitive bias direction |
+| `strategy.extreme_exit_score_offset` | 1.5 | Exit strong-trend position when score is this far beyond thresholds |
+| `strategy.breakout_min_move_ratio` | 0.4 | \|close-open\|/range >= this for valid breakout bar |
+| `strategy.disable_take_profit_in_strong_trend` | true | Let trailing stop handle exits instead of take-profit |
+| `strategy.trailing_stop_require_profit` | true | Trailing stop only activates when position is in profit |
+
+### Position Management
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.allow_pyramiding` | false | Add to existing same-direction positions |
+| `strategy.allow_immediate_reversal` | true | Close + reopen in opposite direction on signal flip |
+| `strategy.flatten_eod` | false | Force-close all positions at end of each trading day (intraday only) |
+
+### Pattern-Indicator Combination
+
+Three modes control how the indicator composite and pattern composite are
+combined into a single trading signal.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.combination_mode` | "weighted" | "weighted", "gate", or "boost" |
+
+#### Weighted mode (default)
+
+```
+blended = indicator_weight * indicator_score + pattern_weight * pattern_score
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.indicator_weight` | 0.7 | Weight of indicator composite |
+| `strategy.pattern_weight` | 0.3 | Weight of pattern composite |
+
+#### Gate mode
+
+Only trade if **both** composites pass their respective thresholds.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.gate_indicator_min` | 5.5 | Indicator must exceed this for LONG |
+| `strategy.gate_indicator_max` | 4.5 | Indicator must be below this for SHORT |
+| `strategy.gate_pattern_min` | 5.5 | Pattern must exceed this for LONG |
+| `strategy.gate_pattern_max` | 4.5 | Pattern must be below this for SHORT |
+
+#### Boost mode
+
+Indicators are the base signal. Active patterns (score outside dead zone)
+amplify or dampen the indicator score. Inactive patterns (score near 5.0)
+have zero effect — avoiding the weighted-mode problem where neutral patterns
+dilute the indicator signal.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.boost_strength` | 0.5 | Multiplier for pattern deviation from 5.0 |
+| `strategy.boost_dead_zone` | 0.3 | Pattern within 5.0 +/- this = no boost |
+
+---
+
+## Backtest Parameters
+
+Section: `backtest`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `backtest.initial_cash` | 100000.0 | Starting portfolio cash |
+| `backtest.commission_per_trade` | 0.0 | Flat commission per trade |
+| `backtest.slippage_pct` | 0.001 | Simulated slippage as fraction of price (0.1%) |
+| `backtest.warmup_bars` | 100 | Minimum bars before first signal (must be >= longest indicator lookback) |
+| `backtest.max_warmup_ratio` | 0.5 | Maximum fraction of data that warmup can consume |
+| `backtest.significant_pattern_min_strength` | 0.5 | Minimum strength for pattern to appear in timeline |
+| `backtest.min_warmup_bars` | 20 | Absolute floor for proportional warmup |
+| `backtest.min_post_warmup_bars` | 10 | Minimum tradeable bars after warmup |
+| `backtest.trading_days_per_year` | 252 | For annualization of returns |
+| `backtest.trading_day_minutes` | 390 | US market: 6.5 hours (for intraday bar counts) |
+| `backtest.default_score` | 5.0 | Neutral starting score before first rebalance |
+| `backtest.close_on_end_of_data` | true | Force-close any open position at end of data |
+
+**Warmup note:** Effective warmup = `min(warmup_bars, int(len(data) * max_warmup_ratio))`,
+clamped to at least `min_warmup_bars`. Short datasets (e.g. 6mo = ~126 bars)
+get proportionally reduced warmup.
+
+---
+
+## Market Regime Classification
+
+Section: `regime`
+
+Classifies the current market environment into one of four regimes, which
+then drives strategy adaptation during backtesting.
+
+### The four regimes
+
+| Regime | When | Strategy adaptation |
+|--------|------|---------------------|
+| `strong_trend` | High ADX, consistent direction, large total return | Trailing stop, hold with trend |
+| `mean_reverting` | Low ADX, oscillates around MA, small return | Tighten thresholds, swing trade |
+| `volatile_choppy` | High ATR%, frequent reversals | Reduce position size, widen stops |
+| `breakout_transition` | BB squeeze then expansion | Momentum entry on breakout confirmation |
+
+### Core thresholds
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `regime.trend_ma_period` | 50 | MA period for trend analysis |
+| `regime.adx_strong_trend` | 30.0 | ADX above this = strong trend signal |
+| `regime.adx_weak` | 20.0 | ADX below this = weak/no trend |
+| `regime.trend_consistency_high` | 70.0 | % bars above MA = strong directional bias |
+| `regime.trend_consistency_low` | 40.0 | Below 100-this on bear side = strong bear bias |
+| `regime.atr_pct_high` | 0.03 | ATR% above this = high volatility |
+| `regime.atr_pct_low` | 0.01 | ATR% below this = low volatility |
+| `regime.atr_period` | 14 | ATR calculation period |
+| `regime.bb_period` | 20 | Bollinger Band period |
+| `regime.bb_std_dev` | 2.0 | BB standard deviation multiplier |
+| `regime.bb_squeeze_percentile` | 20.0 | BB width below this percentile = squeeze |
+| `regime.bb_expansion_percentile` | 80.0 | BB width above this = expansion |
+| `regime.direction_change_high` | 0.55 | Fraction of bars reversing direction = choppy |
+| `regime.direction_change_period` | 20 | Lookback for direction change calculation |
+| `regime.price_ma_distance_extended` | 0.10 | Price > 10% from MA = extended trend |
+| `regime.total_return_strong` | 0.30 | \|return\| > 30% = definitively trending |
+| `regime.total_return_moderate` | 0.15 | \|return\| > 15% = moderate trend signal |
+| `regime.min_bars_for_classification` | 20 | Minimum bars before regime can be classified |
+
+### Trend direction thresholds
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `regime.trend_direction_bullish_threshold` | 60 | pct_above_ma > this = bullish |
+| `regime.trend_direction_bearish_threshold` | 40 | pct_above_ma < this = bearish |
+
+### Reason building
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `regime.adx_dip_threshold` | 3 | Rolling ADX mean > current + this = "temporary dip" note |
+| `regime.runner_up_proximity_ratio` | 0.7 | Runner-up score / winner > this = mention runner-up |
+
+### Regime Scoring Weights
+
+Section: `regime.scoring`
+
+These control the numerical scores assigned to each regime during
+classification. Higher scores pull the classification toward that regime.
+Organized by regime type — see `config.yaml` for the full list of ~50 keys.
+
+#### Strong Trend scoring
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scoring.strong_trend.return_strong_base` | 3.0 | Base score when \|return\| >= total_return_strong |
+| `scoring.strong_trend.return_strong_cap` | 0.70 | Cap on excess return for scaling |
+| `scoring.strong_trend.return_strong_scale` | 3.0 | Max bonus from excess return |
+| `scoring.strong_trend.return_moderate_base` | 1.0 | Base for moderate return |
+| `scoring.strong_trend.return_moderate_scale` | 2.0 | Max bonus for moderate return |
+| `scoring.strong_trend.adx_strong_base` | 2.0 | Base when ADX >= adx_strong_trend |
+| `scoring.strong_trend.adx_strong_divisor` | 20.0 | Divisor for ADX excess bonus |
+| `scoring.strong_trend.adx_moderate_score` | 0.5 | When ADX >= adx_weak |
+| `scoring.strong_trend.consistency_high_score` | 2.0 | pct_above_ma strongly one-sided |
+| `scoring.strong_trend.consistency_moderate_score` | 0.5 | Moderately one-sided |
+| `scoring.strong_trend.extended_distance_score` | 1.0 | Price far from MA |
+| `scoring.strong_trend.direction_change_low` | 0.4 | Threshold for low direction changes |
+| `scoring.strong_trend.direction_change_low_score` | 1.0 | Score when changes < threshold |
+| `scoring.strong_trend.direction_change_mid` | 0.5 | Mid threshold |
+| `scoring.strong_trend.direction_change_mid_score` | 0.3 | Score when changes < mid threshold |
+
+#### Mean Reverting scoring
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scoring.mean_reverting.return_strong_penalty` | 2.0 | Penalty when \|return\| >= strong |
+| `scoring.mean_reverting.return_moderate_penalty` | 1.0 | Penalty for moderate return |
+| `scoring.mean_reverting.return_small_bonus` | 1.5 | Bonus when return is small |
+| `scoring.mean_reverting.adx_low_score` | 2.0 | ADX < adx_weak |
+| `scoring.mean_reverting.adx_moderate_score` | 1.0 | ADX < adx_strong_trend |
+| `scoring.mean_reverting.pct_away_tight` | 15 | pct_above_ma within 50 +/- this = range-bound |
+| `scoring.mean_reverting.pct_away_tight_score` | 2.0 | Score for tight range |
+| `scoring.mean_reverting.pct_away_moderate` | 25 | Moderate range |
+| `scoring.mean_reverting.pct_away_moderate_score` | 1.0 | Score for moderate range |
+| `scoring.mean_reverting.atr_below_high_score` | 0.5 | ATR% below high threshold |
+| `scoring.mean_reverting.atr_below_low_score` | 0.5 | ATR% below low threshold (additional) |
+| `scoring.mean_reverting.price_ma_close_threshold` | 0.03 | Price within this % of MA |
+| `scoring.mean_reverting.price_ma_close_score` | 1.0 | Score when close to MA |
+
+#### Volatile Choppy scoring
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scoring.volatile_choppy.atr_high_base` | 2.0 | Base when ATR% >= high |
+| `scoring.volatile_choppy.atr_high_scale` | 30.0 | Multiplier for excess ATR% |
+| `scoring.volatile_choppy.atr_moderate_score` | 0.5 | ATR% >= low |
+| `scoring.volatile_choppy.direction_change_high_score` | 2.0 | High direction changes |
+| `scoring.volatile_choppy.direction_change_moderate` | 0.45 | Moderate threshold |
+| `scoring.volatile_choppy.direction_change_moderate_score` | 1.0 | Score for moderate |
+| `scoring.volatile_choppy.low_adx_small_return_score` | 0.5 | Low ADX + small return |
+| `scoring.volatile_choppy.wide_bb_score` | 1.0 | BB width > expansion percentile |
+
+#### Breakout Transition scoring
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scoring.breakout.bb_squeeze_score` | 2.5 | BB width <= squeeze percentile |
+| `scoring.breakout.adx_moderate_score` | 1.0 | ADX in moderate zone |
+| `scoring.breakout.direction_change_threshold` | 0.40 | Min changes for consolidation |
+| `scoring.breakout.low_atr_high_changes_score` | 1.0 | Low ATR + high changes |
+| `scoring.breakout.price_ma_close_threshold` | 0.03 | Price near MA during consolidation |
+| `scoring.breakout.bb_consolidation_percentile` | 40 | BB width below this + near MA |
+| `scoring.breakout.consolidation_score` | 0.5 | Score for consolidation |
+
+### Strategy Adaptation per Regime
+
+Section: `regime.strategy_adaptation`
+
+Each regime has adaptation rules that override base strategy behavior during
+backtesting.
+
+#### Strong Trend adaptation
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy_adaptation.strong_trend.use_trailing_stop` | true | Trail stop instead of score-based exits |
+| `strategy_adaptation.strong_trend.trailing_stop_atr_mult` | 4.0 | Trailing stop = N x ATR |
+| `strategy_adaptation.strong_trend.ignore_score_entries` | true | Don't use score thresholds for entry |
+| `strategy_adaptation.strong_trend.hold_with_trend` | true | Stay in position while trend persists |
+| `strategy_adaptation.strong_trend.min_distance` | 0.01 | Price must be 1%+ from MA for entry |
+| `strategy_adaptation.strong_trend.min_score` | 3.5 | Don't enter when indicators are strongly bearish |
+| `strategy_adaptation.strong_trend.respect_trend_direction` | true | Only enter in direction of long-term trend |
+
+#### Mean Reverting adaptation
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy_adaptation.mean_reverting.use_trailing_stop` | false | Use score-based entries/exits |
+| `strategy_adaptation.mean_reverting.tighten_thresholds` | true | Narrow HOLD zone for more trades |
+| `strategy_adaptation.mean_reverting.threshold_adjustment` | 0.3 | Narrow thresholds by this on each side |
+
+#### Volatile Choppy adaptation
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy_adaptation.volatile_choppy.reduce_position_size` | true | Halve position size |
+| `strategy_adaptation.volatile_choppy.position_size_mult` | 0.5 | Position size multiplier |
+| `strategy_adaptation.volatile_choppy.widen_stops` | true | Widen stop loss |
+| `strategy_adaptation.volatile_choppy.stop_loss_mult` | 1.5 | Stop loss multiplier |
+
+#### Breakout Transition adaptation
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy_adaptation.breakout_transition.use_momentum_entry` | true | Enter on breakout confirmation |
+| `strategy_adaptation.breakout_transition.breakout_atr_mult` | 1.5 | Price must move N x ATR from squeeze level |
+| `strategy_adaptation.breakout_transition.require_volume_surge` | true | Require above-avg volume |
+| `strategy_adaptation.breakout_transition.volume_surge_mult` | 1.3 | Volume must be N x average |
+
+---
+
+## Trading Mode Suitability
+
+Section: `suitability`
+
+Auto-detects whether a stock is suitable for shorting, active trading, or
+should be held only. Three modes:
+
+| Mode | Behavior |
+|------|----------|
+| `long_short` | Both long and short positions allowed |
+| `long_only` | Only long positions; goes to cash when bearish |
+| `hold_only` | Unsuitable for active trading; analysis display only |
+
+### Suitability thresholds
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `suitability.mode_override` | "auto" | "auto", "long_short", "long_only", "hold_only" |
+| `suitability.min_volume` | 100000 | Avg daily volume below this = hold_only |
+| `suitability.min_atr_pct` | 0.005 | ATR/price below this = hold_only (0.5%) |
+| `suitability.min_adx_for_short` | 25.0 | ADX below this = no shorting (long_only) |
+| `suitability.min_atr_for_short` | 0.01 | ATR/price below this = no shorting (1%) |
+| `suitability.min_volume_for_short` | 500000 | Avg volume below this = no shorting |
+| `suitability.trend_ma_period` | 200 | Long-term MA period for structural trend check |
+| `suitability.max_pct_above_ma` | 65.0 | Price above MA > this % of time = long_only |
+| `suitability.atr_period` | 14 | ATR calculation period |
+
+### Advanced (rarely changed)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `suitability.adx_min_data_mult` | 3 | Require period x this many bars for ADX calculation |
+| `suitability.insufficient_data_pct` | 50.0 | pct_above_ma fallback when data < trend_ma_period (50 = no bias) |
+
+---
+
+## Objective Presets
+
+Section: `objectives`
+
+Named presets that override specific base config values. Select via CLI:
 
 ```bash
-python main.py AAPL --start 2015-01-01                  # 2015 to today
-python main.py AAPL --start 2015-01-01 --end 2020-12-31 # 2015 to 2020
+python main.py AAPL --objective long_term
+python main.py AAPL -o short_term -b
+python main.py AAPL -o day_trading -b -i 5m --start 2026-02-17
 ```
 
-When `--start` is specified, `--period` is ignored.
+Presets are partial configs — only keys listed in the preset are
+overridden. All other settings keep their base values.
 
-### Intraday Data Limits
+### Built-in presets
 
-Yahoo Finance imposes strict limits on how far back intraday data is available:
+| Preset | Holding period | Key differences |
+|--------|---------------|-----------------|
+| `long_term` | Weeks to months | Slower periods (RSI 21, MACD 19/39), wider stops (10% / 100% take-profit), heavier MA/ADX/volume weights, 200-bar warmup |
+| `short_term` | Days to weeks | Faster periods (RSI 9, MACD 8/17), tighter stops (3% / 20%), heavier MACD/Stochastic weights, 60-bar warmup |
+| `day_trading` | Intraday only | Very fast periods (RSI 5, MACD 5/13), tight stops (1.5% / 3%), EOD flattening, rebalance every bar, 30-bar warmup |
 
-| Interval | Maximum History |
-|----------|----------------|
-| 1m | Last 7 days |
-| 2m | Last 60 days |
-| 5m | Last 60 days |
-| 15m | Last 60 days |
-| 30m | Last 60 days |
-| 60m / 1h | Last 730 days |
-| 90m | Last 730 days |
-| Daily+ (1d, 1wk, etc.) | Unlimited |
+### Creating custom presets
 
-The tool validates your period/date selection against these limits and will show an error with valid options if you exceed them.
+Add a new key under `objectives` in `config.yaml`:
 
-### Data Normalization
+```yaml
+objectives:
+  my_preset:
+    description: "My custom preset"
+    rsi:
+      period: 10
+    strategy:
+      stop_loss_pct: 0.04
+      rebalance_interval: 3
+    backtest:
+      warmup_bars: 80
+```
 
-The tool automatically:
-- Uses adjusted prices (splits and dividends accounted for)
-- Normalizes column names to lowercase
-- Removes timezone information from timestamps
-- Validates that required columns (open, high, low, close, volume) are present
-
----
-
-## 14. Display and Output
-
-### Analysis Output
-
-The standard analysis display includes:
-
-1. **Header Panel** — Company name, ticker, current price, period, active objective (if set), sector, exchange, currency, and market cap.
-
-2. **Technical Indicators Table** — One row per indicator showing:
-   - Indicator name
-   - Primary value (e.g., RSI: 45.2)
-   - Descriptive detail (e.g., "14-period | Neutral")
-   - Score with visual bar (`████░░░░░░ 6.2`)
-
-3. **Overall Score** — Weighted composite of all indicator scores.
-
-4. **Pattern Signals Table** — One row per pattern detector showing:
-   - Pattern name
-   - Primary value (e.g., "3 gaps detected")
-   - Descriptive detail (e.g., "1 breakaway ↑, 2 common")
-   - Score with visual bar
-   - PATTERN SCORE composite at the bottom
-
-5. **Support and Resistance Table** — Up to 4 support levels and 4 resistance levels with prices, labels, and detection sources.
-
-6. **Market Regime Panel** — A bordered panel showing:
-   - Detected regime (Strong Trend, Mean-Reverting, Volatile/Choppy, or Breakout/Transition)
-   - Confidence percentage
-   - Description of the regime and recommended approach
-   - Key metrics: total return, ADX (current and rolling average), trend MA consistency, ATR%, direction changes
-   - Explanatory reasons for the classification
-
-7. **Score Legend** — Color-coded interpretation guide.
-
-8. **Disclaimer** — "For informational purposes only. Not financial advice."
-
-### Backtest Output
-
-The backtest display includes:
-
-1. **Header Panel** — Ticker, period, strategy name, active objective.
-
-2. **Suitability Assessment** (if auto-detected) — Trading mode, metrics, and reasons.
-
-3. **Performance Summary Table** — All metrics from [Section 9.5](#95-performance-metrics), color-coded green (positive) or red (negative).
-
-4. **Market Regime Panel** — Same regime panel as the analysis view (see above), showing the regime detected on the full backtest dataset and how it influenced strategy behavior.
-
-5. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted, gate, or boost), indicator/pattern weight split, ATR stop settings, trend confirmation, and regime-adaptive overrides.
-
-6. **Trade Log** — Detailed table of every trade:
-   - Trade number, side (LONG/SHORT), entry/exit dates and prices
-   - Quantity, P&L dollar amount and percentage, exit reason
-   - Up to 50 trades shown; if more, first 25 + last 25 with a count of omitted trades
-
-7. **Significant Patterns Timeline** — A chronological table of all notable patterns detected during the backtest period (not just the ones the strategy acted on). This helps you spot entry/exit opportunities the strategy may have missed. Columns:
-   - **Date** — When the pattern was detected
-   - **Detector** — Which detector found it (Candlesticks, Gaps, Spikes, Inside/Outside Bars)
-   - **Pattern** — Specific pattern name (e.g., Hammer, Breakaway Gap UP, Spike DOWN)
-   - **Signal** — Bullish or Bearish with directional arrow
-   - **Strength** — Raw strength value (detector-specific)
-   - **Detail** — Extra context (e.g., gap percentage, z-score and confirmation status)
-   - Up to 80 patterns shown; if more, first 40 + last 40 with a count of omitted entries
-   - Summary line shows total count with bullish/bearish breakdown
-   - Minimum strength threshold is configurable via `backtest.significant_pattern_min_strength` (default: 0.5)
-
-8. **Equity Curve** — Text-based checkpoints showing portfolio value at start, 25%, 50%, 75%, and end of the backtest period.
-
-9. **Backtest Disclaimer** — "Backtest results are hypothetical and do not guarantee future performance."
-
----
-
-## 15. Graphical Dashboard (Streamlit)
-
-The tool includes a browser-based graphical dashboard built with [Streamlit](https://streamlit.io/) and [Plotly](https://plotly.com/python/). It provides the same analysis and backtesting capabilities as the CLI, but with interactive charts and visual layouts that make config tuning easier.
-
-### 15.1 Running the Dashboard
+Then use it:
 
 ```bash
-# From the project directory:
-streamlit run dashboard.py
-
-# Or with full Python path if needed:
-/Users/aleqian/miniconda3/bin/python -m streamlit run dashboard.py
+python main.py AAPL -o my_preset -b
 ```
-
-This opens the dashboard in your default browser (usually at `http://localhost:8501`).
-
-### 15.2 Dashboard Features
-
-**Sidebar Controls:**
-- **Ticker** — Enter any stock symbol (e.g., AAPL, TSLA, MSFT)
-- **Range mode** — Choose between Period (1mo, 3mo, 6mo, ...) or Custom dates (start/end date pickers)
-- **Interval** — All intervals from 1m to 3mo
-- **Objective preset** — Select long_term, short_term, day_trading, or none
-- **Run backtest** — Toggle backtesting on/off with trading mode selection
-- **Parameter editing** — Expandable sections for tuning all parameters in real time:
-  - **Indicator Weights** — Adjust the weight of each indicator in the composite score
-  - **Indicator Parameters** — Tune individual indicator settings (periods, thresholds, scoring)
-  - **Pattern Weights** — Adjust pattern detector weights
-  - **Strategy Parameters** — Combination mode, thresholds, position sizing, stop-loss, take-profit, ATR stop, trend confirmation
-  - **Backtest Parameters** — Initial cash, commission, slippage, warmup bars, max warmup ratio
-  - **Regime Parameters** — All classification thresholds (ADX, ATR%, direction changes, total return, BB squeeze/expansion) and per-regime strategy adaptation settings
-  - Each parameter shows a small gray hint below it with the default value and a brief description
-- **Config loadouts** — Save and load parameter configurations as named loadouts for quick comparison
-
-**Analysis View:**
-1. **Header** — Ticker name, price, indicator composite score, pattern composite score
-2. **Candlestick Price Chart** — Interactive OHLCV chart with:
-   - Support/resistance levels (dashed lines)
-   - Volume bars (colored by direction)
-   - Indicator and pattern score time-series overlay (bottom panel)
-   - Threshold markers showing where LONG/SHORT/HOLD boundaries are
-3. **Indicator Breakdown Table** — Each indicator's value, detail, score (with progress bar), and weight
-4. **Pattern Signals Table** — Each pattern's signal, detail, score, and weight
-5. **Market Regime Panel** — Detected regime type, confidence percentage, and key metrics (total return, ADX current/average, trend MA %, ATR%, direction changes). Includes explanatory reasons for the classification.
-6. **Score Distribution Histogram** — Distribution of indicator and pattern scores over the full period, with threshold markers
-
-**Backtest View (when enabled):**
-1. **Suitability Assessment** — Trading mode, avg volume, ADX, ATR% metrics with reason explanations
-2. **Performance Metrics** — Total return, annualized return, max drawdown, Sharpe ratio, win rate, profit factor, etc.
-3. **Equity Curve Chart** — Strategy equity vs. buy-and-hold benchmark with:
-   - Entry markers (triangles for long/short)
-   - Exit markers (X symbols, colored by win/loss)
-   - Hover details for each trade
-4. **Market Regime** — The regime detected on the full backtest dataset, including confidence and strategy adaptation summary
-5. **Strategy Configuration** — Expandable panel showing all active strategy parameters
-6. **Trade Log** — Full trade history in a scrollable table
-7. **Significant Patterns Timeline** — Expandable panel showing all notable patterns detected during the backtest period with bullish/bearish summary counts (same data as the CLI version)
-
-### 15.3 Performance Notes
-
-- **Data caching**: Results are cached for 5 minutes (`@st.cache_data(ttl=300)`). Changing any sidebar input automatically re-runs the computation.
-- **Score timeseries**: Computing scores at every bar is expensive. The dashboard samples at ~150 evenly-spaced points for responsiveness. For a 2-year daily dataset (~500 bars), this means scores are computed roughly every 3-4 bars.
-- **Backtest**: The backtest runs the same engine as the CLI — identical results are expected for the same inputs.
-- **Parameter editing**: All parameter changes in the sidebar take effect immediately on the next analysis run. Changes are session-local — they do not modify `config.yaml` on disk unless you explicitly save a loadout.
 
 ---
 
-## 16. Extending the Tool: Adding New Indicators
+## Tips & Troubleshooting
 
-The plugin architecture makes it straightforward to add new indicators without modifying any existing code.
+### Score compression
 
-### Step 1: Create the Indicator File
+The composite score (weighted average of 8 indicators) has much lower
+variance than individual indicators. Typical effective range is ~3.7-5.9.
+**Set strategy thresholds within that actual range**, or use
+`threshold_mode: "percentile"` for self-calibrating thresholds.
 
-Create a new Python file in the `indicators/` directory, e.g., `indicators/vwap.py`:
+### Warmup eating your data
+
+With default `warmup_bars: 100` on a 6-month dataset (~126 bars), warmup
+consumes ~50% of your data (capped by `max_warmup_ratio: 0.5`). Solutions:
+- Use a longer period (`--period 2y` or more)
+- Lower `warmup_bars` (but must be >= longest indicator lookback)
+- Use `--objective short_term` which sets `warmup_bars: 60`
+
+### yfinance quirks
+
+- `10y` period is **not** supported — use `5y` or `max`, or `--start` dates
+- Day-count periods like `60d` are **not** supported
+- Our data provider rejects `5d` — minimum is `1mo`
+- Intraday data has limited history (see table above)
+
+### LSP type errors
+
+The `ta`, `yfinance`, `plotly`, and `streamlit` libraries have poor type
+stubs. Errors about DataFrame/Series/ndarray type mismatches from your
+editor's language server are benign and can be ignored.
+
+### Backtest performance issues
+
+If your backtest underperforms the buy-and-hold:
+1. Check that warmup isn't eating most of your data
+2. Score compression may prevent entries — try `threshold_mode: "percentile"`
+3. Tune thresholds in `config.yaml` — all 169+ parameters are now
+   configurable without code changes
+4. Try different objectives: `--objective long_term` for trending stocks
+
+### Config access patterns (for developers)
 
 ```python
-from __future__ import annotations
-from typing import Any
-
-import pandas as pd
-from .base import BaseIndicator
-
-
-class VWAPIndicator(BaseIndicator):
-    # Display name shown in the terminal output
-    name = "VWAP"
-
-    # Key used in config.yaml and weights — must be unique
-    config_key = "vwap"
-
-    def compute(self, df: pd.DataFrame) -> dict[str, Any]:
-        """Compute raw indicator values from OHLCV DataFrame."""
-        typical_price = (df["high"] + df["low"] + df["close"]) / 3
-        cumulative_tp_vol = (typical_price * df["volume"]).cumsum()
-        cumulative_vol = df["volume"].cumsum()
-        vwap = cumulative_tp_vol / cumulative_vol
-        current_vwap = float(vwap.iloc[-1])
-        current_price = float(df["close"].iloc[-1])
-        return {
-            "vwap": current_vwap,
-            "price": current_price,
-            "deviation_pct": (current_price - current_vwap) / current_vwap * 100,
-        }
-
-    def score(self, values: dict[str, Any]) -> float:
-        """Translate computed values into a 0-10 score."""
-        dev = values["deviation_pct"]
-        threshold = self.config.get("deviation_threshold", 2.0)
-        # Price above VWAP = bullish; below = bearish
-        raw = self._linear_score(dev, -threshold, threshold, 1.0, 9.0)
-        return self._clamp(raw)
-
-    def summary(self, values: dict[str, Any], score: float) -> dict[str, Any]:
-        """Build display strings for the terminal table."""
-        return {
-            "value_str": f"${values['vwap']:.2f}",
-            "detail_str": f"Price deviation: {values['deviation_pct']:+.2f}%",
-        }
+cfg = Config.load()                # from config.yaml
+cfg = Config.from_dict(data)       # from arbitrary dict
+cfg.get("key")                     # top-level only (no dot-notation)
+cfg.section("strategy").get("key") # nested access
+cfg.normalized_weights()           # auto-normalized indicator weights
 ```
-
-### Step 2: Add Configuration
-
-In `config.yaml`, add a section for your indicator:
-
-```yaml
-vwap:
-  deviation_threshold: 2.0
-```
-
-Also add it to the `DEFAULT_CONFIG` dictionary in `config.py`:
-
-```python
-"vwap": {
-    "deviation_threshold": 2.0,
-},
-```
-
-### Step 3: Add a Weight
-
-In the `overall.weights` section of `config.yaml` (and `DEFAULT_CONFIG`):
-
-```yaml
-overall:
-  weights:
-    rsi: 0.15
-    macd: 0.15
-    bollinger_bands: 0.10
-    moving_averages: 0.15
-    stochastic: 0.10
-    adx: 0.10
-    volume: 0.10
-    fibonacci: 0.05
-    vwap: 0.10       # new indicator weight
-```
-
-### That's It
-
-No other code changes needed. The indicator registry automatically discovers any class in the `indicators/` directory that:
-- Subclasses `BaseIndicator`
-- Has a non-empty `config_key` class attribute
-
-### Available Helper Methods
-
-All indicators inherit these from `BaseIndicator`:
-
-| Method | Description |
-|--------|-------------|
-| `self._clamp(value, lo=0.0, hi=10.0)` | Clamp a value to a range |
-| `self._linear_score(value, low_val, high_val, low_score, high_score)` | Linearly interpolate a score between two value endpoints |
-| `self.config` | The indicator's config section from `config.yaml` |
-| `self.run(df)` | Convenience method that calls compute → score → summary with error handling |
-
----
-
-## 17. Troubleshooting
-
-### "No data found for ticker"
-
-- Verify the ticker symbol is correct and traded on a Yahoo Finance-supported exchange.
-- Check your internet connection.
-
-### "Period X is too long for interval Y"
-
-- Intraday data has strict history limits (see [Section 13](#13-data-provider-and-limitations)).
-- Use `--start` with a recent date instead of `--period`, or use a wider interval.
-
-### SMA-200 shows "N/A"
-
-- With short data periods (e.g., `--period 3mo`), there aren't enough bars to compute a 200-day moving average.
-- Use a longer period or the `short_term` / `day_trading` objective (which uses shorter MA periods).
-
-### Composite scores are always near 5.0
-
-- This is expected when averaging 8 indicators. The composite naturally has lower variance than individual indicators.
-- The strategy thresholds (4.5/5.5 for fixed mode) are calibrated for this narrow range.
-- Consider using `threshold_mode: "percentile"` for self-calibrating thresholds that adapt to each stock.
-
-### "day_trading objective requires an intraday interval"
-
-- The `day_trading` preset is designed for intraday data. Add an interval flag:
-  ```bash
-  python main.py AAPL -o day_trading -b -i 5m --start 2026-02-10
-  ```
-
-### Backtest shows "No trades were executed"
-
-- The warmup period may consume all your data. Ensure your data has at least `warmup_bars + 10` bars after warmup.
-- For short-term / day trading presets, warmup is smaller (60 / 30 bars), so this is less likely.
-- Check that your score thresholds actually produce BUY/SELL signals — if all scores fall in the HOLD zone, no trades are generated.
-
-### Config validation warnings
-
-- Run `python main.py --validate-config` to see all issues.
-- Common issues: oversold ≥ overbought, short_below ≥ hold_below, negative weights.
-
----
-
-*This tool is for informational and educational purposes only. It does not constitute financial advice. Backtest results are hypothetical and do not guarantee future performance. Always do your own research before making investment decisions.*
