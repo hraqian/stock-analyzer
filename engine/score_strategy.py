@@ -145,9 +145,12 @@ class ScoreBasedStrategy(Strategy):
         self._regime_adapt: dict[str, dict[str, Any]] = {
             "strong_trend": ra.get("strong_trend", {
                 "use_trailing_stop": True,
-                "trailing_stop_atr_mult": 3.0,
+                "trailing_stop_atr_mult": 5.0,
                 "ignore_score_entries": True,
                 "hold_with_trend": True,
+                "min_distance": 0.01,       # 1% from MA for trend entry
+                "min_score": 3.5,           # don't enter when indicators are strongly bearish
+                "respect_trend_direction": True,  # only enter in the direction of the long-term trend
             }),
             "mean_reverting": ra.get("mean_reverting", {
                 "use_trailing_stop": False,
@@ -169,6 +172,35 @@ class ScoreBasedStrategy(Strategy):
         }
         # Trailing stop tracker (for strong trend regime)
         self._trailing_stop_price: float = 0.0
+
+        # Re-entry grace period: after exiting a position, skip trend
+        # confirmation for N bars to allow faster re-entry in trending markets.
+        self._reentry_grace_bars: int = int(self.params.get("reentry_grace_bars", 10))
+        self._bars_since_exit: int = 999  # start high so no grace on fresh start
+
+        # ── Consecutive loss cooldown ───────────────────────────────────
+        # After N consecutive losing trades, escalate entry requirements
+        # to avoid repeated re-entries during extended pullbacks.
+        self._consecutive_losses: int = 0
+        self._cooldown_max_losses: int = int(
+            self.params.get("cooldown_max_losses", 2)
+        )
+        self._cooldown_distance_mult: float = float(
+            self.params.get("cooldown_distance_mult", 2.0)
+        )
+        self._cooldown_min_score: float = float(
+            self.params.get("cooldown_min_score", 4.5)
+        )
+
+        # ── Global directional bias ────────────────────────────────────
+        # When the regime's total return is strongly positive/negative,
+        # suppress counter-trend entries even in non-strong_trend regimes.
+        self._global_bias_enabled: bool = bool(
+            self.params.get("global_trend_bias", True)
+        )
+        self._global_bias_threshold: float = float(
+            self.params.get("global_bias_threshold", 0.10)
+        )
 
     @property
     def trading_mode(self) -> TradingMode:
@@ -203,6 +235,9 @@ class ScoreBasedStrategy(Strategy):
         ind_score = ctx.overall_score
         pat_score = ctx.pattern_score
         regime = ctx.regime
+
+        # Track bars since last exit for re-entry grace period
+        self._bars_since_exit += 1
 
         # ── Get regime-adapted thresholds ───────────────────────────────
         short_below, hold_below = self._get_regime_thresholds(regime)
@@ -246,13 +281,33 @@ class ScoreBasedStrategy(Strategy):
                 if not self._breakout_confirmed(ctx):
                     signal = Signal.HOLD
 
+        # ── Global directional bias: suppress counter-trend entries ─────
+        # When the regime's total return is strongly positive/negative,
+        # suppress counter-trend entries even in non-strong_trend regimes.
+        # This prevents shorting in a +115% trend just because the current
+        # regime window happens to classify as mean_reverting.
+        if self._global_bias_enabled and ctx.position == 0:
+            total_return = ctx.regime_total_return
+            if total_return >= self._global_bias_threshold and signal == Signal.SELL:
+                signal = Signal.HOLD  # don't short in a strong uptrend
+            elif total_return <= -self._global_bias_threshold and signal == Signal.BUY:
+                signal = Signal.HOLD  # don't go long in a strong downtrend
+
         # ── Apply trading mode constraints ──────────────────────────────
         signal = self._constrain_signal(signal, ctx.position)
 
         # ── Trend confirmation filter ───────────────────────────────────
         # Prevent entering trades against the short-term trend direction.
         # Only applied to NEW entries (not closing existing positions).
-        if self._trend_confirm_enabled and ctx.trend_ma > 0 and ctx.position == 0:
+        # SKIP during re-entry grace period to allow faster re-entry after
+        # forced exits (stop-loss, take-profit, trailing stop).
+        in_grace = self._bars_since_exit <= self._reentry_grace_bars
+        if (
+            self._trend_confirm_enabled
+            and ctx.trend_ma > 0
+            and ctx.position == 0
+            and not in_grace
+        ):
             close = ctx.bar.get("close", 0.0)
             if signal == Signal.BUY and close < ctx.trend_ma:
                 signal = Signal.HOLD  # don't buy into a downtrend
@@ -264,12 +319,20 @@ class ScoreBasedStrategy(Strategy):
 
         # If we already hold a position in the signal direction, HOLD.
         current_pos = ctx.position  # positive = long, negative = short
+        was_in_position = current_pos != 0
         if signal == Signal.BUY and current_pos > 0:
             signal = Signal.HOLD
         elif signal == Signal.SELL and current_pos < 0:
             signal = Signal.HOLD
 
+        # Track exits for re-entry grace period
+        if was_in_position and signal != Signal.HOLD:
+            # A SELL when long or BUY when short = closing a position
+            if (current_pos > 0 and signal == Signal.SELL) or (current_pos < 0 and signal == Signal.BUY):
+                self._bars_since_exit = 0
+
         regime_tag = f" regime={regime.value}" if regime else ""
+        grace_tag = " grace" if in_grace and ctx.position == 0 else ""
         return TradeOrder(
             signal=signal,
             quantity=quantity,
@@ -277,14 +340,23 @@ class ScoreBasedStrategy(Strategy):
                 f"ind={ind_score:.2f} pat={pat_score:.2f} "
                 f"eff={effective_score:.2f} mode={self._trading_mode.value}"
                 + (f" tma={ctx.trend_ma:.2f}" if self._trend_confirm_enabled and ctx.trend_ma > 0 else "")
-                + regime_tag
+                + regime_tag + grace_tag
             ),
         )
 
     def on_start(self, metadata: dict[str, Any]) -> None:
-        """Reset rolling window and trailing stop at the start of each backtest."""
+        """Reset rolling window, trailing stop, cooldown, and re-entry grace at the start of each backtest."""
         self._score_window.clear()
         self._trailing_stop_price = 0.0
+        self._bars_since_exit = 999
+        self._consecutive_losses = 0
+
+    def on_trade_close(self, pnl_pct: float, exit_reason: str) -> None:
+        """Track consecutive losses for cooldown logic."""
+        if pnl_pct < 0:
+            self._consecutive_losses += 1
+        else:
+            self._consecutive_losses = 0
 
     # ------------------------------------------------------------------
     # Regime adaptation helpers
@@ -320,14 +392,28 @@ class ScoreBasedStrategy(Strategy):
     ) -> TradeOrder:
         """Strong trend regime: hold position, manage via trailing stop.
 
-        When holding a long in a bullish trend (or short in bearish), maintain
-        the position.  The trailing stop is managed by the backtest engine's
+        When holding a position aligned with the trend direction, maintain
+        it.  The trailing stop is managed by the backtest engine's
         ATR-adaptive stop — we just signal HOLD to keep the position.
+
+        If holding a position AGAINST the trend direction (e.g. short in
+        a bullish trend), exit immediately — this shouldn't happen with the
+        updated entry logic, but acts as a safety net.
 
         Exit only if the score turns strongly against the position.
         """
         close = ctx.bar.get("close", 0.0)
         adapt = self._regime_adapt["strong_trend"]
+        trend_direction = ctx.regime_trend
+        total_return = ctx.regime_total_return
+
+        # Determine effective bias from total return (same logic as entry)
+        if total_return >= 0.15:
+            effective_bias = "bullish"
+        elif total_return <= -0.15:
+            effective_bias = "bearish"
+        else:
+            effective_bias = trend_direction
 
         # Compute effective score for logging
         w_total = self._indicator_weight + self._pattern_weight
@@ -339,10 +425,39 @@ class ScoreBasedStrategy(Strategy):
         else:
             effective_score = ind_score
 
+        # Safety: exit if holding against the trend direction
+        if adapt.get("respect_trend_direction", True):
+            if effective_bias == "bullish" and ctx.position < 0:
+                # Short in a bullish trend — close immediately
+                signal = self._constrain_signal(Signal.BUY, ctx.position)
+                quantity = self._compute_quantity(ctx, ctx.regime)
+                return TradeOrder(
+                    signal=signal,
+                    quantity=quantity,
+                    notes=(
+                        f"ind={ind_score:.2f} pat={pat_score:.2f} "
+                        f"eff={effective_score:.2f} mode={self._trading_mode.value}"
+                        f" regime=strong_trend close_counter_trend bias={effective_bias}"
+                    ),
+                )
+            elif effective_bias == "bearish" and ctx.position > 0:
+                # Long in a bearish trend — close immediately
+                signal = self._constrain_signal(Signal.SELL, ctx.position)
+                quantity = self._compute_quantity(ctx, ctx.regime)
+                return TradeOrder(
+                    signal=signal,
+                    quantity=quantity,
+                    notes=(
+                        f"ind={ind_score:.2f} pat={pat_score:.2f} "
+                        f"eff={effective_score:.2f} mode={self._trading_mode.value}"
+                        f" regime=strong_trend close_counter_trend bias={effective_bias}"
+                    ),
+                )
+
         # Allow exit if score is extremely bearish (for longs) or bullish (for shorts)
         # Use a wide margin — only exit on extreme conviction reversal
-        extreme_bearish = self._short_below - 0.5  # e.g. 4.0 if short_below=4.5
-        extreme_bullish = self._hold_below + 0.5   # e.g. 6.0 if hold_below=5.5
+        extreme_bearish = self._short_below - 1.5  # e.g. 2.0 if short_below=3.5
+        extreme_bullish = self._hold_below + 1.5   # e.g. 8.0 if hold_below=6.5
 
         signal = Signal.HOLD
         if ctx.position > 0 and effective_score < extreme_bearish:
@@ -359,45 +474,54 @@ class ScoreBasedStrategy(Strategy):
             notes=(
                 f"ind={ind_score:.2f} pat={pat_score:.2f} "
                 f"eff={effective_score:.2f} mode={self._trading_mode.value}"
-                f" regime=strong_trend hold_with_trend"
+                f" regime=strong_trend hold_with_trend bias={effective_bias}"
             ),
         )
 
     def _strong_trend_entry(
         self, ctx: StrategyContext, ind_score: float, pat_score: float
     ) -> TradeOrder | None:
-        """Strong trend regime: enter based on trend direction, not score.
+        """Strong trend regime: enter in the direction of the long-term trend.
 
-        If trend_ma is available and price is clearly above it, go long.
-        If clearly below, go short. Otherwise, return None to fall through
-        to normal score-based logic.
+        Key principles:
+        - Uses **total return** over the analysis period as the PRIMARY
+          directional signal.  A stock up 30%+ is bullish regardless of
+          short-term ``trend_direction``.  Falls back to ``trend_direction``
+          only if total return is ambiguous (between -15% and +15%).
+        - When ``respect_trend_direction`` is enabled:
+          - Positive total return: only allow LONG entries, never SHORT.
+          - Negative total return: only allow SHORT entries, never LONG.
+          - Ambiguous return: use ``trend_direction`` or price/MA relationship.
+        - Require price to be meaningfully away from the MA (configurable
+          ``min_distance``, default 1%) to confirm trend resumption.
+        - Require a minimum effective score (``min_score``, default 3.5) so
+          we don't enter when indicators are strongly against us.
+        - If conditions aren't met, return None to fall through to normal
+          score-based logic (which will likely HOLD in the wide 3.5-6.5 zone).
         """
         close = ctx.bar.get("close", 0.0)
         trend_ma = ctx.trend_ma
+        trend_direction = ctx.regime_trend      # "bullish", "bearish", or "neutral"
+        total_return = ctx.regime_total_return   # e.g. 1.15 for +115%
 
         if trend_ma <= 0 or close <= 0:
             return None  # no trend data — fall through
 
+        adapt = self._regime_adapt["strong_trend"]
+        min_distance = float(adapt.get("min_distance", 0.01))
+        min_score = float(adapt.get("min_score", 3.5))
+        respect_direction = adapt.get("respect_trend_direction", True)
+
+        # ── Consecutive loss cooldown ───────────────────────────────────
+        # After repeated losses, tighten entry requirements to avoid
+        # repeated re-entries during extended pullbacks.
+        if self._consecutive_losses >= self._cooldown_max_losses:
+            min_distance *= self._cooldown_distance_mult
+            min_score = max(min_score, self._cooldown_min_score)
+
         distance_pct = (close - trend_ma) / trend_ma
 
-        # Require some distance from MA to confirm trend direction
-        # (at least 0.5% above/below MA)
-        min_distance = 0.005
-
-        signal = Signal.HOLD
-        if distance_pct > min_distance:
-            signal = Signal.BUY
-        elif distance_pct < -min_distance:
-            signal = Signal.SELL
-
-        if signal == Signal.HOLD:
-            return None  # no clear trend direction — fall through
-
-        signal = self._constrain_signal(signal, ctx.position)
-        if signal == Signal.HOLD:
-            return None
-
-        # Compute effective score for logging
+        # Compute effective score for decision + logging
         w_total = self._indicator_weight + self._pattern_weight
         if w_total > 0:
             effective_score = (
@@ -407,6 +531,53 @@ class ScoreBasedStrategy(Strategy):
         else:
             effective_score = ind_score
 
+        # Minimum score gate: don't enter when indicators are strongly against us
+        if effective_score < min_score:
+            return None
+
+        # ── Determine effective trend bias ──────────────────────────────
+        # Use total return as the primary directional signal.
+        # total_return is a fraction (e.g. 1.15 = +115%, -0.20 = -20%)
+        if total_return >= 0.15:
+            effective_bias = "bullish"
+        elif total_return <= -0.15:
+            effective_bias = "bearish"
+        else:
+            # Ambiguous total return — use trend_direction or price/MA
+            effective_bias = trend_direction  # may be "neutral"
+
+        # ── Determine allowed entry direction ───────────────────────────
+        signal = Signal.HOLD
+
+        if respect_direction:
+            if effective_bias == "bullish":
+                # Only long in bullish trend
+                if distance_pct > min_distance:
+                    signal = Signal.BUY
+            elif effective_bias == "bearish":
+                # Only short in bearish trend
+                if distance_pct < -min_distance:
+                    signal = Signal.SELL
+            else:
+                # Neutral: enter in the direction price is relative to MA
+                if distance_pct > min_distance:
+                    signal = Signal.BUY
+                elif distance_pct < -min_distance:
+                    signal = Signal.SELL
+        else:
+            # respect_trend_direction disabled: pure price/MA entry
+            if distance_pct > min_distance:
+                signal = Signal.BUY
+            elif distance_pct < -min_distance:
+                signal = Signal.SELL
+
+        if signal == Signal.HOLD:
+            return None  # conditions not met — fall through
+
+        signal = self._constrain_signal(signal, ctx.position)
+        if signal == Signal.HOLD:
+            return None
+
         quantity = self._compute_quantity(ctx, ctx.regime)
 
         return TradeOrder(
@@ -415,7 +586,8 @@ class ScoreBasedStrategy(Strategy):
             notes=(
                 f"ind={ind_score:.2f} pat={pat_score:.2f} "
                 f"eff={effective_score:.2f} mode={self._trading_mode.value}"
-                f" regime=strong_trend trend_entry dist={distance_pct:+.3f}"
+                f" regime=strong_trend trend_entry"
+                f" bias={effective_bias} dist={distance_pct:+.3f}"
             ),
         )
 

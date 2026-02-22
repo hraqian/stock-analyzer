@@ -49,6 +49,8 @@ class StrategyContext:
     portfolio_value: float = 100_000.0  # total portfolio value
     trend_ma: float = 0.0               # short-term trend MA for confirmation filter
     regime: RegimeType | None = None    # current market regime classification
+    regime_trend: str = "neutral"       # trend direction from regime: "bullish", "bearish", "neutral"
+    regime_total_return: float = 0.0    # total return over the regime analysis period
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -91,6 +93,15 @@ class Strategy(ABC):
 
     def on_start(self, metadata: dict[str, Any]) -> None:
         """Called once before the backtest begins. Override if needed."""
+        pass
+
+    def on_trade_close(self, pnl_pct: float, exit_reason: str) -> None:
+        """Called when a trade closes. Override to track win/loss streaks.
+
+        Args:
+            pnl_pct:     Percentage P&L of the closed trade (e.g. 0.05 = +5%).
+            exit_reason: Why the trade was closed (e.g. "trailing_stop", "stop_loss", "signal").
+        """
         pass
 
     def on_end(self, metadata: dict[str, Any]) -> None:

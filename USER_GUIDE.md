@@ -779,9 +779,9 @@ The composite score is compared directly against fixed thresholds:
 
 | Composite Score | Signal |
 |----------------|--------|
-| ≤ 4.5 | **SELL** (enter short or close long) |
-| 4.5 – 5.5 | **HOLD** (maintain current position) |
-| > 5.5 | **BUY** (enter long or close short) |
+| ≤ 3.5 | **SELL** (enter short or close long) |
+| 3.5 – 6.5 | **HOLD** (maintain current position) |
+| > 6.5 | **BUY** (enter long or close short) |
 
 #### Percentile Mode
 
@@ -800,8 +800,8 @@ Percentile mode is **self-calibrating** — it adapts to each stock's actual sco
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `threshold_mode` | "fixed" | "fixed" or "percentile" |
-| `score_thresholds.short_below` | 4.5 | Fixed: SELL when score ≤ this |
-| `score_thresholds.hold_below` | 5.5 | Fixed: HOLD when score ≤ this; BUY above |
+| `score_thresholds.short_below` | 3.5 | Fixed: SELL when score ≤ this |
+| `score_thresholds.hold_below` | 6.5 | Fixed: HOLD when score ≤ this; BUY above |
 | `percentile_thresholds.short_percentile` | 25 | Percentile: SELL at or below this rank |
 | `percentile_thresholds.long_percentile` | 75 | Percentile: BUY at or above this rank |
 | `percentile_thresholds.lookback_bars` | 60 | Rolling window size |
@@ -818,6 +818,14 @@ After the score-based signal is generated, a **trend confirmation filter** can p
 | `trend_confirm_period` | 20 | EMA period for the trend filter |
 
 Objective presets adjust the confirmation period: `long_term` uses 50 (slower confirmation), `short_term` and `day_trading` use 10 (faster).
+
+#### Re-entry Grace Period
+
+After a position is force-closed (by stop-loss, take-profit, or trailing stop), the trend confirmation filter is temporarily bypassed for `reentry_grace_bars` bars. This allows faster re-entry in trending markets — without the grace period, a stop-out during a brief pullback could prevent the strategy from re-entering because price is temporarily below the trend EMA, causing it to miss the subsequent recovery.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `reentry_grace_bars` | 10 | Bars after a forced exit during which trend confirmation is skipped |
 
 ### 9.3 Position Management
 
@@ -850,7 +858,7 @@ The strategy only re-evaluates (re-runs all indicators and generates a new signa
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stop_loss_pct` | 0.05 (5%) | Close position if unrealized loss exceeds this |
-| `take_profit_pct` | 0.20 (20%) | Close position if unrealized gain exceeds this |
+| `take_profit_pct` | 0.50 (50%) | Close position if unrealized gain exceeds this (disabled in strong_trend regime) |
 
 #### ATR-Adaptive Stop Loss
 
@@ -860,16 +868,64 @@ Instead of using a fixed percentage stop, the engine can compute a **volatility-
 
 1. When a position is opened, the current ATR value is recorded.
 2. The ATR stop distance is computed as: `atr_stop = atr_stop_multiplier × entry_atr / entry_price`.
-3. The effective stop is the **tighter** of the fixed `stop_loss_pct` and the ATR-derived stop. The fixed stop acts as a safety ceiling — the ATR stop can only make the stop tighter, never wider than the fixed percentage.
+3. The effective stop is the **wider** of the fixed `stop_loss_pct` and the ATR-derived stop: `max(fixed_%, atr_stop)`. The fixed stop acts as a safety floor — the ATR stop can make the stop wider for volatile stocks, but the position always has at least the fixed percentage as a minimum stop distance.
 4. In the **Volatile/Choppy** regime (see [Section 9.7](#97-regime-adaptive-strategy)), the effective stop is widened by a configurable multiplier to avoid premature stop-outs from noisy price action.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `atr_stop_enabled` | true | Use ATR-based stop instead of fixed % only |
-| `atr_stop_multiplier` | 2.5 | Stop distance = N x ATR at entry time |
+| `atr_stop_enabled` | true | Use ATR-based stop in combination with fixed % |
+| `atr_stop_multiplier` | 3.0 | Stop distance = max(fixed %, N x ATR at entry time) |
 | `atr_stop_period` | 14 | ATR calculation period |
 
 Objective presets adjust the multiplier: `long_term` uses 3.0 (wider), `short_term` uses 2.0 (tighter), `day_trading` uses 1.5 (tightest) with a shorter ATR period of 10.
+
+#### Trailing Stop
+
+When the regime's strategy adaptation enables a trailing stop (e.g., in Strong Trend), the engine tracks the **high-water mark** of the position — the best unrealized P&L reached since entry. The trailing stop distance is computed as `trailing_stop_atr_mult × ATR_at_entry / entry_price`. If the position's unrealized gain retraces beyond this distance from the high-water mark, the position is closed.
+
+The high-water mark resets each time a new position is opened. The trailing stop interacts with the fixed `stop_loss_pct` — whichever triggers first closes the position. For AAPL 5y, the trailing stop at 4.0×ATR was the primary exit mechanism (13 out of 15 exits).
+
+> **Note:** Widening the trailing stop beyond 4.0×ATR was tested and made performance worse, because the fixed `stop_loss_pct` (5%) becomes the binding constraint — trades hit the fixed stop at deeper losses before the wider trailing stop can activate.
+
+#### Consecutive Loss Cooldown
+
+After repeated losing trades, the strategy tightens entry requirements to avoid bleeding capital during extended pullbacks or adverse market conditions.
+
+**How it works:**
+
+1. The strategy tracks the count of consecutive losing trades (trades where `pnl_pct < 0`).
+2. When the count reaches `cooldown_max_losses` (default 2), cooldown mode activates.
+3. During cooldown:
+   - `min_distance` is multiplied by `cooldown_distance_mult` (default 2.0) — the price must move further from the trend MA before a new entry triggers.
+   - `min_score` is raised to `cooldown_min_score` (default 4.5) — indicators must be more favorable before entry is allowed.
+4. Cooldown resets immediately on the first winning trade.
+
+This prevents the strategy from repeatedly entering during a pullback where each entry gets stopped out, which was a significant source of losses in the 2022 bear market within AAPL's longer uptrend.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `cooldown_max_losses` | 2 | Consecutive losses before cooldown activates |
+| `cooldown_distance_mult` | 2.0 | Multiply `min_distance` by this during cooldown |
+| `cooldown_min_score` | 4.5 | Minimum composite score required during cooldown |
+
+#### Global Directional Bias
+
+When the regime's trailing total return over the analysis window is strongly directional, the strategy suppresses counter-trend entries across **all** regimes — not just Strong Trend.
+
+**How it works:**
+
+1. On each rebalance bar, the backtest engine passes `regime_total_return` (the total return computed from trailing data up to the current bar) to the strategy context.
+2. If `global_trend_bias` is enabled and `|regime_total_return| >= global_bias_threshold`:
+   - When total return is positive (bullish bias), SHORT entries are suppressed (converted to HOLD).
+   - When total return is negative (bearish bias), LONG entries are suppressed.
+3. This applies after the score-based signal is generated, overriding it if needed.
+
+**Why this matters:** Without global bias, the strategy can enter short positions during brief mean-reverting windows within a large uptrend. For example, AAPL's +115% 5-year trend occasionally has regime windows that classify as mean_reverting (when the trailing total return temporarily drops). The mean-reverting adaptation narrows thresholds, making short entries easier to trigger. Global directional bias prevents this — if the trailing total return is above 10%, no shorts are allowed regardless of the current regime classification.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `global_trend_bias` | true | Enable global directional bias |
+| `global_bias_threshold` | 0.10 | `|total_return|` above this suppresses counter-trend entries |
 
 **EOD Flattening** (for intraday/day trading):
 
@@ -981,18 +1037,34 @@ When backtesting is enabled, the detected regime adapts the strategy's behavior 
 
 #### Strong Trend Adaptations
 
-In a strong trend, the strategy shifts from score-based trading to trend-following:
+In a strong trend, the strategy shifts from score-based trading to trend-following. The entry and hold logic uses the **total return** over the analysis period as the primary directional signal, rather than relying on current ADX or trend MA position (which can be temporarily misleading during consolidations within a larger trend).
 
-- **Entry:** When `ignore_score_entries` is enabled, the strategy bypasses score thresholds entirely. Instead, it enters based on trend direction — long when price is above the trend MA, short when below.
-- **Holding:** When `hold_with_trend` is enabled, the strategy holds the position as long as the trend persists. It only exits on extreme score reversals (e.g., a long position exits only if the score drops well below the SELL threshold).
-- **Trailing stop:** Uses an ATR-based trailing stop (`trailing_stop_atr_mult × ATR`) instead of score-based exits.
+**Entry logic (`_strong_trend_entry`):**
+
+When `ignore_score_entries` is enabled, the strategy uses a specialized entry mechanism instead of score thresholds:
+
+1. **Direction from total return:** If the regime's `total_return` is positive, bias is LONG; if negative, bias is SHORT. If total return is near zero (`|total_return| < 0.05`), falls back to trend MA direction.
+2. **Minimum distance gate (`min_distance`):** Price must be at least 1% away from the trend MA in the direction of the bias before entry triggers. This prevents entering during tight consolidation right around the MA.
+3. **Minimum score gate (`min_score`):** Even though score thresholds are bypassed, the strategy still requires the composite score to be above `min_score` (default 3.5) for longs (or below `10 - min_score` for shorts). This prevents entering when indicators are strongly counter-trend.
+4. **Trend direction respect (`respect_trend_direction`):** When enabled, the strategy only enters in the direction dictated by total return. A +115% stock will never trigger short entries via this mechanism.
+
+**Hold logic (`_strong_trend_hold`):**
+
+When `hold_with_trend` is enabled, the strategy uses an `effective_bias` derived from total return (same as entry) to decide whether to hold:
+
+- **With-trend positions** are held unless the score reaches an extreme reversal (±1.5 points beyond the threshold). For example, a long position in a bullish trend only exits if the score drops to `short_below - 1.5`.
+- **Counter-trend positions** are closed immediately. If total return is positive but the position is SHORT, it's closed on the next rebalance bar.
+- **Trailing stop** manages the actual exit in most cases — an ATR-based trailing stop (`trailing_stop_atr_mult × ATR`) tracks the high-water mark and exits when price retraces beyond the stop distance.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `use_trailing_stop` | true | Trail stop with trend instead of score-based exits |
-| `trailing_stop_atr_mult` | 3.0 | Trailing stop distance = N x ATR |
-| `ignore_score_entries` | true | Skip score thresholds; enter based on trend direction |
-| `hold_with_trend` | true | Hold position as long as trend persists |
+| `trailing_stop_atr_mult` | 4.0 | Trailing stop distance = N x ATR (wider = hold longer through pullbacks) |
+| `ignore_score_entries` | true | Skip score thresholds; enter based on trend direction and total return |
+| `hold_with_trend` | true | Hold position as long as trend persists; close counter-trend positions immediately |
+| `min_distance` | 0.01 | Price must be this fraction (1%) away from trend MA for entry |
+| `min_score` | 3.5 | Minimum composite score required even when bypassing thresholds |
+| `respect_trend_direction` | true | Only enter in the direction of the long-term trend (from total return) |
 
 #### Mean-Reverting Adaptations
 
@@ -1434,8 +1506,8 @@ display:
 strategy:
   threshold_mode: "fixed"    # "fixed" or "percentile"
   score_thresholds:
-    short_below: 4.5
-    hold_below: 5.5
+    short_below: 3.5
+    hold_below: 6.5
   percentile_thresholds:
     short_percentile: 25
     long_percentile: 75
@@ -1444,16 +1516,25 @@ strategy:
   fixed_quantity: 100
   percent_equity: 0.80
   stop_loss_pct: 0.05
-  take_profit_pct: 0.20
+  take_profit_pct: 0.50         # disabled in strong_trend regime (trailing stop manages exit)
   rebalance_interval: 5
   flatten_eod: false
   # ATR-Adaptive Stop
-  atr_stop_enabled: true           # use ATR-based stop instead of fixed %
-  atr_stop_multiplier: 2.5         # stop = N × ATR at entry time
-  atr_stop_period: 14              # ATR calculation period
+  atr_stop_enabled: true
+  atr_stop_multiplier: 3.0      # stop = max(fixed %, N × ATR) at entry time
+  atr_stop_period: 14
   # Trend Confirmation
-  trend_confirm_enabled: true      # require price above/below trend MA for entry
-  trend_confirm_period: 20         # EMA period for trend confirmation
+  trend_confirm_enabled: true
+  trend_confirm_period: 20
+  # Re-entry Grace Period
+  reentry_grace_bars: 10         # skip trend confirmation for N bars after forced exit
+  # Consecutive Loss Cooldown
+  cooldown_max_losses: 2         # consecutive losses before cooldown activates
+  cooldown_distance_mult: 2.0    # multiply min_distance by this during cooldown
+  cooldown_min_score: 4.5        # minimum score required during cooldown
+  # Global Directional Bias
+  global_trend_bias: true        # suppress counter-trend entries when total return is large
+  global_bias_threshold: 0.10    # |total_return| above this → suppress counter-trend
   # Pattern-Indicator Combination
   combination_mode: "weighted"   # "weighted", "gate", or "boost"
   indicator_weight: 0.7          # indicator weight in blended score
@@ -1513,9 +1594,12 @@ regime:
   strategy_adaptation:
     strong_trend:
       use_trailing_stop: true
-      trailing_stop_atr_mult: 3.0
+      trailing_stop_atr_mult: 4.0   # wider trail to hold through pullbacks
       ignore_score_entries: true
       hold_with_trend: true
+      min_distance: 0.01            # price must be 1%+ from MA for trend entry
+      min_score: 3.5                # don't enter when indicators are strongly bearish
+      respect_trend_direction: true  # only enter in direction of long-term trend
     mean_reverting:
       use_trailing_stop: false
       tighten_thresholds: true

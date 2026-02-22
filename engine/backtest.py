@@ -228,6 +228,9 @@ class BacktestEngine:
         # Proportional warmup
         self._max_warmup_ratio: float = float(bt_cfg.get("max_warmup_ratio", 0.5))
 
+        # Trailing stop high-water mark (reset when position opens/closes)
+        self._trailing_high: float = 0.0
+
     # ------------------------------------------------------------------
     # Interval helpers
     # ------------------------------------------------------------------
@@ -335,9 +338,16 @@ class BacktestEngine:
         # Regime classification (re-evaluated each rebalance)
         regime_classifier = RegimeClassifier(self._cfg)
         current_regime: RegimeType | None = None
+        current_regime_trend: str = "neutral"
+        current_regime_total_return: float = 0.0
 
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
+
+        def _record_trade(t: BacktestTrade) -> None:
+            """Append trade to list and notify strategy of the close."""
+            trades.append(t)
+            self._strategy.on_trade_close(t.pnl_pct, t.exit_reason)
 
         # 3. Bar-by-bar simulation
         bars_since_rebalance = self._rebalance_interval  # force recompute on first eligible bar
@@ -374,7 +384,7 @@ class BacktestEngine:
                         position, close, date_str, exit_reason
                     )
                     cash += self._trade_proceeds(trade, position)
-                    trades.append(trade)
+                    _record_trade(trade)
                     position = None
 
             # -- Determine if this is the last bar of the trading day (for EOD flattening) --
@@ -399,6 +409,8 @@ class BacktestEngine:
                 try:
                     regime_assessment = regime_classifier.classify(trailing_df)
                     current_regime = regime_assessment.regime
+                    current_regime_trend = regime_assessment.metrics.trend_direction
+                    current_regime_total_return = regime_assessment.metrics.total_return
                 except Exception:
                     pass  # keep previous regime if classification fails
 
@@ -434,6 +446,8 @@ class BacktestEngine:
                 portfolio_value=portfolio_value,
                 trend_ma=current_trend_ma,
                 regime=current_regime,
+                regime_trend=current_regime_trend,
+                regime_total_return=current_regime_total_return,
             )
 
             order = self._strategy.on_bar(ctx)
@@ -451,13 +465,13 @@ class BacktestEngine:
                         # Close short (but don't open long)
                         trade = self._close_position(position, close, date_str, signal_reason)
                         cash += self._trade_proceeds(trade, position)
-                        trades.append(trade)
+                        _record_trade(trade)
                         position = None
                     elif order.signal == Signal.SELL and position.side == "long":
                         # Close long (but don't open short)
                         trade = self._close_position(position, close, date_str, signal_reason)
                         cash += self._trade_proceeds(trade, position)
-                        trades.append(trade)
+                        _record_trade(trade)
                         position = None
             elif not can_trade:
                 pass  # hold_only: do nothing
@@ -475,7 +489,7 @@ class BacktestEngine:
                 # Close short, open long
                 trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
-                trades.append(trade)
+                _record_trade(trade)
                 position, cost = self._open_position(
                     "long", close, order.quantity, date_str, order.notes, current_atr
                 )
@@ -484,7 +498,7 @@ class BacktestEngine:
                 # Close long
                 trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
-                trades.append(trade)
+                _record_trade(trade)
                 position = None
                 # Open short only if trading mode allows
                 if can_short:
@@ -499,7 +513,7 @@ class BacktestEngine:
                     position, close, date_str, "eod_flatten"
                 )
                 cash += self._trade_proceeds(trade, position)
-                trades.append(trade)
+                _record_trade(trade)
                 position = None
 
             # Record equity
@@ -519,7 +533,7 @@ class BacktestEngine:
             last_date = str(df.index[-1])[:10]
             trade = self._close_position(position, last_close, last_date, "end_of_data")
             cash += self._trade_proceeds(trade, position)
-            trades.append(trade)
+            _record_trade(trade)
             position = None
 
         final_equity = cash
@@ -570,6 +584,8 @@ class BacktestEngine:
         For short: cash_cost = commission only (proceeds credited on close)
         """
         fill_price = self._apply_slippage(price, side, opening=True)
+        # Reset trailing stop high-water mark for the new position
+        self._trailing_high = fill_price
         pos = _Position(
             side=side,
             entry_date=date,
@@ -647,22 +663,60 @@ class BacktestEngine:
         current_price: float,
         regime: RegimeType | None = None,
     ) -> str:
-        """Check stop-loss and take-profit. Returns exit reason or empty string.
+        """Check stop-loss, trailing stop, and take-profit.
 
-        When ATR-adaptive stop is enabled and the position has a valid entry_atr,
-        the stop is ``atr_stop_multiplier * entry_atr / entry_price``, capped by
-        the fixed ``stop_loss_pct`` as a safety ceiling.
+        Returns exit reason or empty string.
+
+        Stop-loss logic:
+          When ATR-adaptive stop is enabled and the position has a valid entry_atr,
+          the stop is ``max(stop_loss_pct, atr_stop_multiplier * entry_atr / entry_price)``
+          — the ATR stop widens the floor, and the fixed % is a minimum safety net.
+
+        Trailing stop:
+          In strong_trend regime (or when trailing stop is explicitly enabled),
+          the stop trails the highest price seen since entry. The trailing distance
+          is ``trailing_stop_atr_mult * entry_atr / entry_price``.
+
+        Take-profit:
+          Disabled in strong_trend regime to let winners run. In other regimes,
+          the take-profit cap applies normally.
 
         In volatile/choppy regime, the stop loss is widened by the configured
         ``stop_loss_mult`` to avoid premature exits from noisy price action.
         """
         pnl_pct = position.unrealized_pnl_pct(current_price)
 
-        # Determine effective stop distance
+        # ── Trailing stop management ────────────────────────────────────
+        # Update the high-water mark for trailing stop
+        if position.side == "long":
+            if current_price > self._trailing_high:
+                self._trailing_high = current_price
+        else:
+            if self._trailing_high == 0.0 or current_price < self._trailing_high:
+                self._trailing_high = current_price
+
+        # Check trailing stop in strong_trend regime
+        if regime == RegimeType.STRONG_TREND and position.entry_atr > 0:
+            regime_cfg = self._cfg.section("regime")
+            adapt = regime_cfg.get("strategy_adaptation", {}).get("strong_trend", {})
+            if adapt.get("use_trailing_stop", True):
+                trail_mult = float(adapt.get("trailing_stop_atr_mult", 3.0))
+                trail_dist = trail_mult * position.entry_atr
+                if position.side == "long":
+                    trail_stop_price = self._trailing_high - trail_dist
+                    if current_price <= trail_stop_price and self._trailing_high > position.entry_price:
+                        return "trailing_stop"
+                else:
+                    trail_stop_price = self._trailing_high + trail_dist
+                    if current_price >= trail_stop_price and self._trailing_high < position.entry_price:
+                        return "trailing_stop"
+
+        # ── Fixed / ATR stop-loss ───────────────────────────────────────
+        # ATR stop is a floor (uses max), not a cap — allows wider breathing room
         effective_stop = self._stop_loss_pct  # fixed fallback
         if self._atr_stop_enabled and position.entry_atr > 0 and position.entry_price > 0:
             atr_stop = self._atr_stop_multiplier * position.entry_atr / position.entry_price
-            effective_stop = min(self._stop_loss_pct, atr_stop)
+            effective_stop = max(self._stop_loss_pct, atr_stop)
 
         # Regime adjustment: widen stops in volatile/choppy markets
         if regime == RegimeType.VOLATILE_CHOPPY:
@@ -674,6 +728,12 @@ class BacktestEngine:
 
         if pnl_pct <= -effective_stop:
             return "stop_loss"
+
+        # ── Take-profit ─────────────────────────────────────────────────
+        # Disabled in strong_trend — trailing stop handles exits instead
+        if regime == RegimeType.STRONG_TREND:
+            return ""  # let trailing stop manage the exit
+
         if pnl_pct >= self._take_profit_pct:
             return "take_profit"
         return ""

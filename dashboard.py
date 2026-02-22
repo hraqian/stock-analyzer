@@ -312,12 +312,20 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "strategy.percentile_thresholds.lookback_bars": "shorter = adapts to recent conditions faster",
     # -- Strategy params --
     "strategy.stop_loss_pct": "tighter = limits losses but more likely to be stopped out",
-    "strategy.take_profit_pct": "tighter = locks in gains sooner but caps upside",
+    "strategy.take_profit_pct": "tighter = locks in gains sooner but caps upside; disabled in strong_trend regime",
     "strategy.position_sizing": "percent_equity = risk scales with portfolio, fixed = constant share count",
     "strategy.percent_equity": "higher = larger positions, more risk per trade",
     "strategy.fixed_quantity": "higher = more shares per trade",
-    "strategy.rebalance_interval": "lower = checks signals more often, more responsive",
+    "strategy.rebalance_interval": "lower = checks signals more often, more responsive; higher = less whipsaw",
     "strategy.flatten_eod": "enable for day-trading to close all positions at end of day",
+    "strategy.reentry_grace_bars": "bars after exit where trend filter is skipped for faster re-entry",
+    # -- Consecutive loss cooldown --
+    "strategy.cooldown_max_losses": "after N consecutive losses, tighten entry requirements",
+    "strategy.cooldown_distance_mult": "multiply min_distance by this factor during cooldown",
+    "strategy.cooldown_min_score": "raise minimum score to this during cooldown (overrides base min_score)",
+    # -- Global directional bias --
+    "strategy.global_trend_bias": "suppress counter-trend entries when total return is strongly directional",
+    "strategy.global_bias_threshold": "total return above this triggers counter-trend suppression (e.g. 0.10 = 10%)",
     # -- Backtest params --
     "backtest.initial_cash": "starting portfolio value for the simulation",
     "backtest.commission_per_trade": "higher = more realistic, reduces net returns",
@@ -326,8 +334,8 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "backtest.significant_pattern_min_strength": "higher = only the strongest patterns appear in the timeline",
     "backtest.max_warmup_ratio": "higher = allows warmup to consume more of short datasets (0.1–0.9)",
     # -- ATR-adaptive stop --
-    "strategy.atr_stop_enabled": "use ATR-based dynamic stop instead of fixed %; adapts to volatility",
-    "strategy.atr_stop_multiplier": "higher = wider stop, fewer stop-outs; lower = tighter, more stop-outs",
+    "strategy.atr_stop_enabled": "use ATR-based dynamic stop; widens the fixed stop when ATR is larger",
+    "strategy.atr_stop_multiplier": "higher = wider stop, fewer stop-outs; stop = max(fixed %, N × ATR / price)",
     "strategy.atr_stop_period": "shorter = reacts to recent volatility faster, longer = smoother ATR",
     # -- Trend confirmation --
     "strategy.trend_confirm_enabled": "require price on correct side of trend EMA before entering",
@@ -355,6 +363,9 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "regime.strong_trend.trailing_stop_atr_mult": "trailing stop distance = N x ATR; higher = wider stop",
     "regime.strong_trend.ignore_score_entries": "skip score thresholds; enter based on trend direction instead",
     "regime.strong_trend.hold_with_trend": "hold position as long as trend persists, ignore sell signals",
+    "regime.strong_trend.min_distance": "minimum price distance from trend MA to trigger trend entry (e.g. 0.01 = 1%)",
+    "regime.strong_trend.min_score": "minimum effective score required for trend entry",
+    "regime.strong_trend.respect_trend_direction": "use total return to determine bias (bullish/bearish) for entries",
     "regime.mean_reverting.tighten_thresholds": "narrow the HOLD zone to generate more swing trades",
     "regime.mean_reverting.threshold_adjustment": "how much to narrow thresholds on each side (0.1–0.5)",
     "regime.volatile_choppy.reduce_position_size": "halve position size to limit risk in choppy markets",
@@ -768,6 +779,56 @@ def _edit_strategy_params(data: dict) -> None:
         )
         _default_hint(_ds.get("trend_confirm_period"), PARAM_DESCRIPTIONS.get("strategy.trend_confirm_period"))
 
+        strat["reentry_grace_bars"] = st.number_input(
+            "Re-entry grace bars",
+            0, 50,
+            value=int(strat.get("reentry_grace_bars", 10)),
+            step=1, key="reentry_grace",
+        )
+        _default_hint(_ds.get("reentry_grace_bars"), PARAM_DESCRIPTIONS.get("strategy.reentry_grace_bars"))
+
+    st.markdown("##### Consecutive Loss Cooldown")
+    strat["cooldown_max_losses"] = st.number_input(
+        "Max consecutive losses",
+        1, 10,
+        value=int(strat.get("cooldown_max_losses", 2)),
+        step=1, key="cooldown_max",
+    )
+    _default_hint(_ds.get("cooldown_max_losses"), PARAM_DESCRIPTIONS.get("strategy.cooldown_max_losses"))
+
+    strat["cooldown_distance_mult"] = st.number_input(
+        "Distance multiplier",
+        1.0, 5.0,
+        value=float(strat.get("cooldown_distance_mult", 2.0)),
+        step=0.5, key="cooldown_dist", format="%.1f",
+    )
+    _default_hint(_ds.get("cooldown_distance_mult"), PARAM_DESCRIPTIONS.get("strategy.cooldown_distance_mult"))
+
+    strat["cooldown_min_score"] = st.number_input(
+        "Cooldown min score",
+        0.0, 10.0,
+        value=float(strat.get("cooldown_min_score", 4.5)),
+        step=0.1, key="cooldown_score", format="%.1f",
+    )
+    _default_hint(_ds.get("cooldown_min_score"), PARAM_DESCRIPTIONS.get("strategy.cooldown_min_score"))
+
+    st.markdown("##### Global Directional Bias")
+    strat["global_trend_bias"] = st.checkbox(
+        "Enable global trend bias",
+        value=bool(strat.get("global_trend_bias", True)),
+        key="global_bias_en",
+    )
+    _default_hint(_ds.get("global_trend_bias"), PARAM_DESCRIPTIONS.get("strategy.global_trend_bias"))
+
+    if strat["global_trend_bias"]:
+        strat["global_bias_threshold"] = st.number_input(
+            "Bias threshold (total return)",
+            0.01, 1.0,
+            value=float(strat.get("global_bias_threshold", 0.10)),
+            step=0.01, key="global_bias_thr", format="%.2f",
+        )
+        _default_hint(_ds.get("global_bias_threshold"), PARAM_DESCRIPTIONS.get("strategy.global_bias_threshold"))
+
 
 def _edit_backtest_params(data: dict) -> None:
     """Editable backtest engine params."""
@@ -985,6 +1046,29 @@ def _edit_regime_params(data: dict) -> None:
         key="reg_st_hold",
     )
     _default_hint(_dst.get("hold_with_trend"), PARAM_DESCRIPTIONS.get("regime.strong_trend.hold_with_trend"))
+
+    st_adapt["min_distance"] = st.number_input(
+        "Min distance from MA",
+        0.001, 0.10,
+        value=float(st_adapt.get("min_distance", 0.01)),
+        step=0.005, key="reg_st_min_dist", format="%.3f",
+    )
+    _default_hint(_dst.get("min_distance"), PARAM_DESCRIPTIONS.get("regime.strong_trend.min_distance"))
+
+    st_adapt["min_score"] = st.number_input(
+        "Min effective score",
+        0.0, 10.0,
+        value=float(st_adapt.get("min_score", 3.5)),
+        step=0.1, key="reg_st_min_score", format="%.1f",
+    )
+    _default_hint(_dst.get("min_score"), PARAM_DESCRIPTIONS.get("regime.strong_trend.min_score"))
+
+    st_adapt["respect_trend_direction"] = st.checkbox(
+        "Respect trend direction",
+        value=bool(st_adapt.get("respect_trend_direction", True)),
+        key="reg_st_respect_dir",
+    )
+    _default_hint(_dst.get("respect_trend_direction"), PARAM_DESCRIPTIONS.get("regime.strong_trend.respect_trend_direction"))
 
     # Mean Reverting
     st.markdown("_Mean Reverting_")
@@ -2003,6 +2087,18 @@ def render_strategy_config(cfg: Config) -> None:
     rows.append(("Trend Filter", "ON" if trend_enabled else "OFF"))
     if trend_enabled:
         rows.append(("Trend EMA Period", f"{strat_cfg.get('trend_confirm_period', 20)}"))
+        rows.append(("Re-entry Grace", f"{strat_cfg.get('reentry_grace_bars', 10)} bars"))
+
+    # Consecutive loss cooldown
+    rows.append(("Cooldown Max Losses", f"{strat_cfg.get('cooldown_max_losses', 2)}"))
+    rows.append(("Cooldown Distance Mult", f"{strat_cfg.get('cooldown_distance_mult', 2.0):.1f}x"))
+    rows.append(("Cooldown Min Score", f"{strat_cfg.get('cooldown_min_score', 4.5):.1f}"))
+
+    # Global directional bias
+    bias_enabled = strat_cfg.get("global_trend_bias", True)
+    rows.append(("Global Trend Bias", "ON" if bias_enabled else "OFF"))
+    if bias_enabled:
+        rows.append(("Bias Threshold", f"{strat_cfg.get('global_bias_threshold', 0.10) * 100:.0f}%"))
 
     rows.append(("Slippage", f"{bt_cfg.get('slippage_pct', 0.001) * 100:.2f}%"))
     rows.append(("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"))

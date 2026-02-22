@@ -136,8 +136,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "strategy": {
         "threshold_mode": "fixed",
         "score_thresholds": {
-            "short_below": 4.5,
-            "hold_below": 5.5,
+            "short_below": 3.5,
+            "hold_below": 6.5,
         },
         "percentile_thresholds": {
             "short_percentile": 25,
@@ -148,16 +148,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fixed_quantity": 100,
         "percent_equity": 0.80,
         "stop_loss_pct": 0.05,
-        "take_profit_pct": 0.20,
-        "rebalance_interval": 1,
+        "take_profit_pct": 0.50,
+        "rebalance_interval": 5,
         "flatten_eod": False,  # force-close all positions at end of each trading day
-        # ATR-adaptive stop loss
+        # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop
         "atr_stop_enabled": True,       # use ATR-based stop instead of fixed %
-        "atr_stop_multiplier": 2.5,     # stop = N × ATR at entry time
+        "atr_stop_multiplier": 3.0,     # stop = N × ATR at entry time
         "atr_stop_period": 14,          # ATR calculation period
         # Trend confirmation filter
         "trend_confirm_enabled": True,   # require price above/below trend MA for entry
         "trend_confirm_period": 20,      # EMA period for trend confirmation
+        # Re-entry grace period: after exiting, skip trend confirmation for N bars
+        "reentry_grace_bars": 10,        # bars after exit to allow unfiltered re-entry
+        # Consecutive loss cooldown: after N consecutive losses, tighten entry requirements
+        "cooldown_max_losses": 2,        # consecutive losses before cooldown activates
+        "cooldown_distance_mult": 2.0,   # multiply min_distance by this during cooldown
+        "cooldown_min_score": 4.5,       # minimum score required during cooldown
+        # Global trend bias: suppress counter-trend entries when total return is strong
+        "global_trend_bias": True,       # enable global directional bias
+        "global_bias_threshold": 0.10,   # |total_return| above this → suppress counter-trend
         # Pattern-indicator combination for strategy decisions
         "combination_mode": "weighted",  # "weighted", "gate", or "boost"
         "indicator_weight": 0.7,         # weight of indicator composite in blended score
@@ -275,9 +284,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strategy_adaptation": {
             "strong_trend": {
                 "use_trailing_stop": True,       # trail stop instead of score-based exits
-                "trailing_stop_atr_mult": 3.0,   # trailing stop = N × ATR
+                "trailing_stop_atr_mult": 4.0,   # trailing stop = N × ATR
                 "ignore_score_entries": True,     # don't use score thresholds for entry
                 "hold_with_trend": True,          # stay in position while trend persists
+                "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
+                "min_score": 3.5,                # don't enter when indicators are strongly bearish
+                "respect_trend_direction": True,  # only enter in direction of long-term trend
             },
             "mean_reverting": {
                 "use_trailing_stop": False,       # use score-based entries/exits
@@ -367,10 +379,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "strategy": {
                 "rebalance_interval": 5,
                 "stop_loss_pct": 0.10,
-                "take_profit_pct": 0.30,
+                "take_profit_pct": 1.00,
                 "indicator_weight": 0.8,
                 "pattern_weight": 0.2,
-                "atr_stop_multiplier": 3.0,    # wider ATR stop for position trading
+                "atr_stop_multiplier": 4.0,    # wider ATR stop for position trading
                 "trend_confirm_period": 50,     # slower trend confirmation for long-term
             },
             "backtest": {
@@ -446,10 +458,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "strategy": {
                 "rebalance_interval": 3,
                 "stop_loss_pct": 0.03,
-                "take_profit_pct": 0.10,
+                "take_profit_pct": 0.20,
                 "indicator_weight": 0.6,
                 "pattern_weight": 0.4,
-                "atr_stop_multiplier": 2.0,    # tighter ATR stop for swing trading
+                "atr_stop_multiplier": 2.5,    # tighter ATR stop for swing trading
                 "trend_confirm_period": 10,     # faster trend confirmation
             },
             "backtest": {

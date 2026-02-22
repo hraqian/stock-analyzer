@@ -240,8 +240,8 @@ strategy:
   threshold_mode: "fixed"
 
   score_thresholds:
-    short_below: 4.5      # composite score <= this → SHORT
-    hold_below: 5.5       # composite score <= this → HOLD
+    short_below: 3.5      # composite score <= this → SHORT
+    hold_below: 6.5       # composite score <= this → HOLD
     # composite score > hold_below → LONG
 
   # Percentile mode settings (only used when threshold_mode = "percentile")
@@ -257,13 +257,13 @@ strategy:
 
   # Risk management
   stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
-  take_profit_pct: 0.20     # exit if position gains this fraction (0.20 = 20%)
+  take_profit_pct: 0.50     # exit if position gains this fraction (0.50 = 50%)
+                             # disabled in strong_trend regime (trailing stop manages exit)
 
-  # ATR-adaptive stop loss — uses N × ATR at entry time instead of fixed %
-  # The effective stop is min(stop_loss_pct, atr_stop_multiplier × ATR / price)
-  # so the fixed % acts as a safety ceiling.
+  # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop.
+  # The fixed stop_loss_pct is the minimum safety net; ATR can only make it wider.
   atr_stop_enabled: true    # set false to use only the fixed stop_loss_pct
-  atr_stop_multiplier: 2.5  # N in "N × ATR" — higher = wider stop
+  atr_stop_multiplier: 3.0  # N in "N × ATR" — higher = wider stop
   atr_stop_period: 14       # ATR calculation lookback period
 
   # Trend confirmation filter — before entering a new position, check that
@@ -275,7 +275,29 @@ strategy:
   trend_confirm_period: 20   # EMA period for trend confirmation
 
   # How often to re-evaluate and potentially change position
-  rebalance_interval: 1     # re-score every N bars
+  rebalance_interval: 5     # re-score every N bars (higher = less whipsaw, fewer trades)
+
+  # Re-entry grace period: after exiting a position (stop-loss, take-profit,
+  # trailing stop), skip the trend confirmation filter for this many bars.
+  # Allows faster re-entry in trending markets after forced exits.
+  reentry_grace_bars: 10
+
+  # Consecutive loss cooldown: after repeated losing trades, tighten entry
+  # requirements to avoid bleeding capital during extended pullbacks.
+  # After cooldown_max_losses consecutive losses, min_distance is multiplied
+  # by cooldown_distance_mult and min_score is raised to cooldown_min_score.
+  # The cooldown resets on the first winning trade.
+  cooldown_max_losses: 2         # consecutive losses before cooldown activates
+  cooldown_distance_mult: 2.0    # multiply min_distance by this during cooldown
+  cooldown_min_score: 4.5        # minimum score required during cooldown
+
+  # Global trend bias: when the regime's total return over the analysis period
+  # is strongly positive (>= threshold), suppress SHORT entries even in non-
+  # strong_trend regimes. Similarly, suppress LONG entries when strongly negative.
+  # This prevents shorting a +115% trend just because the current regime window
+  # briefly classifies as mean_reverting.
+  global_trend_bias: true
+  global_bias_threshold: 0.10    # |total_return| above this → suppress counter-trend
 
   # Day trading: force-close all positions at the end of each trading day
   # (only applies when using intraday intervals like 1m, 5m, 15m, etc.)
@@ -363,9 +385,12 @@ regime:
   strategy_adaptation:
     strong_trend:
       use_trailing_stop: true       # trail stop instead of score-based exits
-      trailing_stop_atr_mult: 3.0   # trailing stop distance = N × ATR
+      trailing_stop_atr_mult: 4.0   # trailing stop distance = N × ATR (wider = hold longer)
       ignore_score_entries: true     # don't use score thresholds for entry
       hold_with_trend: true          # stay in position while trend persists
+      min_distance: 0.01            # price must be 1%+ from MA for trend entry
+      min_score: 3.5                # don't enter when indicators are strongly bearish
+      respect_trend_direction: true  # only enter in direction of long-term trend
     mean_reverting:
       use_trailing_stop: false
       tighten_thresholds: true      # narrow the HOLD zone for more trades
@@ -494,10 +519,10 @@ objectives:
     strategy:
       rebalance_interval: 5     # less frequent re-evaluation
       stop_loss_pct: 0.10       # wider stop (10%)
-      take_profit_pct: 0.30     # wider target (30%)
+      take_profit_pct: 1.00     # very wide target — let trends run
       indicator_weight: 0.8     # long-term: indicators matter more
       pattern_weight: 0.2
-      atr_stop_multiplier: 3.0  # wider ATR stop for position trading
+      atr_stop_multiplier: 4.0  # wider ATR stop for position trading
       trend_confirm_period: 50  # slower trend confirmation for long-term
 
     backtest:
@@ -589,10 +614,10 @@ objectives:
     strategy:
       rebalance_interval: 3     # more frequent re-evaluation
       stop_loss_pct: 0.03       # tighter stop (3%)
-      take_profit_pct: 0.10     # tighter target (10%)
+      take_profit_pct: 0.20     # tighter target (20%)
       indicator_weight: 0.6     # short-term: patterns matter more than long-term
       pattern_weight: 0.4
-      atr_stop_multiplier: 2.0  # tighter ATR stop for swing trading
+      atr_stop_multiplier: 2.5  # tighter ATR stop for swing trading
       trend_confirm_period: 10  # faster trend confirmation
 
     backtest:
