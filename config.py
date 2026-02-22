@@ -169,6 +169,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "commission_per_trade": 0.0,
         "slippage_pct": 0.001,
         "warmup_bars": 200,
+        "significant_pattern_min_strength": 0.5,
     },
     # ------------------------------------------------------------------
     # Pattern Signal Detectors

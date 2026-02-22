@@ -41,7 +41,7 @@ from plotly.subplots import make_subplots
 from analysis.analyzer import Analyzer, AnalysisResult
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
-from config import Config
+from config import Config, DEFAULT_CONFIG
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.score_strategy import ScoreBasedStrategy
@@ -251,11 +251,38 @@ def _build_score_table_html(
 # Sidebar — parameter editors
 # ---------------------------------------------------------------------------
 
+def _get_default(path: str) -> object:
+    """Look up a value in DEFAULT_CONFIG by dot-separated path.
+
+    Example: ``_get_default("rsi.thresholds.oversold")`` → 30
+    Returns ``None`` if the path doesn't exist.
+    """
+    node: object = DEFAULT_CONFIG
+    for part in path.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+def _default_hint(value: object) -> None:
+    """Render a small gray caption showing the default value."""
+    if value is None:
+        return
+    if isinstance(value, float):
+        text = f"{value:.4g}"
+    elif isinstance(value, list):
+        text = ", ".join(str(v) for v in value)
+    else:
+        text = str(value)
+    st.caption(f"default: {text}")
+
 def _edit_indicator_weights(data: dict) -> None:
     """Editable indicator weight sliders (auto-normalised display)."""
     weights = data.setdefault("overall", {}).setdefault("weights", {})
     names = list(weights.keys())
-    total = sum(weights.values()) or 1.0
+    default_weights = DEFAULT_CONFIG.get("overall", {}).get("weights", {})
 
     for name in names:
         raw = float(weights.get(name, 0))
@@ -269,6 +296,7 @@ def _edit_indicator_weights(data: dict) -> None:
             format="%.2f",
         )
         weights[name] = new_val
+        _default_hint(default_weights.get(name))
 
     new_total = sum(weights.values())
     if new_total > 0:
@@ -329,11 +357,15 @@ def _edit_indicator_params(data: dict) -> None:
                     target = target.setdefault(p, {})
                 field = parts[-1]
 
+                # Look up default from DEFAULT_CONFIG
+                default_val = _get_default(f"{ind_key}.{path}")
+
                 if ptype == "int_list":
                     # Special: comma-separated integer list
                     current = target.get(field, [20, 50, 200])
                     current_str = ", ".join(str(x) for x in current)
                     new_str = st.text_input(label, value=current_str, key=f"ip_{ind_key}_{path}")
+                    _default_hint(default_val)
                     try:
                         parsed = [int(x.strip()) for x in new_str.split(",") if x.strip()]
                         target[field] = sorted(parsed)
@@ -345,6 +377,7 @@ def _edit_indicator_params(data: dict) -> None:
                         label, min_value=pmin, max_value=pmax,
                         value=current, step=1, key=f"ip_{ind_key}_{path}",
                     )
+                    _default_hint(default_val)
                     target[field] = int(new_val)
                 elif ptype is float:
                     current = float(target.get(field, pmin))
@@ -353,6 +386,7 @@ def _edit_indicator_params(data: dict) -> None:
                         value=current, step=0.1, key=f"ip_{ind_key}_{path}",
                         format="%.2f",
                     )
+                    _default_hint(default_val)
                     target[field] = float(new_val)
 
 
@@ -360,6 +394,7 @@ def _edit_pattern_weights(data: dict) -> None:
     """Editable pattern weight sliders."""
     weights = data.setdefault("overall_patterns", {}).setdefault("weights", {})
     names = list(weights.keys())
+    default_weights = DEFAULT_CONFIG.get("overall_patterns", {}).get("weights", {})
 
     for name in names:
         raw = float(weights.get(name, 0))
@@ -373,6 +408,7 @@ def _edit_pattern_weights(data: dict) -> None:
             format="%.2f",
         )
         weights[name] = new_val
+        _default_hint(default_weights.get(name))
 
     new_total = sum(weights.values())
     if new_total > 0:
@@ -384,12 +420,14 @@ def _edit_pattern_weights(data: dict) -> None:
 def _edit_pattern_indicator_combination(data: dict) -> None:
     """Editable combination mode and related params."""
     strat = data.setdefault("strategy", {})
+    _ds = DEFAULT_CONFIG.get("strategy", {})
 
     modes = ["weighted", "gate", "boost"]
     current_mode = strat.get("combination_mode", "weighted")
     idx = modes.index(current_mode) if current_mode in modes else 0
     mode = st.selectbox("Combination mode", modes, index=idx, key="combo_mode")
     strat["combination_mode"] = mode
+    _default_hint(_ds.get("combination_mode"))
 
     if mode == "weighted":
         ind_w = st.slider(
@@ -398,12 +436,14 @@ def _edit_pattern_indicator_combination(data: dict) -> None:
             value=float(strat.get("indicator_weight", 0.7)),
             step=0.05, key="combo_ind_w", format="%.2f",
         )
+        _default_hint(_ds.get("indicator_weight"))
         pat_w = st.slider(
             "Pattern weight",
             0.0, 1.0,
             value=float(strat.get("pattern_weight", 0.3)),
             step=0.05, key="combo_pat_w", format="%.2f",
         )
+        _default_hint(_ds.get("pattern_weight"))
         strat["indicator_weight"] = ind_w
         strat["pattern_weight"] = pat_w
         total = ind_w + pat_w
@@ -415,37 +455,44 @@ def _edit_pattern_indicator_combination(data: dict) -> None:
             0.0, 10.0, float(strat.get("gate_indicator_min", 5.5)),
             step=0.1, key="gate_ind_min", format="%.1f",
         )
+        _default_hint(_ds.get("gate_indicator_min"))
         strat["gate_indicator_max"] = st.number_input(
             "Indicator SHORT threshold",
             0.0, 10.0, float(strat.get("gate_indicator_max", 4.5)),
             step=0.1, key="gate_ind_max", format="%.1f",
         )
+        _default_hint(_ds.get("gate_indicator_max"))
         strat["gate_pattern_min"] = st.number_input(
             "Pattern LONG threshold",
             0.0, 10.0, float(strat.get("gate_pattern_min", 5.5)),
             step=0.1, key="gate_pat_min", format="%.1f",
         )
+        _default_hint(_ds.get("gate_pattern_min"))
         strat["gate_pattern_max"] = st.number_input(
             "Pattern SHORT threshold",
             0.0, 10.0, float(strat.get("gate_pattern_max", 4.5)),
             step=0.1, key="gate_pat_max", format="%.1f",
         )
+        _default_hint(_ds.get("gate_pattern_max"))
     elif mode == "boost":
         strat["boost_strength"] = st.slider(
             "Boost strength",
             0.0, 2.0, float(strat.get("boost_strength", 0.5)),
             step=0.1, key="boost_str", format="%.1f",
         )
+        _default_hint(_ds.get("boost_strength"))
         strat["boost_dead_zone"] = st.slider(
-            "Dead zone (±)",
+            "Dead zone (+-)",
             0.0, 2.0, float(strat.get("boost_dead_zone", 0.3)),
             step=0.1, key="boost_dz", format="%.1f",
         )
+        _default_hint(_ds.get("boost_dead_zone"))
 
 
 def _edit_scoring_thresholds(data: dict) -> None:
     """Editable scoring threshold mode and values."""
     strat = data.setdefault("strategy", {})
+    _ds = DEFAULT_CONFIG.get("strategy", {})
 
     mode = st.radio(
         "Threshold mode",
@@ -455,45 +502,54 @@ def _edit_scoring_thresholds(data: dict) -> None:
         key="threshold_mode_radio",
     )
     strat["threshold_mode"] = mode
+    _default_hint(_ds.get("threshold_mode"))
 
     if mode == "fixed":
+        _ds_thr = _ds.get("score_thresholds", {})
         thresholds = strat.setdefault("score_thresholds", {})
         short_below = st.slider(
             "SHORT when score <=",
             0.0, 10.0, float(thresholds.get("short_below", 4.5)),
             step=0.1, key="fix_short", format="%.1f",
         )
+        _default_hint(_ds_thr.get("short_below"))
         hold_below = st.slider(
             "LONG when score >",
             0.0, 10.0, float(thresholds.get("hold_below", 5.5)),
             step=0.1, key="fix_long", format="%.1f",
         )
+        _default_hint(_ds_thr.get("hold_below"))
         thresholds["short_below"] = short_below
         thresholds["hold_below"] = hold_below
         if short_below >= hold_below:
             st.warning("SHORT threshold should be below LONG threshold.")
     else:
+        _ds_pct = _ds.get("percentile_thresholds", {})
         pct = strat.setdefault("percentile_thresholds", {})
         pct["short_percentile"] = st.number_input(
             "SHORT percentile <=",
             0, 100, int(pct.get("short_percentile", 25)),
             step=1, key="pct_short",
         )
+        _default_hint(_ds_pct.get("short_percentile"))
         pct["long_percentile"] = st.number_input(
             "LONG percentile >=",
             0, 100, int(pct.get("long_percentile", 75)),
             step=1, key="pct_long",
         )
+        _default_hint(_ds_pct.get("long_percentile"))
         pct["lookback_bars"] = st.number_input(
             "Lookback bars",
             10, 500, int(pct.get("lookback_bars", 60)),
             step=5, key="pct_lookback",
         )
+        _default_hint(_ds_pct.get("lookback_bars"))
 
 
 def _edit_strategy_params(data: dict) -> None:
     """Editable strategy execution params."""
     strat = data.setdefault("strategy", {})
+    _ds = DEFAULT_CONFIG.get("strategy", {})
 
     strat["stop_loss_pct"] = st.number_input(
         "Stop loss %",
@@ -501,6 +557,7 @@ def _edit_strategy_params(data: dict) -> None:
         value=float(strat.get("stop_loss_pct", 0.05)) * 100,
         step=0.5, key="sl_pct", format="%.1f",
     ) / 100.0
+    _default_hint(f"{_ds.get('stop_loss_pct', 0.05) * 100:.1f}%")
 
     strat["take_profit_pct"] = st.number_input(
         "Take profit %",
@@ -508,6 +565,7 @@ def _edit_strategy_params(data: dict) -> None:
         value=float(strat.get("take_profit_pct", 0.20)) * 100,
         step=0.5, key="tp_pct", format="%.1f",
     ) / 100.0
+    _default_hint(f"{_ds.get('take_profit_pct', 0.20) * 100:.1f}%")
 
     sizing_modes = ["percent_equity", "fixed"]
     current_sizing = strat.get("position_sizing", "percent_equity")
@@ -515,6 +573,7 @@ def _edit_strategy_params(data: dict) -> None:
     strat["position_sizing"] = st.selectbox(
         "Position sizing", sizing_modes, index=sizing_idx, key="pos_sizing",
     )
+    _default_hint(_ds.get("position_sizing"))
 
     if strat["position_sizing"] == "percent_equity":
         strat["percent_equity"] = st.slider(
@@ -522,29 +581,34 @@ def _edit_strategy_params(data: dict) -> None:
             0.1, 1.0, float(strat.get("percent_equity", 0.80)),
             step=0.05, key="pct_equity", format="%.2f",
         )
+        _default_hint(_ds.get("percent_equity"))
     else:
         strat["fixed_quantity"] = st.number_input(
             "Fixed quantity",
             1, 10000, int(strat.get("fixed_quantity", 100)),
             step=10, key="fix_qty",
         )
+        _default_hint(_ds.get("fixed_quantity"))
 
     strat["rebalance_interval"] = st.number_input(
         "Rebalance interval (bars)",
         1, 100, int(strat.get("rebalance_interval", 5)),
         step=1, key="rebal",
     )
+    _default_hint(_ds.get("rebalance_interval"))
 
     strat["flatten_eod"] = st.checkbox(
         "Flatten at EOD",
         value=bool(strat.get("flatten_eod", False)),
         key="flatten_eod_cb",
     )
+    _default_hint(_ds.get("flatten_eod"))
 
 
 def _edit_backtest_params(data: dict) -> None:
     """Editable backtest engine params."""
     bt = data.setdefault("backtest", {})
+    _db = DEFAULT_CONFIG.get("backtest", {})
 
     bt["initial_cash"] = st.number_input(
         "Initial capital ($)",
@@ -552,6 +616,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("initial_cash", 100_000)),
         step=10_000.0, key="init_cash", format="%.0f",
     )
+    _default_hint(f"${_db.get('initial_cash', 100_000):,.0f}")
 
     bt["commission_per_trade"] = st.number_input(
         "Commission per trade ($)",
@@ -559,6 +624,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("commission_per_trade", 0.0)),
         step=1.0, key="commission", format="%.2f",
     )
+    _default_hint(_db.get("commission_per_trade"))
 
     bt["slippage_pct"] = st.number_input(
         "Slippage %",
@@ -566,6 +632,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("slippage_pct", 0.001)) * 100,
         step=0.01, key="slippage", format="%.3f",
     ) / 100.0
+    _default_hint(f"{_db.get('slippage_pct', 0.001) * 100:.3f}%")
 
     bt["warmup_bars"] = st.number_input(
         "Warmup bars",
@@ -573,6 +640,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=int(bt.get("warmup_bars", 200)),
         step=10, key="warmup",
     )
+    _default_hint(_db.get("warmup_bars"))
 
     bt["significant_pattern_min_strength"] = st.number_input(
         "Sig. pattern min strength",
@@ -580,6 +648,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("significant_pattern_min_strength", 0.5)),
         step=0.1, key="sig_min_str", format="%.1f",
     )
+    _default_hint(_db.get("significant_pattern_min_strength"))
 
 
 # ---------------------------------------------------------------------------
