@@ -33,6 +33,8 @@
    - 9.3 [Position Management](#93-position-management)
    - 9.4 [Risk Management](#94-risk-management)
    - 9.5 [Performance Metrics](#95-performance-metrics)
+   - 9.6 [Market Regime Classification](#96-market-regime-classification)
+   - 9.7 [Regime-Adaptive Strategy](#97-regime-adaptive-strategy)
 10. [Trading Mode Suitability Detection](#10-trading-mode-suitability-detection)
 11. [Trading Objective Presets](#11-trading-objective-presets)
     - 11.1 [Long-Term (Position Trading)](#111-long-term-position-trading)
@@ -56,15 +58,16 @@
 
 ## 1. Overview
 
-The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects five types of pattern signals (also scored 0–10), calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with configurable strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
+The Stock Technical Analysis Tool is a Python command-line application that performs comprehensive technical analysis on any stock. It fetches historical OHLCV (Open, High, Low, Close, Volume) data, computes eight technical indicators — each scored on a 0–10 scale — detects five types of pattern signals (also scored 0–10), classifies the market regime, calculates support/resistance levels, and produces weighted composite scores for both indicators and patterns. It also includes a full backtesting engine with regime-adaptive strategies, automatic trading mode detection, and trading objective presets for different investment horizons.
 
 **Key Features:**
 
 - **8 technical indicators** with configurable parameters, each scored 0 (strongly bearish) to 10 (strongly bullish)
 - **5 pattern signal detectors** — gaps, candlesticks, volume-range correlation, spikes, and inside/outside bars — scored independently from indicators
 - **Dual composite scoring** — separate indicator and pattern composite scores, combined via configurable weighted blend or gate mode
+- **Market regime classification** — detects Strong Trend, Mean-Reverting, Volatile/Choppy, or Breakout/Transition environments, adapting the backtest strategy accordingly
 - **Support/resistance detection** using pivot points and/or fractal analysis
-- **Backtesting engine** with bar-by-bar simulation, stop-loss, take-profit, slippage, and commission modeling
+- **Backtesting engine** with bar-by-bar simulation, ATR-adaptive stops, trend confirmation, regime-adaptive strategy, slippage, and commission modeling
 - **Trading mode auto-detection** that determines whether a stock is suitable for long/short trading, long-only, or hold-only
 - **Trading objective presets** for long-term, short-term, and day trading — each overriding indicator periods, strategy thresholds, and weights
 - **Plugin architecture** — add new indicators or patterns by dropping a file into the `indicators/` or `patterns/` directory
@@ -748,16 +751,23 @@ The backtesting engine simulates trading a score-based strategy over historical 
 ### 9.1 How Backtesting Works
 
 1. **Data Fetch:** The full historical OHLCV dataset is loaded for the specified period/date range and interval.
-2. **Warmup Period:** The first N bars (default: 200) are used to initialize indicator calculations. No trades are executed during warmup.
+2. **Warmup Period:** The first N bars (default: 200) are used to initialize indicator calculations. No trades are executed during warmup. **Proportional warmup** automatically reduces this if the dataset is short — warmup cannot exceed `max_warmup_ratio` (default 50%) of total bars, with a hard floor of 20 bars. This prevents warmup from consuming all available data on short periods like `6mo`.
 3. **Bar-by-Bar Simulation:** Starting after warmup, the engine processes each bar sequentially:
-   - Check stop-loss and take-profit on every bar.
-   - Every N bars (the rebalance interval), re-compute all indicators and the composite score.
-   - Generate a trade signal (BUY, SELL, or HOLD) based on the score.
+   - Check stop-loss, take-profit, and ATR-adaptive stops on every bar.
+   - Every N bars (the rebalance interval), re-compute all indicators, the composite score, and re-classify the market regime.
+   - Generate a trade signal (BUY, SELL, or HOLD) based on the score, with regime-specific adaptations and trend confirmation filtering.
    - Execute the trade order with simulated slippage and commission.
 4. **Final Close:** Any open position at the end of the data is closed automatically.
 5. **Metrics:** Performance statistics are calculated from the equity curve and trade history.
 
-> **No Look-Ahead Bias:** At each bar, the engine only uses data up to and including that bar. It never looks at future prices.
+> **No Look-Ahead Bias:** At each bar, the engine only uses data up to and including that bar. It never looks at future prices. Regime classification uses the trailing data window, not the full dataset.
+
+**Proportional Warmup Configuration:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `warmup_bars` | 200 | Base warmup period (bars) |
+| `max_warmup_ratio` | 0.5 | Warmup cannot exceed this fraction of total bars |
 
 ### 9.2 Strategy: Signal Generation
 
@@ -796,6 +806,19 @@ Percentile mode is **self-calibrating** — it adapts to each stock's actual sco
 | `percentile_thresholds.long_percentile` | 75 | Percentile: BUY at or above this rank |
 | `percentile_thresholds.lookback_bars` | 60 | Rolling window size |
 
+#### Trend Confirmation Filter
+
+After the score-based signal is generated, a **trend confirmation filter** can prevent entries against the short-term trend. This reduces whipsaw trades where the score says BUY but the price is falling.
+
+**How it works:** An EMA of the configured period is computed. When the strategy generates a new BUY signal (no existing position), the signal is converted to HOLD if the current price is below the trend EMA. Likewise, a new SELL signal is converted to HOLD if price is above the trend EMA. Existing positions are not affected — the filter only gates new entries.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `trend_confirm_enabled` | true | Enable trend confirmation on new entries |
+| `trend_confirm_period` | 20 | EMA period for the trend filter |
+
+Objective presets adjust the confirmation period: `long_term` uses 50 (slower confirmation), `short_term` and `day_trading` use 10 (faster).
+
 ### 9.3 Position Management
 
 **Position Sizing:**
@@ -822,12 +845,31 @@ The strategy only re-evaluates (re-runs all indicators and generates a new signa
 
 ### 9.4 Risk Management
 
-**Stop-Loss and Take-Profit** are checked on every bar (not just rebalance bars):
+**Fixed Stop-Loss and Take-Profit** are checked on every bar (not just rebalance bars):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stop_loss_pct` | 0.05 (5%) | Close position if unrealized loss exceeds this |
 | `take_profit_pct` | 0.20 (20%) | Close position if unrealized gain exceeds this |
+
+#### ATR-Adaptive Stop Loss
+
+Instead of using a fixed percentage stop, the engine can compute a **volatility-adjusted stop** based on the stock's Average True Range (ATR) at the time of entry. This automatically gives wider stops to volatile stocks and tighter stops to stable ones.
+
+**How it works:**
+
+1. When a position is opened, the current ATR value is recorded.
+2. The ATR stop distance is computed as: `atr_stop = atr_stop_multiplier × entry_atr / entry_price`.
+3. The effective stop is the **tighter** of the fixed `stop_loss_pct` and the ATR-derived stop. The fixed stop acts as a safety ceiling — the ATR stop can only make the stop tighter, never wider than the fixed percentage.
+4. In the **Volatile/Choppy** regime (see [Section 9.7](#97-regime-adaptive-strategy)), the effective stop is widened by a configurable multiplier to avoid premature stop-outs from noisy price action.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `atr_stop_enabled` | true | Use ATR-based stop instead of fixed % only |
+| `atr_stop_multiplier` | 2.5 | Stop distance = N x ATR at entry time |
+| `atr_stop_period` | 14 | ATR calculation period |
+
+Objective presets adjust the multiplier: `long_term` uses 3.0 (wider), `short_term` uses 2.0 (tighter), `day_trading` uses 1.5 (tightest) with a shorter ATR period of 10.
 
 **EOD Flattening** (for intraday/day trading):
 
@@ -865,6 +907,133 @@ The backtest report includes these metrics:
 | 60m / 1h | 6 |
 | 90m | 4 |
 | 1d (daily+) | 1 |
+
+### 9.6 Market Regime Classification
+
+The backtesting engine includes a **market regime classifier** that analyzes the price data to determine the current market environment. The detected regime drives strategy adaptations (see [Section 9.7](#97-regime-adaptive-strategy)) — adjusting entries, exits, position sizing, and stop-loss behavior to match market conditions.
+
+The regime is also displayed in the analysis view (both CLI and dashboard) as an informational panel, even when backtesting is not enabled.
+
+#### Four Regime Types
+
+| Regime | Characteristics | Optimal approach |
+|--------|----------------|------------------|
+| **Strong Trend** | High total return, high ADX, price consistently above/below MA | Buy-and-hold or wide trailing stop |
+| **Mean-Reverting / Range-Bound** | Low total return, low ADX, price oscillates around MA | Swing trade support/resistance |
+| **Volatile / Choppy** | High ATR%, frequent direction changes, no clear trend | Reduce position size, widen stops |
+| **Breakout / Transition** | Narrowing volatility (BB squeeze) followed by expansion | Momentum entry on breakout confirmation |
+
+#### How Classification Works
+
+The classifier computes six metrics from the data, then scores each regime type. The regime with the highest score wins.
+
+**Metrics computed:**
+
+| Metric | Description |
+|--------|-------------|
+| Total return | `(last_close - first_close) / first_close` — the overall price change across the entire period. This is the **primary signal**. |
+| ADX (current) | Latest ADX value — measures current trend strength |
+| ADX (rolling mean) | Average ADX over the full period — captures trend strength even when current ADX dips during consolidations |
+| % above MA | Fraction of bars where close > trend MA — measures trend consistency |
+| ATR% | ATR / price — measures volatility relative to price level |
+| Direction changes | Fraction of bars that reverse direction — measures choppiness |
+| BB width percentile | Current Bollinger Band width vs. recent history — detects squeezes and expansions |
+
+**Total return as primary signal:** A stock with 30%+ absolute return over the analysis period is classified as trending regardless of current ADX. This prevents misclassification of stocks in short-term consolidations within strong long-term trends (e.g., AAPL up 46% over 2 years but with a low current ADX of 19.7 during a pullback). The classifier uses `effective_adx = max(current_adx, rolling_adx_mean)` to reduce sensitivity to temporary ADX dips.
+
+**Confidence:** The winning regime's score divided by the sum of all regime scores. A confidence of 89% means the winner strongly dominates; 44% means the classification is less certain with other regimes scoring comparably.
+
+**Period dependence:** The regime reflects the data you asked it to analyze. The same stock can be "Strong Trend" on a 2-year period and "Mean-Reverting" on a 6-month period if it's been consolidating recently within a longer uptrend. This is intentional — the regime drives strategy adaptation for the analysis window you selected.
+
+#### Regime Re-Evaluation During Backtesting
+
+The regime is **not** set once at the start. It is re-classified every `rebalance_interval` bars (default: 5) on the trailing data up to the current bar. This means the strategy can adapt mid-backtest if market conditions change — for example, transitioning from a trend-following mode to a swing-trading mode as a trend exhausts.
+
+If classification fails on any bar (exception), the previous regime is silently retained.
+
+A final classification on the **complete** dataset is performed after the simulation loop ends, and this is what appears in the backtest report.
+
+#### Classification Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `trend_ma_period` | 50 | MA period for trend consistency and direction |
+| `adx_strong_trend` | 30.0 | ADX above this = strong trend signal |
+| `adx_weak` | 20.0 | ADX below this = weak/no trend |
+| `trend_consistency_high` | 70.0 | % above MA exceeding this = strong trend bias |
+| `trend_consistency_low` | 40.0 | % above MA below this = trend weakness |
+| `atr_pct_high` | 0.03 | ATR% above this = high volatility |
+| `atr_pct_low` | 0.01 | ATR% below this = low volatility |
+| `atr_period` | 14 | ATR calculation period |
+| `bb_period` | 20 | Bollinger Band period |
+| `bb_std_dev` | 2.0 | Bollinger Band standard deviation |
+| `bb_squeeze_percentile` | 20.0 | BB width below this percentile = squeeze |
+| `bb_expansion_percentile` | 80.0 | BB width above this percentile = expansion |
+| `direction_change_high` | 0.55 | Direction changes above this = choppy |
+| `direction_change_period` | 20 | Lookback for counting direction changes |
+| `price_ma_distance_extended` | 0.10 | Price > this % from MA = extended trend |
+| `total_return_strong` | 0.30 | Absolute return above this = definitively trending |
+| `total_return_moderate` | 0.15 | Absolute return above this = moderate trend signal |
+
+### 9.7 Regime-Adaptive Strategy
+
+When backtesting is enabled, the detected regime adapts the strategy's behavior automatically. Each regime type has its own set of configurable adaptations under `regime.strategy_adaptation` in the config.
+
+#### Strong Trend Adaptations
+
+In a strong trend, the strategy shifts from score-based trading to trend-following:
+
+- **Entry:** When `ignore_score_entries` is enabled, the strategy bypasses score thresholds entirely. Instead, it enters based on trend direction — long when price is above the trend MA, short when below.
+- **Holding:** When `hold_with_trend` is enabled, the strategy holds the position as long as the trend persists. It only exits on extreme score reversals (e.g., a long position exits only if the score drops well below the SELL threshold).
+- **Trailing stop:** Uses an ATR-based trailing stop (`trailing_stop_atr_mult × ATR`) instead of score-based exits.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_trailing_stop` | true | Trail stop with trend instead of score-based exits |
+| `trailing_stop_atr_mult` | 3.0 | Trailing stop distance = N x ATR |
+| `ignore_score_entries` | true | Skip score thresholds; enter based on trend direction |
+| `hold_with_trend` | true | Hold position as long as trend persists |
+
+#### Mean-Reverting Adaptations
+
+In a range-bound market, the strategy generates more frequent swing trades:
+
+- **Thresholds:** The HOLD zone is narrowed by `threshold_adjustment` on each side. For example, if base thresholds are `short_below=4.5, hold_below=5.5`, mean-reverting adjusts them to `short_below=4.8, hold_below=5.2`. This makes it easier for the score to trigger BUY and SELL signals at the range extremes.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `tighten_thresholds` | true | Narrow the HOLD zone for more swing trades |
+| `threshold_adjustment` | 0.3 | How much to narrow thresholds on each side |
+
+#### Volatile/Choppy Adaptations
+
+In choppy markets, the strategy becomes defensive:
+
+- **Position sizing:** Reduced by `position_size_mult` (default 0.5), so each trade uses half the normal size.
+- **Stop-loss:** The effective stop-loss distance is widened by `stop_loss_mult` (default 1.5x) to prevent frequent stop-outs from noisy price action.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `reduce_position_size` | true | Halve position size to limit risk |
+| `position_size_mult` | 0.5 | Position size multiplier (0.1-1.0) |
+| `widen_stops` | true | Widen stop loss to avoid frequent stop-outs |
+| `stop_loss_mult` | 1.5 | Stop loss multiplier (1.0-3.0) |
+
+#### Breakout/Transition Adaptations
+
+During a potential breakout, the strategy gates entries with confirmation signals:
+
+- **Momentum entry:** When the score-based logic generates a BUY or SELL signal, it must pass a momentum check before executing. The bar's directional move (`|close - open|`) must be at least 40% of the bar's total range (`high - low`), filtering out wicks and noise.
+- **Volume confirmation:** Optionally requires the bar's volume to exceed the average by `volume_surge_mult` (default 1.3x).
+
+If confirmation fails, the signal is converted to HOLD.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `use_momentum_entry` | true | Enter on breakout confirmation instead of score alone |
+| `breakout_atr_mult` | 1.5 | Price must move N x ATR from squeeze level |
+| `require_volume_surge` | true | Require above-average volume to confirm breakout |
+| `volume_surge_mult` | 1.3 | Volume must exceed average by this multiplier |
 
 ---
 
@@ -1278,6 +1447,13 @@ strategy:
   take_profit_pct: 0.20
   rebalance_interval: 5
   flatten_eod: false
+  # ATR-Adaptive Stop
+  atr_stop_enabled: true           # use ATR-based stop instead of fixed %
+  atr_stop_multiplier: 2.5         # stop = N × ATR at entry time
+  atr_stop_period: 14              # ATR calculation period
+  # Trend Confirmation
+  trend_confirm_enabled: true      # require price above/below trend MA for entry
+  trend_confirm_period: 20         # EMA period for trend confirmation
   # Pattern-Indicator Combination
   combination_mode: "weighted"   # "weighted", "gate", or "boost"
   indicator_weight: 0.7          # indicator weight in blended score
@@ -1298,6 +1474,7 @@ backtest:
   commission_per_trade: 0.0
   slippage_pct: 0.001
   warmup_bars: 200
+  max_warmup_ratio: 0.5            # warmup can't exceed this fraction of total data
   significant_pattern_min_strength: 0.5  # min strength to appear in timeline
 
 # ── Suitability Detection ───────────────────────────────────────
@@ -1312,6 +1489,47 @@ suitability:
   trend_ma_period: 200
   max_pct_above_ma: 65.0
   atr_period: 14
+
+# ── Market Regime Classification ────────────────────────────────
+
+regime:
+  trend_ma_period: 50
+  adx_strong_trend: 30.0
+  adx_weak: 20.0
+  trend_consistency_high: 70.0
+  trend_consistency_low: 40.0
+  atr_pct_high: 0.03
+  atr_pct_low: 0.01
+  atr_period: 14
+  bb_period: 20
+  bb_std_dev: 2.0
+  bb_squeeze_percentile: 20.0
+  bb_expansion_percentile: 80.0
+  direction_change_high: 0.55
+  direction_change_period: 20
+  price_ma_distance_extended: 0.10
+  total_return_strong: 0.30
+  total_return_moderate: 0.15
+  strategy_adaptation:
+    strong_trend:
+      use_trailing_stop: true
+      trailing_stop_atr_mult: 3.0
+      ignore_score_entries: true
+      hold_with_trend: true
+    mean_reverting:
+      use_trailing_stop: false
+      tighten_thresholds: true
+      threshold_adjustment: 0.3
+    volatile_choppy:
+      reduce_position_size: true
+      position_size_mult: 0.5
+      widen_stops: true
+      stop_loss_mult: 1.5
+    breakout_transition:
+      use_momentum_entry: true
+      breakout_atr_mult: 1.5
+      require_volume_surge: true
+      volume_surge_mult: 1.3
 
 # ── Objective Presets ────────────────────────────────────────────
 
@@ -1436,9 +1654,16 @@ The standard analysis display includes:
 
 5. **Support and Resistance Table** — Up to 4 support levels and 4 resistance levels with prices, labels, and detection sources.
 
-6. **Score Legend** — Color-coded interpretation guide.
+6. **Market Regime Panel** — A bordered panel showing:
+   - Detected regime (Strong Trend, Mean-Reverting, Volatile/Choppy, or Breakout/Transition)
+   - Confidence percentage
+   - Description of the regime and recommended approach
+   - Key metrics: total return, ADX (current and rolling average), trend MA consistency, ATR%, direction changes
+   - Explanatory reasons for the classification
 
-7. **Disclaimer** — "For informational purposes only. Not financial advice."
+7. **Score Legend** — Color-coded interpretation guide.
+
+8. **Disclaimer** — "For informational purposes only. Not financial advice."
 
 ### Backtest Output
 
@@ -1450,14 +1675,16 @@ The backtest display includes:
 
 3. **Performance Summary Table** — All metrics from [Section 9.5](#95-performance-metrics), color-coded green (positive) or red (negative).
 
-4. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted, gate, or boost) and indicator/pattern weight split.
+4. **Market Regime Panel** — Same regime panel as the analysis view (see above), showing the regime detected on the full backtest dataset and how it influenced strategy behavior.
 
-5. **Trade Log** — Detailed table of every trade:
+5. **Strategy Configuration Table** — All active strategy parameters, including combination mode (weighted, gate, or boost), indicator/pattern weight split, ATR stop settings, trend confirmation, and regime-adaptive overrides.
+
+6. **Trade Log** — Detailed table of every trade:
    - Trade number, side (LONG/SHORT), entry/exit dates and prices
    - Quantity, P&L dollar amount and percentage, exit reason
    - Up to 50 trades shown; if more, first 25 + last 25 with a count of omitted trades
 
-6. **Significant Patterns Timeline** — A chronological table of all notable patterns detected during the backtest period (not just the ones the strategy acted on). This helps you spot entry/exit opportunities the strategy may have missed. Columns:
+7. **Significant Patterns Timeline** — A chronological table of all notable patterns detected during the backtest period (not just the ones the strategy acted on). This helps you spot entry/exit opportunities the strategy may have missed. Columns:
    - **Date** — When the pattern was detected
    - **Detector** — Which detector found it (Candlesticks, Gaps, Spikes, Inside/Outside Bars)
    - **Pattern** — Specific pattern name (e.g., Hammer, Breakaway Gap UP, Spike DOWN)
@@ -1468,9 +1695,9 @@ The backtest display includes:
    - Summary line shows total count with bullish/bearish breakdown
    - Minimum strength threshold is configurable via `backtest.significant_pattern_min_strength` (default: 0.5)
 
-7. **Equity Curve** — Text-based checkpoints showing portfolio value at start, 25%, 50%, 75%, and end of the backtest period.
+8. **Equity Curve** — Text-based checkpoints showing portfolio value at start, 25%, 50%, 75%, and end of the backtest period.
 
-8. **Backtest Disclaimer** — "Backtest results are hypothetical and do not guarantee future performance."
+9. **Backtest Disclaimer** — "Backtest results are hypothetical and do not guarantee future performance."
 
 ---
 
@@ -1498,6 +1725,15 @@ This opens the dashboard in your default browser (usually at `http://localhost:8
 - **Interval** — All intervals from 1m to 3mo
 - **Objective preset** — Select long_term, short_term, day_trading, or none
 - **Run backtest** — Toggle backtesting on/off with trading mode selection
+- **Parameter editing** — Expandable sections for tuning all parameters in real time:
+  - **Indicator Weights** — Adjust the weight of each indicator in the composite score
+  - **Indicator Parameters** — Tune individual indicator settings (periods, thresholds, scoring)
+  - **Pattern Weights** — Adjust pattern detector weights
+  - **Strategy Parameters** — Combination mode, thresholds, position sizing, stop-loss, take-profit, ATR stop, trend confirmation
+  - **Backtest Parameters** — Initial cash, commission, slippage, warmup bars, max warmup ratio
+  - **Regime Parameters** — All classification thresholds (ADX, ATR%, direction changes, total return, BB squeeze/expansion) and per-regime strategy adaptation settings
+  - Each parameter shows a small gray hint below it with the default value and a brief description
+- **Config loadouts** — Save and load parameter configurations as named loadouts for quick comparison
 
 **Analysis View:**
 1. **Header** — Ticker name, price, indicator composite score, pattern composite score
@@ -1508,7 +1744,8 @@ This opens the dashboard in your default browser (usually at `http://localhost:8
    - Threshold markers showing where LONG/SHORT/HOLD boundaries are
 3. **Indicator Breakdown Table** — Each indicator's value, detail, score (with progress bar), and weight
 4. **Pattern Signals Table** — Each pattern's signal, detail, score, and weight
-5. **Score Distribution Histogram** — Distribution of indicator and pattern scores over the full period, with threshold markers
+5. **Market Regime Panel** — Detected regime type, confidence percentage, and key metrics (total return, ADX current/average, trend MA %, ATR%, direction changes). Includes explanatory reasons for the classification.
+6. **Score Distribution Histogram** — Distribution of indicator and pattern scores over the full period, with threshold markers
 
 **Backtest View (when enabled):**
 1. **Suitability Assessment** — Trading mode, avg volume, ADX, ATR% metrics with reason explanations
@@ -1517,16 +1754,17 @@ This opens the dashboard in your default browser (usually at `http://localhost:8
    - Entry markers (triangles for long/short)
    - Exit markers (X symbols, colored by win/loss)
    - Hover details for each trade
-4. **Strategy Configuration** — Expandable panel showing all active strategy parameters
-5. **Trade Log** — Full trade history in a scrollable table
-6. **Significant Patterns Timeline** — Expandable panel showing all notable patterns detected during the backtest period with bullish/bearish summary counts (same data as the CLI version)
+4. **Market Regime** — The regime detected on the full backtest dataset, including confidence and strategy adaptation summary
+5. **Strategy Configuration** — Expandable panel showing all active strategy parameters
+6. **Trade Log** — Full trade history in a scrollable table
+7. **Significant Patterns Timeline** — Expandable panel showing all notable patterns detected during the backtest period with bullish/bearish summary counts (same data as the CLI version)
 
 ### 15.3 Performance Notes
 
 - **Data caching**: Results are cached for 5 minutes (`@st.cache_data(ttl=300)`). Changing any sidebar input automatically re-runs the computation.
 - **Score timeseries**: Computing scores at every bar is expensive. The dashboard samples at ~150 evenly-spaced points for responsiveness. For a 2-year daily dataset (~500 bars), this means scores are computed roughly every 3-4 bars.
 - **Backtest**: The backtest runs the same engine as the CLI — identical results are expected for the same inputs.
-- **Dashboard is read-only** (Phase 1): You cannot edit config parameters from the dashboard. Edit `config.yaml` directly and refresh the page.
+- **Parameter editing**: All parameter changes in the sidebar take effect immediately on the next analysis run. Changes are session-local — they do not modify `config.yaml` on disk unless you explicitly save a loadout.
 
 ---
 
