@@ -230,7 +230,7 @@ strategy:
   # Map composite score ranges to trading decisions
   #
   # NOTE: The composite score (weighted average of 8 indicators) has lower
-  # variance than individual indicators — it typically ranges ~3.5–6.5.
+  # variance than individual indicators — it typically ranges ~3.7–5.9.
   # Set thresholds within that actual range for trades to trigger.
   # Use threshold_mode: "percentile" for self-calibrating thresholds.
   #
@@ -259,8 +259,23 @@ strategy:
   stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
   take_profit_pct: 0.20     # exit if position gains this fraction (0.20 = 20%)
 
+  # ATR-adaptive stop loss — uses N × ATR at entry time instead of fixed %
+  # The effective stop is min(stop_loss_pct, atr_stop_multiplier × ATR / price)
+  # so the fixed % acts as a safety ceiling.
+  atr_stop_enabled: true    # set false to use only the fixed stop_loss_pct
+  atr_stop_multiplier: 2.5  # N in "N × ATR" — higher = wider stop
+  atr_stop_period: 14       # ATR calculation lookback period
+
+  # Trend confirmation filter — before entering a new position, check that
+  # price is on the right side of a short-term EMA.
+  # BUY requires close > EMA(trend_confirm_period)
+  # SHORT requires close < EMA(trend_confirm_period)
+  # This prevents buying into active downtrends or shorting into uptrends.
+  trend_confirm_enabled: true
+  trend_confirm_period: 20   # EMA period for trend confirmation
+
   # How often to re-evaluate and potentially change position
-  rebalance_interval: 5     # re-score every N bars
+  rebalance_interval: 1     # re-score every N bars
 
   # Day trading: force-close all positions at the end of each trading day
   # (only applies when using intraday intervals like 1m, 5m, 15m, etc.)
@@ -303,7 +318,11 @@ backtest:
   slippage_pct: 0.001       # simulated slippage as fraction of price (0.1%)
   # Minimum bars of data needed before the first signal can be generated
   # (must be >= longest indicator lookback, e.g. 200 for SMA200)
-  warmup_bars: 200
+  warmup_bars: 100
+  # Maximum fraction of total data that warmup can consume.  Prevents warmup
+  # from eating most of a short dataset (e.g. 6mo = 126 bars).
+  # warmup = min(warmup_bars, int(len(data) * max_warmup_ratio))
+  max_warmup_ratio: 0.5
   # Minimum strength for a pattern to appear in the "Significant Patterns
   # Timeline" table at the end of the backtest output.  Lower = more patterns
   # shown.  Range depends on detector (candlestick strength is typically
@@ -421,14 +440,16 @@ objectives:
         fibonacci: 0.10
 
     strategy:
-      rebalance_interval: 10    # less frequent re-evaluation
-      stop_loss_pct: 0.08       # wider stop (8%)
+      rebalance_interval: 5     # less frequent re-evaluation
+      stop_loss_pct: 0.10       # wider stop (10%)
       take_profit_pct: 0.30     # wider target (30%)
       indicator_weight: 0.8     # long-term: indicators matter more
       pattern_weight: 0.2
+      atr_stop_multiplier: 3.0  # wider ATR stop for position trading
+      trend_confirm_period: 50  # slower trend confirmation for long-term
 
     backtest:
-      warmup_bars: 250          # need more data for slower indicators
+      warmup_bars: 200          # need more data for slower indicators
 
   # ── Short-term / Swing Trading ───────────────────────────────────────────
   # Designed for holding periods of days to weeks.
@@ -519,6 +540,8 @@ objectives:
       take_profit_pct: 0.10     # tighter target (10%)
       indicator_weight: 0.6     # short-term: patterns matter more than long-term
       pattern_weight: 0.4
+      atr_stop_multiplier: 2.0  # tighter ATR stop for swing trading
+      trend_confirm_period: 10  # faster trend confirmation
 
     backtest:
       warmup_bars: 60           # much less data needed (no SMA200)
@@ -626,6 +649,9 @@ objectives:
       pattern_weight: 0.5
       boost_strength: 0.7       # stronger boost — patterns more meaningful intraday
       boost_dead_zone: 0.2      # narrower dead zone — react to smaller pattern signals
+      atr_stop_multiplier: 1.5  # tight ATR stop for day trading
+      atr_stop_period: 10       # shorter ATR period for intraday
+      trend_confirm_period: 10  # fast confirmation for intraday
 
     backtest:
       warmup_bars: 30           # minimal warmup for fast indicators

@@ -153,6 +153,7 @@ class _Position:
     quantity: float
     bars_held: int = 0
     entry_reason: str = ""  # carried through to BacktestTrade on close
+    entry_atr: float = 0.0  # ATR at time of entry (for adaptive stop loss)
 
     def unrealized_pnl(self, current_price: float) -> float:
         if self.side == "long":
@@ -210,6 +211,18 @@ class BacktestEngine:
         self._stop_loss_pct: float = float(strat_cfg.get("stop_loss_pct", 0.05))
         self._take_profit_pct: float = float(strat_cfg.get("take_profit_pct", 0.15))
         self._flatten_eod: bool = bool(strat_cfg.get("flatten_eod", False))
+
+        # ATR-adaptive stop loss
+        self._atr_stop_multiplier: float = float(strat_cfg.get("atr_stop_multiplier", 2.5))
+        self._atr_stop_period: int = int(strat_cfg.get("atr_stop_period", 14))
+        self._atr_stop_enabled: bool = bool(strat_cfg.get("atr_stop_enabled", True))
+
+        # Trend confirmation filter
+        self._trend_confirm_enabled: bool = bool(strat_cfg.get("trend_confirm_enabled", True))
+        self._trend_confirm_period: int = int(strat_cfg.get("trend_confirm_period", 20))
+
+        # Proportional warmup
+        self._max_warmup_ratio: float = float(bt_cfg.get("max_warmup_ratio", 0.5))
 
     # ------------------------------------------------------------------
     # Interval helpers
@@ -273,12 +286,36 @@ class BacktestEngine:
         else:
             period_label = period or "2y"
 
-        if len(df) < self._warmup_bars + 10:
+        # 1b. Proportional warmup — cap warmup to a fraction of available data
+        effective_warmup = self._warmup_bars
+        max_warmup = int(len(df) * self._max_warmup_ratio)
+        if effective_warmup > max_warmup:
+            effective_warmup = max(20, max_warmup)  # floor at 20 bars
+
+        if len(df) < effective_warmup + 10:
             raise ValueError(
                 f"Not enough data for backtest. Got {len(df)} bars, "
-                f"need at least {self._warmup_bars + 10} "
-                f"(warmup={self._warmup_bars})."
+                f"need at least {effective_warmup + 10} "
+                f"(warmup={effective_warmup})."
             )
+
+        # 1c. Pre-compute trend confirmation EMA (full series, no lookahead — EMA[i] uses data up to i)
+        trend_ma_series: pd.Series | None = None
+        if self._trend_confirm_enabled:
+            trend_ma_series = df["close"].ewm(span=self._trend_confirm_period, adjust=False).mean()
+
+        # 1d. Pre-compute ATR series for adaptive stop loss
+        atr_series: pd.Series | None = None
+        if self._atr_stop_enabled:
+            high = df["high"]
+            low = df["low"]
+            prev_close = df["close"].shift(1)
+            tr = pd.concat([
+                high - low,
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            atr_series = tr.rolling(window=self._atr_stop_period, min_periods=1).mean()
 
         # 2. State initialization
         cash: float = self._initial_cash
@@ -316,7 +353,7 @@ class BacktestEngine:
                 position.bars_held += 1
 
             # -- Skip warmup period --
-            if i < self._warmup_bars:
+            if i < effective_warmup:
                 equity = cash + (position.unrealized_pnl(close) if position else 0.0)
                 equity_curve.append({"date": date_str, "equity": equity})
                 continue
@@ -359,6 +396,16 @@ class BacktestEngine:
                     else 0.0
                 )
 
+            # Trend MA for confirmation filter
+            current_trend_ma = 0.0
+            if trend_ma_series is not None:
+                current_trend_ma = float(trend_ma_series.iloc[i])
+
+            # Current ATR for adaptive stop loss on new entries
+            current_atr = 0.0
+            if atr_series is not None:
+                current_atr = float(atr_series.iloc[i])
+
             ctx = StrategyContext(
                 bar=bar_dict,
                 indicators={},       # raw values not needed for score strategy
@@ -370,6 +417,7 @@ class BacktestEngine:
                 else 0.0,
                 cash=cash,
                 portfolio_value=portfolio_value,
+                trend_ma=current_trend_ma,
             )
 
             order = self._strategy.on_bar(ctx)
@@ -399,12 +447,12 @@ class BacktestEngine:
                 pass  # hold_only: do nothing
             elif order.signal == Signal.BUY and position is None:
                 position, cost = self._open_position(
-                    "long", close, order.quantity, date_str, order.notes
+                    "long", close, order.quantity, date_str, order.notes, current_atr
                 )
                 cash -= cost
             elif order.signal == Signal.SELL and position is None and can_short:
                 position, cost = self._open_position(
-                    "short", close, order.quantity, date_str, order.notes
+                    "short", close, order.quantity, date_str, order.notes, current_atr
                 )
                 cash -= cost  # cost = commission only for short opens
             elif order.signal == Signal.BUY and position is not None and position.side == "short":
@@ -413,7 +461,7 @@ class BacktestEngine:
                 cash += self._trade_proceeds(trade, position)
                 trades.append(trade)
                 position, cost = self._open_position(
-                    "long", close, order.quantity, date_str, order.notes
+                    "long", close, order.quantity, date_str, order.notes, current_atr
                 )
                 cash -= cost
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
@@ -425,7 +473,7 @@ class BacktestEngine:
                 # Open short only if trading mode allows
                 if can_short:
                     position, cost = self._open_position(
-                        "short", close, order.quantity, date_str, order.notes
+                        "short", close, order.quantity, date_str, order.notes, current_atr
                     )
                     cash -= cost
 
@@ -461,7 +509,7 @@ class BacktestEngine:
         final_equity = cash
 
         # 5. Extract significant patterns from the full post-warmup data
-        post_warmup_df = df.iloc[self._warmup_bars:].copy()
+        post_warmup_df = df.iloc[effective_warmup:].copy()
         significant_patterns = self._extract_significant_patterns(post_warmup_df)
 
         # 6. Build result
@@ -490,6 +538,7 @@ class BacktestEngine:
         quantity: float,
         date: str,
         entry_reason: str = "",
+        entry_atr: float = 0.0,
     ) -> tuple[_Position, float]:
         """Open a new position. Returns (position, cash_cost).
 
@@ -503,6 +552,7 @@ class BacktestEngine:
             entry_price=fill_price,
             quantity=quantity,
             entry_reason=entry_reason,
+            entry_atr=entry_atr,
         )
         if side == "long":
             cost = fill_price * quantity + self._commission
@@ -568,10 +618,21 @@ class BacktestEngine:
         return price * (1 - self._slippage_pct)
 
     def _check_exit_triggers(self, position: _Position, current_price: float) -> str:
-        """Check stop-loss and take-profit. Returns exit reason or empty string."""
+        """Check stop-loss and take-profit. Returns exit reason or empty string.
+
+        When ATR-adaptive stop is enabled and the position has a valid entry_atr,
+        the stop is ``atr_stop_multiplier * entry_atr / entry_price``, capped by
+        the fixed ``stop_loss_pct`` as a safety ceiling.
+        """
         pnl_pct = position.unrealized_pnl_pct(current_price)
 
-        if pnl_pct <= -self._stop_loss_pct:
+        # Determine effective stop distance
+        effective_stop = self._stop_loss_pct  # fixed fallback
+        if self._atr_stop_enabled and position.entry_atr > 0 and position.entry_price > 0:
+            atr_stop = self._atr_stop_multiplier * position.entry_atr / position.entry_price
+            effective_stop = min(self._stop_loss_pct, atr_stop)
+
+        if pnl_pct <= -effective_stop:
             return "stop_loss"
         if pnl_pct >= self._take_profit_pct:
             return "take_profit"

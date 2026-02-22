@@ -45,6 +45,7 @@ class StrategyContext:
     position: float = 0.0               # current position size (0 = flat)
     cash: float = 100_000.0             # available cash
     portfolio_value: float = 100_000.0  # total portfolio value
+    trend_ma: float = 0.0               # short-term trend MA for confirmation filter
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

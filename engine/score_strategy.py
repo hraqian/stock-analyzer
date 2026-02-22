@@ -128,6 +128,10 @@ class ScoreBasedStrategy(Strategy):
         self._stop_loss: float = float(self.params.get("stop_loss_pct", 0.05))
         self._take_profit: float = float(self.params.get("take_profit_pct", 0.15))
 
+        # Trend confirmation filter
+        self._trend_confirm_enabled: bool = bool(self.params.get("trend_confirm_enabled", True))
+        self._trend_confirm_period: int = int(self.params.get("trend_confirm_period", 20))
+
     @property
     def trading_mode(self) -> TradingMode:
         return self._trading_mode
@@ -181,6 +185,16 @@ class ScoreBasedStrategy(Strategy):
         # ── Apply trading mode constraints ──────────────────────────────
         signal = self._constrain_signal(signal, ctx.position)
 
+        # ── Trend confirmation filter ───────────────────────────────────
+        # Prevent entering trades against the short-term trend direction.
+        # Only applied to NEW entries (not closing existing positions).
+        if self._trend_confirm_enabled and ctx.trend_ma > 0 and ctx.position == 0:
+            close = ctx.bar.get("close", 0.0)
+            if signal == Signal.BUY and close < ctx.trend_ma:
+                signal = Signal.HOLD  # don't buy into a downtrend
+            elif signal == Signal.SELL and close > ctx.trend_ma:
+                signal = Signal.HOLD  # don't short into an uptrend
+
         # Determine desired quantity
         quantity = self._compute_quantity(ctx)
 
@@ -197,6 +211,7 @@ class ScoreBasedStrategy(Strategy):
             notes=(
                 f"ind={ind_score:.2f} pat={pat_score:.2f} "
                 f"eff={effective_score:.2f} mode={self._trading_mode.value}"
+                + (f" tma={ctx.trend_ma:.2f}" if self._trend_confirm_enabled and ctx.trend_ma > 0 else "")
             ),
         )
 

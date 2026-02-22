@@ -149,8 +149,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "percent_equity": 0.80,
         "stop_loss_pct": 0.05,
         "take_profit_pct": 0.20,
-        "rebalance_interval": 5,
+        "rebalance_interval": 1,
         "flatten_eod": False,  # force-close all positions at end of each trading day
+        # ATR-adaptive stop loss
+        "atr_stop_enabled": True,       # use ATR-based stop instead of fixed %
+        "atr_stop_multiplier": 2.5,     # stop = N × ATR at entry time
+        "atr_stop_period": 14,          # ATR calculation period
+        # Trend confirmation filter
+        "trend_confirm_enabled": True,   # require price above/below trend MA for entry
+        "trend_confirm_period": 20,      # EMA period for trend confirmation
         # Pattern-indicator combination for strategy decisions
         "combination_mode": "weighted",  # "weighted", "gate", or "boost"
         "indicator_weight": 0.7,         # weight of indicator composite in blended score
@@ -168,7 +175,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "initial_cash": 100_000.0,
         "commission_per_trade": 0.0,
         "slippage_pct": 0.001,
-        "warmup_bars": 200,
+        "warmup_bars": 100,
+        "max_warmup_ratio": 0.5,       # warmup can't exceed this fraction of total data
         "significant_pattern_min_strength": 0.5,
     },
     # ------------------------------------------------------------------
@@ -302,14 +310,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 },
             },
             "strategy": {
-                "rebalance_interval": 10,
-                "stop_loss_pct": 0.08,
+                "rebalance_interval": 5,
+                "stop_loss_pct": 0.10,
                 "take_profit_pct": 0.30,
                 "indicator_weight": 0.8,
                 "pattern_weight": 0.2,
+                "atr_stop_multiplier": 3.0,    # wider ATR stop for position trading
+                "trend_confirm_period": 50,     # slower trend confirmation for long-term
             },
             "backtest": {
-                "warmup_bars": 250,
+                "warmup_bars": 200,
             },
         },
         "short_term": {
@@ -384,6 +394,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "take_profit_pct": 0.10,
                 "indicator_weight": 0.6,
                 "pattern_weight": 0.4,
+                "atr_stop_multiplier": 2.0,    # tighter ATR stop for swing trading
+                "trend_confirm_period": 10,     # faster trend confirmation
             },
             "backtest": {
                 "warmup_bars": 60,
@@ -476,6 +488,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "pattern_weight": 0.5,
                 "boost_strength": 0.7,      # stronger boost — patterns more meaningful intraday
                 "boost_dead_zone": 0.2,     # narrower dead zone — react to smaller pattern signals
+                "atr_stop_multiplier": 1.5,  # tight ATR stop for day trading
+                "atr_stop_period": 10,       # shorter ATR period for intraday
+                "trend_confirm_period": 10,  # fast confirmation for intraday
             },
             "backtest": {
                 "warmup_bars": 30,
@@ -711,6 +726,26 @@ class Config:
                 f"strategy.rebalance_interval must be a positive integer, got {rebal!r}"
             )
 
+        # ATR-adaptive stop loss
+        atr_mult = strat.get("atr_stop_multiplier", 2.5)
+        if not isinstance(atr_mult, (int, float)) or atr_mult <= 0:
+            errors.append(
+                f"strategy.atr_stop_multiplier must be a positive number, got {atr_mult!r}"
+            )
+
+        atr_period = strat.get("atr_stop_period", 14)
+        if not isinstance(atr_period, int) or atr_period < 1:
+            errors.append(
+                f"strategy.atr_stop_period must be a positive integer, got {atr_period!r}"
+            )
+
+        # Trend confirmation filter
+        trend_period = strat.get("trend_confirm_period", 20)
+        if not isinstance(trend_period, int) or trend_period < 1:
+            errors.append(
+                f"strategy.trend_confirm_period must be a positive integer, got {trend_period!r}"
+            )
+
         # Backtest parameters
         bt = self._data.get("backtest", {})
         cash = bt.get("initial_cash", 100_000)
@@ -720,6 +755,12 @@ class Config:
         warmup = bt.get("warmup_bars", 200)
         if not isinstance(warmup, int) or warmup < 1:
             errors.append(f"backtest.warmup_bars must be a positive integer, got {warmup!r}")
+
+        max_warmup_ratio = bt.get("max_warmup_ratio", 0.5)
+        if not isinstance(max_warmup_ratio, (int, float)) or not (0 < max_warmup_ratio < 1):
+            errors.append(
+                f"backtest.max_warmup_ratio must be between 0 and 1 (exclusive), got {max_warmup_ratio!r}"
+            )
 
         slippage = bt.get("slippage_pct", 0.001)
         if not isinstance(slippage, (int, float)) or slippage < 0:

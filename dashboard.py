@@ -323,6 +323,14 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "backtest.slippage_pct": "higher = more realistic fill price slippage",
     "backtest.warmup_bars": "more bars = indicators are fully warmed up before trading begins",
     "backtest.significant_pattern_min_strength": "higher = only the strongest patterns appear in the timeline",
+    "backtest.max_warmup_ratio": "higher = allows warmup to consume more of short datasets (0.1–0.9)",
+    # -- ATR-adaptive stop --
+    "strategy.atr_stop_enabled": "use ATR-based dynamic stop instead of fixed %; adapts to volatility",
+    "strategy.atr_stop_multiplier": "higher = wider stop, fewer stop-outs; lower = tighter, more stop-outs",
+    "strategy.atr_stop_period": "shorter = reacts to recent volatility faster, longer = smoother ATR",
+    # -- Trend confirmation --
+    "strategy.trend_confirm_enabled": "require price on correct side of trend EMA before entering",
+    "strategy.trend_confirm_period": "shorter = faster trend detection, more trades; longer = stronger filter",
 }
 
 
@@ -684,6 +692,48 @@ def _edit_strategy_params(data: dict) -> None:
     )
     _default_hint(_ds.get("flatten_eod"), PARAM_DESCRIPTIONS.get("strategy.flatten_eod"))
 
+    st.markdown("##### ATR-Adaptive Stop")
+    strat["atr_stop_enabled"] = st.checkbox(
+        "Enable ATR stop",
+        value=bool(strat.get("atr_stop_enabled", True)),
+        key="atr_stop_en",
+    )
+    _default_hint(_ds.get("atr_stop_enabled"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_enabled"))
+
+    if strat["atr_stop_enabled"]:
+        strat["atr_stop_multiplier"] = st.number_input(
+            "ATR stop multiplier",
+            0.5, 5.0,
+            value=float(strat.get("atr_stop_multiplier", 2.5)),
+            step=0.1, key="atr_stop_mult", format="%.1f",
+        )
+        _default_hint(_ds.get("atr_stop_multiplier"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_multiplier"))
+
+        strat["atr_stop_period"] = st.number_input(
+            "ATR period",
+            5, 50,
+            value=int(strat.get("atr_stop_period", 14)),
+            step=1, key="atr_stop_per",
+        )
+        _default_hint(_ds.get("atr_stop_period"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_period"))
+
+    st.markdown("##### Trend Confirmation")
+    strat["trend_confirm_enabled"] = st.checkbox(
+        "Enable trend filter",
+        value=bool(strat.get("trend_confirm_enabled", True)),
+        key="trend_conf_en",
+    )
+    _default_hint(_ds.get("trend_confirm_enabled"), PARAM_DESCRIPTIONS.get("strategy.trend_confirm_enabled"))
+
+    if strat["trend_confirm_enabled"]:
+        strat["trend_confirm_period"] = st.number_input(
+            "Trend EMA period",
+            5, 100,
+            value=int(strat.get("trend_confirm_period", 20)),
+            step=1, key="trend_conf_per",
+        )
+        _default_hint(_ds.get("trend_confirm_period"), PARAM_DESCRIPTIONS.get("strategy.trend_confirm_period"))
+
 
 def _edit_backtest_params(data: dict) -> None:
     """Editable backtest engine params."""
@@ -729,6 +779,14 @@ def _edit_backtest_params(data: dict) -> None:
         step=0.1, key="sig_min_str", format="%.1f",
     )
     _default_hint(_db.get("significant_pattern_min_strength"), PARAM_DESCRIPTIONS.get("backtest.significant_pattern_min_strength"))
+
+    bt["max_warmup_ratio"] = st.slider(
+        "Max warmup ratio",
+        0.1, 0.9,
+        value=float(bt.get("max_warmup_ratio", 0.5)),
+        step=0.05, key="max_warmup_r", format="%.2f",
+    )
+    _default_hint(_db.get("max_warmup_ratio"), PARAM_DESCRIPTIONS.get("backtest.max_warmup_ratio"))
 
 
 # ---------------------------------------------------------------------------
@@ -1592,8 +1650,23 @@ def render_strategy_config(cfg: Config) -> None:
     rows.append(("Take Profit", f"{strat_cfg.get('take_profit_pct', 0.15) * 100:.1f}%"))
     rows.append(("Rebalance", f"every {strat_cfg.get('rebalance_interval', 5)} bars"))
     rows.append(("EOD Flatten", "ON" if strat_cfg.get("flatten_eod", False) else "OFF"))
+
+    # ATR-adaptive stop
+    atr_enabled = strat_cfg.get("atr_stop_enabled", True)
+    rows.append(("ATR Stop", "ON" if atr_enabled else "OFF"))
+    if atr_enabled:
+        rows.append(("ATR Multiplier", f"{strat_cfg.get('atr_stop_multiplier', 2.5):.1f}x"))
+        rows.append(("ATR Period", f"{strat_cfg.get('atr_stop_period', 14)}"))
+
+    # Trend confirmation
+    trend_enabled = strat_cfg.get("trend_confirm_enabled", True)
+    rows.append(("Trend Filter", "ON" if trend_enabled else "OFF"))
+    if trend_enabled:
+        rows.append(("Trend EMA Period", f"{strat_cfg.get('trend_confirm_period', 20)}"))
+
     rows.append(("Slippage", f"{bt_cfg.get('slippage_pct', 0.001) * 100:.2f}%"))
     rows.append(("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"))
+    rows.append(("Max Warmup Ratio", f"{bt_cfg.get('max_warmup_ratio', 0.5):.0%}"))
 
     df = pd.DataFrame(rows, columns=["Parameter", "Value"])
     st.dataframe(df, use_container_width=True, hide_index=True)
