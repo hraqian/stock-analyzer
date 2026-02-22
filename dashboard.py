@@ -401,6 +401,18 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "regime.trend_direction_bearish_threshold": "pct_above_ma < this → classify trend direction as bearish",
     "regime.adx_dip_threshold": "rolling ADX mean > current + this → mention 'temporary dip' in reasons",
     "regime.runner_up_proximity_ratio": "runner-up score / winner > this → mention it in classification reasons",
+    # -- Suitability params --
+    "suitability.mode_override": "auto = detect from data, or force long_short / long_only / hold_only",
+    "suitability.min_volume": "avg daily volume below this → stock is too illiquid (hold_only)",
+    "suitability.min_atr_pct": "ATR/price below this → price movement too low for active trading (hold_only)",
+    "suitability.min_adx_for_short": "ADX below this → trend too weak for effective shorting (long_only)",
+    "suitability.min_atr_for_short": "ATR/price below this → volatility too low for shorts (long_only)",
+    "suitability.min_volume_for_short": "avg volume below this → insufficient liquidity for shorting (long_only)",
+    "suitability.trend_ma_period": "long-term MA period for structural trend direction check",
+    "suitability.max_pct_above_ma": "price above MA for more than this % → structural uptrend, suppress shorts",
+    "suitability.atr_period": "ATR calculation lookback period for suitability checks",
+    "suitability.adx_min_data_mult": "require period × this many bars before ADX can be computed",
+    "suitability.insufficient_data_pct": "pct_above_ma fallback when not enough data (50 = no directional bias)",
 }
 
 
@@ -1452,6 +1464,108 @@ def _edit_regime_params(data: dict) -> None:
     _default_hint(_dbo.get("volume_surge_mult"), PARAM_DESCRIPTIONS.get("regime.breakout_transition.volume_surge_mult"))
 
 
+def _edit_suitability_params(data: dict) -> None:
+    """Edit suitability (trading mode detection) thresholds."""
+    suit = data.setdefault("suitability", {})
+    _ds = DEFAULT_CONFIG.get("suitability", {})
+
+    suit["mode_override"] = st.selectbox(
+        "Mode override",
+        ["auto", "long_short", "long_only", "hold_only"],
+        index=["auto", "long_short", "long_only", "hold_only"].index(
+            suit.get("mode_override", "auto"),
+        ),
+        key="suit_mode",
+    )
+    _default_hint(_ds.get("mode_override"), PARAM_DESCRIPTIONS.get("suitability.mode_override"))
+
+    st.markdown("**Hold-Only Thresholds**")
+
+    suit["min_volume"] = st.number_input(
+        "Min avg daily volume",
+        min_value=0, max_value=10_000_000,
+        value=int(suit.get("min_volume", 100_000)),
+        step=10_000, key="suit_min_vol",
+    )
+    _default_hint(_ds.get("min_volume"), PARAM_DESCRIPTIONS.get("suitability.min_volume"))
+
+    suit["min_atr_pct"] = st.number_input(
+        "Min ATR%",
+        min_value=0.0, max_value=0.10,
+        value=float(suit.get("min_atr_pct", 0.005)),
+        step=0.001, key="suit_min_atr", format="%.3f",
+    )
+    _default_hint(_ds.get("min_atr_pct"), PARAM_DESCRIPTIONS.get("suitability.min_atr_pct"))
+
+    st.markdown("**Long-Only Thresholds**")
+
+    suit["min_adx_for_short"] = st.slider(
+        "Min ADX for shorting", 5.0, 50.0,
+        value=float(suit.get("min_adx_for_short", 25.0)),
+        step=1.0, key="suit_min_adx",
+    )
+    _default_hint(_ds.get("min_adx_for_short"), PARAM_DESCRIPTIONS.get("suitability.min_adx_for_short"))
+
+    suit["min_atr_for_short"] = st.number_input(
+        "Min ATR% for shorting",
+        min_value=0.0, max_value=0.10,
+        value=float(suit.get("min_atr_for_short", 0.01)),
+        step=0.001, key="suit_min_atr_short", format="%.3f",
+    )
+    _default_hint(_ds.get("min_atr_for_short"), PARAM_DESCRIPTIONS.get("suitability.min_atr_for_short"))
+
+    suit["min_volume_for_short"] = st.number_input(
+        "Min volume for shorting",
+        min_value=0, max_value=10_000_000,
+        value=int(suit.get("min_volume_for_short", 500_000)),
+        step=50_000, key="suit_min_vol_short",
+    )
+    _default_hint(_ds.get("min_volume_for_short"), PARAM_DESCRIPTIONS.get("suitability.min_volume_for_short"))
+
+    st.markdown("**Trend Direction Filter**")
+
+    suit["trend_ma_period"] = st.number_input(
+        "Trend MA period",
+        min_value=20, max_value=500,
+        value=int(suit.get("trend_ma_period", 200)),
+        step=10, key="suit_trend_ma",
+    )
+    _default_hint(_ds.get("trend_ma_period"), PARAM_DESCRIPTIONS.get("suitability.trend_ma_period"))
+
+    suit["max_pct_above_ma"] = st.slider(
+        "Max % above MA", 50.0, 95.0,
+        value=float(suit.get("max_pct_above_ma", 65.0)),
+        step=1.0, key="suit_max_pct",
+    )
+    _default_hint(_ds.get("max_pct_above_ma"), PARAM_DESCRIPTIONS.get("suitability.max_pct_above_ma"))
+
+    suit["atr_period"] = st.number_input(
+        "ATR period",
+        min_value=5, max_value=50,
+        value=int(suit.get("atr_period", 14)),
+        step=1, key="suit_atr_period",
+    )
+    _default_hint(_ds.get("atr_period"), PARAM_DESCRIPTIONS.get("suitability.atr_period"))
+
+    st.markdown("**Advanced**")
+
+    suit["adx_min_data_mult"] = st.number_input(
+        "ADX min data multiplier",
+        min_value=1, max_value=10,
+        value=int(suit.get("adx_min_data_mult", 3)),
+        step=1, key="suit_adx_mult",
+    )
+    _default_hint(_ds.get("adx_min_data_mult"), PARAM_DESCRIPTIONS.get("suitability.adx_min_data_mult"))
+
+    suit["insufficient_data_pct"] = st.number_input(
+        "Insufficient data fallback %",
+        min_value=0.0, max_value=100.0,
+        value=float(suit.get("insufficient_data_pct", 50.0)),
+        step=5.0, key="suit_insuf_pct", format="%.1f",
+    )
+    _default_hint(_ds.get("insufficient_data_pct"), PARAM_DESCRIPTIONS.get("suitability.insufficient_data_pct"))
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -1542,6 +1656,9 @@ def render_sidebar() -> dict:
 
     with st.sidebar.expander("Regime Classification"):
         _edit_regime_params(data)
+
+    with st.sidebar.expander("Suitability Detection"):
+        _edit_suitability_params(data)
 
     # Write back to session state (widgets already mutated `data` in-place)
     st.session_state["config_data"] = data

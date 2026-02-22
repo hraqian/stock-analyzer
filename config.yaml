@@ -546,6 +546,10 @@ suitability:
   # ATR calculation period
   atr_period: 14
 
+  # Algorithmic constants (rarely need changing)
+  adx_min_data_mult: 3          # require period × N bars minimum for ADX calculation
+  insufficient_data_pct: 50.0   # pct_above_ma fallback when data < trend_ma_period (50 = no bias)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Trading Objective Presets
 # ─────────────────────────────────────────────────────────────────────────────

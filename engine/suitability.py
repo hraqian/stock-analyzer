@@ -82,6 +82,10 @@ class SuitabilityAnalyzer:
         # ATR calculation period
         self._atr_period: int = int(suit.get("atr_period", 14))
 
+        # Algorithmic constants
+        self._adx_min_data_mult: int = int(suit.get("adx_min_data_mult", 3))
+        self._insufficient_data_pct: float = float(suit.get("insufficient_data_pct", 50.0))
+
     def assess(self, df: pd.DataFrame) -> SuitabilityAssessment:
         """Analyze the OHLCV DataFrame and return a suitability assessment.
 
@@ -227,7 +231,7 @@ class SuitabilityAnalyzer:
         """
         period = self._atr_period  # reuse the same period for consistency
 
-        if len(df) < period * 3:
+        if len(df) < period * self._adx_min_data_mult:
             return 0.0
 
         high = df["high"].values
@@ -305,7 +309,7 @@ class SuitabilityAnalyzer:
         period), which is treated as "no strong directional bias".
         """
         if len(df) < self._trend_ma_period:
-            return 50.0
+            return self._insufficient_data_pct
 
         close = df["close"]
         sma = close.rolling(window=self._trend_ma_period).mean()
@@ -313,7 +317,7 @@ class SuitabilityAnalyzer:
         # Drop NaN rows — first (period-1) bars have no valid MA
         valid = sma.dropna()
         if valid.empty:
-            return 50.0
+            return self._insufficient_data_pct
 
         close_valid = close.loc[valid.index]
         above = (close_valid > valid).sum()

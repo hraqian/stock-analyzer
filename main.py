@@ -18,6 +18,7 @@ Usage:
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
+    python main.py --list-patterns               # list all available pattern detectors
 
 (Dates above are placeholders — actual examples are computed dynamically at runtime.)
 """
@@ -65,6 +66,10 @@ Examples:
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
+  python main.py --list-patterns
+
+Streamlit dashboard:
+  streamlit run dashboard.py
         """,
     )
 
@@ -177,6 +182,11 @@ Examples:
         action="store_true",
         help="List all available indicator keys and exit",
     )
+    parser.add_argument(
+        "--list-patterns",
+        action="store_true",
+        help="List all available pattern detector keys and exit",
+    )
 
     return parser
 
@@ -284,6 +294,16 @@ def main() -> None:
         registry = IndicatorRegistry(cfg)
         console.print("\n[bold cyan]Available indicators:[/bold cyan]")
         for key in registry.indicator_names:
+            console.print(f"  [white]{key}[/white]")
+        console.print()
+        return
+
+    # ── --list-patterns ───────────────────────────────────────────────────────
+    if args.list_patterns:
+        from patterns.registry import PatternRegistry
+        registry = PatternRegistry(cfg)
+        console.print("\n[bold cyan]Available pattern detectors:[/bold cyan]")
+        for key in registry.pattern_names:
             console.print(f"  [white]{key}[/white]")
         console.print()
         return

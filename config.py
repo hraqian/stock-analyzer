@@ -407,6 +407,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "atr_period": 14,
         "trend_ma_period": 200,
         "max_pct_above_ma": 65.0,
+        "adx_min_data_mult": 3,              # require period*N bars for ADX calculation
+        "insufficient_data_pct": 50.0,       # pct_above_ma fallback when data is insufficient
     },
     # ------------------------------------------------------------------
     # Trading objective presets — partial overrides applied on top of the
