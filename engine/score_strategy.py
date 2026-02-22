@@ -145,7 +145,7 @@ class ScoreBasedStrategy(Strategy):
         self._regime_adapt: dict[str, dict[str, Any]] = {
             "strong_trend": ra.get("strong_trend", {
                 "use_trailing_stop": True,
-                "trailing_stop_atr_mult": 5.0,
+                "trailing_stop_atr_mult": 4.0,
                 "ignore_score_entries": True,
                 "hold_with_trend": True,
                 "min_distance": 0.01,       # 1% from MA for trend entry
@@ -200,6 +200,41 @@ class ScoreBasedStrategy(Strategy):
         )
         self._global_bias_threshold: float = float(
             self.params.get("global_bias_threshold", 0.10)
+        )
+
+        # ── New configurable strategy parameters ───────────────────────
+        self._trend_bias_return_threshold: float = float(
+            self.params.get("trend_bias_return_threshold", 0.15)
+        )
+        self._extreme_exit_score_offset: float = float(
+            self.params.get("extreme_exit_score_offset", 1.5)
+        )
+        self._breakout_min_move_ratio: float = float(
+            self.params.get("breakout_min_move_ratio", 0.4)
+        )
+        self._allow_pyramiding: bool = bool(
+            self.params.get("allow_pyramiding", False)
+        )
+        self._allow_immediate_reversal: bool = bool(
+            self.params.get("allow_immediate_reversal", True)
+        )
+        self._disable_tp_in_strong_trend: bool = bool(
+            self.params.get("disable_take_profit_in_strong_trend", True)
+        )
+        self._trailing_stop_require_profit: bool = bool(
+            self.params.get("trailing_stop_require_profit", True)
+        )
+        self._percentile_min_fill_ratio: float = float(
+            self.params.get("percentile_min_fill_ratio", 0.8)
+        )
+        self._trend_confirm_ma_type: str = str(
+            self.params.get("trend_confirm_ma_type", "ema")
+        )
+        self._trend_confirm_tolerance_pct: float = float(
+            self.params.get("trend_confirm_tolerance_pct", 0.0)
+        )
+        self._cooldown_reset_on_breakeven: bool = bool(
+            self.params.get("cooldown_reset_on_breakeven", True)
         )
 
     @property
@@ -309,21 +344,24 @@ class ScoreBasedStrategy(Strategy):
             and not in_grace
         ):
             close = ctx.bar.get("close", 0.0)
-            if signal == Signal.BUY and close < ctx.trend_ma:
+            tolerance = ctx.trend_ma * self._trend_confirm_tolerance_pct
+            if signal == Signal.BUY and close < ctx.trend_ma - tolerance:
                 signal = Signal.HOLD  # don't buy into a downtrend
-            elif signal == Signal.SELL and close > ctx.trend_ma:
+            elif signal == Signal.SELL and close > ctx.trend_ma + tolerance:
                 signal = Signal.HOLD  # don't short into an uptrend
 
         # Determine desired quantity (regime-adapted)
         quantity = self._compute_quantity(ctx, regime)
 
-        # If we already hold a position in the signal direction, HOLD.
+        # If we already hold a position in the signal direction, HOLD
+        # (unless pyramiding is explicitly enabled).
         current_pos = ctx.position  # positive = long, negative = short
         was_in_position = current_pos != 0
-        if signal == Signal.BUY and current_pos > 0:
-            signal = Signal.HOLD
-        elif signal == Signal.SELL and current_pos < 0:
-            signal = Signal.HOLD
+        if not self._allow_pyramiding:
+            if signal == Signal.BUY and current_pos > 0:
+                signal = Signal.HOLD
+            elif signal == Signal.SELL and current_pos < 0:
+                signal = Signal.HOLD
 
         # Track exits for re-entry grace period
         if was_in_position and signal != Signal.HOLD:
@@ -355,6 +393,8 @@ class ScoreBasedStrategy(Strategy):
         """Track consecutive losses for cooldown logic."""
         if pnl_pct < 0:
             self._consecutive_losses += 1
+        elif pnl_pct == 0 and not self._cooldown_reset_on_breakeven:
+            pass  # breakeven doesn't reset counter when disabled
         else:
             self._consecutive_losses = 0
 
@@ -408,9 +448,9 @@ class ScoreBasedStrategy(Strategy):
         total_return = ctx.regime_total_return
 
         # Determine effective bias from total return (same logic as entry)
-        if total_return >= 0.15:
+        if total_return >= self._trend_bias_return_threshold:
             effective_bias = "bullish"
-        elif total_return <= -0.15:
+        elif total_return <= -self._trend_bias_return_threshold:
             effective_bias = "bearish"
         else:
             effective_bias = trend_direction
@@ -456,8 +496,8 @@ class ScoreBasedStrategy(Strategy):
 
         # Allow exit if score is extremely bearish (for longs) or bullish (for shorts)
         # Use a wide margin — only exit on extreme conviction reversal
-        extreme_bearish = self._short_below - 1.5  # e.g. 2.0 if short_below=3.5
-        extreme_bullish = self._hold_below + 1.5   # e.g. 8.0 if hold_below=6.5
+        extreme_bearish = self._short_below - self._extreme_exit_score_offset
+        extreme_bullish = self._hold_below + self._extreme_exit_score_offset
 
         signal = Signal.HOLD
         if ctx.position > 0 and effective_score < extreme_bearish:
@@ -538,9 +578,9 @@ class ScoreBasedStrategy(Strategy):
         # ── Determine effective trend bias ──────────────────────────────
         # Use total return as the primary directional signal.
         # total_return is a fraction (e.g. 1.15 = +115%, -0.20 = -20%)
-        if total_return >= 0.15:
+        if total_return >= self._trend_bias_return_threshold:
             effective_bias = "bullish"
-        elif total_return <= -0.15:
+        elif total_return <= -self._trend_bias_return_threshold:
             effective_bias = "bearish"
         else:
             # Ambiguous total return — use trend_direction or price/MA
@@ -620,7 +660,7 @@ class ScoreBasedStrategy(Strategy):
         # move is meaningfully directional (> 50% of bar range), which suggests
         # breakout rather than just wide range noise.
         move_ratio = bar_move / bar_range if bar_range > 0 else 0
-        if move_ratio < 0.4:
+        if move_ratio < self._breakout_min_move_ratio:
             return False  # bar is mostly wick, not a real breakout candle
 
         # Volume surge check
@@ -725,7 +765,7 @@ class ScoreBasedStrategy(Strategy):
         Falls back to fixed thresholds if the rolling window
         doesn't have enough data yet (< 80% full).
         """
-        min_samples = max(10, int(self._lookback_bars * 0.8))
+        min_samples = max(10, int(self._lookback_bars * self._percentile_min_fill_ratio))
         if len(self._score_window) < min_samples:
             # Not enough history — fall back to fixed thresholds
             return self._fixed_signal(score, short_below, hold_below)

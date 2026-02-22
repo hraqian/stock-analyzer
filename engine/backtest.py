@@ -228,6 +228,20 @@ class BacktestEngine:
         # Proportional warmup
         self._max_warmup_ratio: float = float(bt_cfg.get("max_warmup_ratio", 0.5))
 
+        # New configurable backtest parameters
+        self._min_warmup_bars: int = int(bt_cfg.get("min_warmup_bars", 20))
+        self._min_post_warmup_bars: int = int(bt_cfg.get("min_post_warmup_bars", 10))
+        self._trading_days_per_year: int = int(bt_cfg.get("trading_days_per_year", 252))
+        self._trading_day_minutes: int = int(bt_cfg.get("trading_day_minutes", 390))
+        self._default_score: float = float(bt_cfg.get("default_score", 5.0))
+        self._close_on_end_of_data: bool = bool(bt_cfg.get("close_on_end_of_data", True))
+
+        # Strategy policy toggles (read from strategy section)
+        self._allow_immediate_reversal: bool = bool(strat_cfg.get("allow_immediate_reversal", True))
+        self._trailing_stop_require_profit: bool = bool(strat_cfg.get("trailing_stop_require_profit", True))
+        self._disable_tp_in_strong_trend: bool = bool(strat_cfg.get("disable_take_profit_in_strong_trend", True))
+        self._trend_confirm_ma_type: str = str(strat_cfg.get("trend_confirm_ma_type", "ema"))
+
         # Trailing stop high-water mark (reset when position opens/closes)
         self._trailing_high: float = 0.0
 
@@ -236,8 +250,8 @@ class BacktestEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _bars_per_day(interval: str) -> int:
-        """Estimate the number of intraday bars in a 6.5-hour trading day.
+    def _bars_per_day(interval: str, trading_day_minutes: int = 390) -> int:
+        """Estimate the number of intraday bars in a trading day.
 
         Returns 1 for daily-or-above intervals (used for annualization).
         """
@@ -250,8 +264,7 @@ class BacktestEngine:
         minutes = _interval_minutes.get(interval)
         if minutes is None:
             return 1  # daily, weekly, monthly
-        # US market: 6.5 hours = 390 minutes
-        return max(1, 390 // minutes)
+        return max(1, trading_day_minutes // minutes)
 
     @staticmethod
     def _is_intraday(interval: str) -> bool:
@@ -297,19 +310,23 @@ class BacktestEngine:
         effective_warmup = self._warmup_bars
         max_warmup = int(len(df) * self._max_warmup_ratio)
         if effective_warmup > max_warmup:
-            effective_warmup = max(20, max_warmup)  # floor at 20 bars
+            effective_warmup = max(self._min_warmup_bars, max_warmup)
 
-        if len(df) < effective_warmup + 10:
+        min_required = effective_warmup + self._min_post_warmup_bars
+        if len(df) < min_required:
             raise ValueError(
                 f"Not enough data for backtest. Got {len(df)} bars, "
-                f"need at least {effective_warmup + 10} "
+                f"need at least {min_required} "
                 f"(warmup={effective_warmup})."
             )
 
         # 1c. Pre-compute trend confirmation EMA (full series, no lookahead — EMA[i] uses data up to i)
         trend_ma_series: pd.Series | None = None
         if self._trend_confirm_enabled:
-            trend_ma_series = df["close"].ewm(span=self._trend_confirm_period, adjust=False).mean()
+            if self._trend_confirm_ma_type.lower() == "sma":
+                trend_ma_series = df["close"].rolling(window=self._trend_confirm_period, min_periods=1).mean()
+            else:
+                trend_ma_series = df["close"].ewm(span=self._trend_confirm_period, adjust=False).mean()
 
         # 1d. Pre-compute ATR series for adaptive stop loss
         atr_series: pd.Series | None = None
@@ -332,8 +349,8 @@ class BacktestEngine:
 
         # Last computed scores (reused between rebalance bars)
         last_scores: dict[str, float] = {}
-        last_overall: float = 5.0
-        last_pattern_overall: float = 5.0
+        last_overall: float = self._default_score
+        last_pattern_overall: float = self._default_score
 
         # Regime classification (re-evaluated each rebalance)
         regime_classifier = RegimeClassifier(self._cfg)
@@ -486,22 +503,26 @@ class BacktestEngine:
                 )
                 cash -= cost  # cost = commission only for short opens
             elif order.signal == Signal.BUY and position is not None and position.side == "short":
-                # Close short, open long
+                # Close short
                 trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
                 _record_trade(trade)
-                position, cost = self._open_position(
-                    "long", close, order.quantity, date_str, order.notes, current_atr
-                )
-                cash -= cost
+                # Open long only if immediate reversal is allowed
+                if self._allow_immediate_reversal:
+                    position, cost = self._open_position(
+                        "long", close, order.quantity, date_str, order.notes, current_atr
+                    )
+                    cash -= cost
+                else:
+                    position = None
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
                 # Close long
                 trade = self._close_position(position, close, date_str, signal_reason)
                 cash += self._trade_proceeds(trade, position)
                 _record_trade(trade)
                 position = None
-                # Open short only if trading mode allows
-                if can_short:
+                # Open short only if trading mode allows and immediate reversal is allowed
+                if can_short and self._allow_immediate_reversal:
                     position, cost = self._open_position(
                         "short", close, order.quantity, date_str, order.notes, current_atr
                     )
@@ -527,8 +548,8 @@ class BacktestEngine:
                     equity += position.unrealized_pnl(close)
             equity_curve.append({"date": date_str, "equity": equity})
 
-        # 4. Close any remaining position at last bar
-        if position is not None:
+        # 4. Close any remaining position at last bar (if configured)
+        if self._close_on_end_of_data and position is not None:
             last_close = float(df["close"].iloc[-1])
             last_date = str(df.index[-1])[:10]
             trade = self._close_position(position, last_close, last_date, "end_of_data")
@@ -537,6 +558,13 @@ class BacktestEngine:
             position = None
 
         final_equity = cash
+        # If position still open (close_on_end_of_data=False), include unrealized value
+        if position is not None:
+            last_close = float(df["close"].iloc[-1])
+            if position.side == "long":
+                final_equity += position.quantity * last_close
+            else:
+                final_equity += position.unrealized_pnl(last_close)
 
         # 5. Extract significant patterns from the full post-warmup data
         post_warmup_df = df.iloc[effective_warmup:].copy()
@@ -700,15 +728,17 @@ class BacktestEngine:
             regime_cfg = self._cfg.section("regime")
             adapt = regime_cfg.get("strategy_adaptation", {}).get("strong_trend", {})
             if adapt.get("use_trailing_stop", True):
-                trail_mult = float(adapt.get("trailing_stop_atr_mult", 3.0))
+                trail_mult = float(adapt.get("trailing_stop_atr_mult", 4.0))
                 trail_dist = trail_mult * position.entry_atr
                 if position.side == "long":
                     trail_stop_price = self._trailing_high - trail_dist
-                    if current_price <= trail_stop_price and self._trailing_high > position.entry_price:
+                    in_profit = not self._trailing_stop_require_profit or self._trailing_high > position.entry_price
+                    if current_price <= trail_stop_price and in_profit:
                         return "trailing_stop"
                 else:
                     trail_stop_price = self._trailing_high + trail_dist
-                    if current_price >= trail_stop_price and self._trailing_high < position.entry_price:
+                    in_profit = not self._trailing_stop_require_profit or self._trailing_high < position.entry_price
+                    if current_price >= trail_stop_price and in_profit:
                         return "trailing_stop"
 
         # ── Fixed / ATR stop-loss ───────────────────────────────────────
@@ -730,8 +760,8 @@ class BacktestEngine:
             return "stop_loss"
 
         # ── Take-profit ─────────────────────────────────────────────────
-        # Disabled in strong_trend — trailing stop handles exits instead
-        if regime == RegimeType.STRONG_TREND:
+        # Optionally disabled in strong_trend — trailing stop handles exits instead
+        if self._disable_tp_in_strong_trend and regime == RegimeType.STRONG_TREND:
             return ""  # let trailing stop manage the exit
 
         if pnl_pct >= self._take_profit_pct:
@@ -893,15 +923,16 @@ class BacktestEngine:
     def _compute_metrics(self, result: BacktestResult, interval: str = "1d") -> None:
         """Populate performance metrics on *result* in-place.
 
-        For intraday intervals, annualization uses bars_per_day * 252 instead
-        of just 252 to correctly scale to yearly figures.
+        For intraday intervals, annualization uses
+        bars_per_day * trading_days_per_year instead of just
+        trading_days_per_year to correctly scale to yearly figures.
         """
         trades = result.trades
         result.total_trades = len(trades)
 
         # Bars per trading year for this interval
-        bpd = self._bars_per_day(interval)
-        bars_per_year = bpd * 252  # trading days per year
+        bpd = self._bars_per_day(interval, self._trading_day_minutes)
+        bars_per_year = bpd * self._trading_days_per_year
 
         # Total return
         if result.initial_cash > 0:

@@ -155,6 +155,20 @@ class RegimeClassifier:
         self._total_return_strong: float = float(r.get("total_return_strong", 0.30))
         self._total_return_moderate: float = float(r.get("total_return_moderate", 0.15))
 
+        # ── Classification guard ────────────────────────────────────────
+        self._min_bars_for_classification: int = int(r.get("min_bars_for_classification", 20))
+
+        # ── Trend direction thresholds ──────────────────────────────────
+        self._trend_direction_bullish: float = float(r.get("trend_direction_bullish_threshold", 60))
+        self._trend_direction_bearish: float = float(r.get("trend_direction_bearish_threshold", 40))
+
+        # ── Reason building ─────────────────────────────────────────────
+        self._adx_dip_threshold: float = float(r.get("adx_dip_threshold", 3))
+        self._runner_up_proximity_ratio: float = float(r.get("runner_up_proximity_ratio", 0.7))
+
+        # ── Scoring weights (nested dict) ───────────────────────────────
+        self._scoring: dict[str, dict[str, float]] = r.get("scoring", {})
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -198,7 +212,7 @@ class RegimeClassifier:
         """Compute all raw metrics needed for regime classification."""
         metrics = RegimeMetrics()
 
-        if df.empty or len(df) < 20:
+        if df.empty or len(df) < self._min_bars_for_classification:
             return metrics
 
         close = df["close"]
@@ -228,9 +242,9 @@ class RegimeClassifier:
                 metrics.pct_above_ma = float(above) / len(valid) * 100.0
 
                 # Trend direction
-                if metrics.pct_above_ma > 60:
+                if metrics.pct_above_ma > self._trend_direction_bullish:
                     metrics.trend_direction = "bullish"
-                elif metrics.pct_above_ma < 40:
+                elif metrics.pct_above_ma < self._trend_direction_bearish:
                     metrics.trend_direction = "bearish"
                 else:
                     metrics.trend_direction = "neutral"
@@ -448,6 +462,8 @@ class RegimeClassifier:
         a stock up 30%+ is in a trend regardless of current ADX.  Rolling
         ADX mean (average over the period) supplements current ADX, since
         the current value can dip during short-term consolidations.
+
+        All scoring weights are read from config → regime → scoring.
         """
         scores: dict[RegimeType, float] = {
             RegimeType.STRONG_TREND: 0.0,
@@ -455,6 +471,12 @@ class RegimeClassifier:
             RegimeType.VOLATILE_CHOPPY: 0.0,
             RegimeType.BREAKOUT_TRANSITION: 0.0,
         }
+
+        # Shorthand accessors for each regime's scoring dict
+        st = self._scoring.get("strong_trend", {})
+        mr = self._scoring.get("mean_reverting", {})
+        vc = self._scoring.get("volatile_choppy", {})
+        bo = self._scoring.get("breakout", {})
 
         # Use the better of current ADX and rolling ADX mean — a stock
         # in a strong long-term trend that's temporarily consolidating
@@ -469,116 +491,155 @@ class RegimeClassifier:
         # --- Primary signal: total return over the period ---
         # A stock up 30%+ (or down 30%+) is definitively trending.
         if abs_return >= self._total_return_strong:
-            # Scale bonus: 30% → 3.0, 60% → 4.5, 100% → 6.0
-            scores[RegimeType.STRONG_TREND] += 3.0 + min(abs_return - self._total_return_strong, 0.70) / 0.70 * 3.0
+            return_strong_base = float(st.get("return_strong_base", 3.0))
+            return_strong_cap = float(st.get("return_strong_cap", 0.70))
+            return_strong_scale = float(st.get("return_strong_scale", 3.0))
+            excess = min(abs_return - self._total_return_strong, return_strong_cap)
+            scores[RegimeType.STRONG_TREND] += return_strong_base + (excess / return_strong_cap * return_strong_scale if return_strong_cap > 0 else 0)
         elif abs_return >= self._total_return_moderate:
-            # Moderate return: some trend signal
+            return_moderate_base = float(st.get("return_moderate_base", 1.0))
+            return_moderate_scale = float(st.get("return_moderate_scale", 2.0))
             frac = (abs_return - self._total_return_moderate) / (self._total_return_strong - self._total_return_moderate)
-            scores[RegimeType.STRONG_TREND] += 1.0 + frac * 2.0
+            scores[RegimeType.STRONG_TREND] += return_moderate_base + frac * return_moderate_scale
 
         # --- ADX (use effective = max of current and rolling mean) ---
+        adx_strong_base = float(st.get("adx_strong_base", 2.0))
+        adx_strong_divisor = float(st.get("adx_strong_divisor", 20.0))
+        adx_moderate_score = float(st.get("adx_moderate_score", 0.5))
         if effective_adx >= self._adx_strong_trend:
-            scores[RegimeType.STRONG_TREND] += 2.0 + (effective_adx - self._adx_strong_trend) / 20.0
+            scores[RegimeType.STRONG_TREND] += adx_strong_base + (effective_adx - self._adx_strong_trend) / adx_strong_divisor
         elif effective_adx >= self._adx_weak:
-            scores[RegimeType.STRONG_TREND] += 0.5
+            scores[RegimeType.STRONG_TREND] += adx_moderate_score
 
         # Trend consistency: price consistently on one side of MA
         pct_away = abs(m.pct_above_ma - 50.0)  # 0 = perfectly balanced, 50 = always one side
+        consistency_high_score = float(st.get("consistency_high_score", 2.0))
+        consistency_moderate_score = float(st.get("consistency_moderate_score", 0.5))
         if pct_away > (self._trend_consistency_high - 50.0):
-            scores[RegimeType.STRONG_TREND] += 2.0
+            scores[RegimeType.STRONG_TREND] += consistency_high_score
         elif pct_away > (self._trend_consistency_low - 50.0):
-            scores[RegimeType.STRONG_TREND] += 0.5
+            scores[RegimeType.STRONG_TREND] += consistency_moderate_score
 
         # Extended price distance from MA (trending far away)
+        extended_distance_score = float(st.get("extended_distance_score", 1.0))
         if m.price_ma_distance > self._price_ma_distance_extended:
-            scores[RegimeType.STRONG_TREND] += 1.0
+            scores[RegimeType.STRONG_TREND] += extended_distance_score
 
         # Low direction changes favour trend
-        if m.direction_changes < 0.4:
-            scores[RegimeType.STRONG_TREND] += 1.0
-        elif m.direction_changes < 0.5:
-            scores[RegimeType.STRONG_TREND] += 0.3
+        dc_low = float(st.get("direction_change_low", 0.4))
+        dc_low_score = float(st.get("direction_change_low_score", 1.0))
+        dc_mid = float(st.get("direction_change_mid", 0.5))
+        dc_mid_score = float(st.get("direction_change_mid_score", 0.3))
+        if m.direction_changes < dc_low:
+            scores[RegimeType.STRONG_TREND] += dc_low_score
+        elif m.direction_changes < dc_mid:
+            scores[RegimeType.STRONG_TREND] += dc_mid_score
 
         # ════════════════════════════════════════════════════════════════
         # MEAN REVERTING scoring
         # ════════════════════════════════════════════════════════════════
 
         # --- Total return suppresses mean-reverting ---
-        # A big move over the period means it's NOT range-bound.
+        return_strong_penalty = float(mr.get("return_strong_penalty", 2.0))
+        return_moderate_penalty = float(mr.get("return_moderate_penalty", 1.0))
+        return_small_bonus = float(mr.get("return_small_bonus", 1.5))
         if abs_return >= self._total_return_strong:
-            # Strong trend → penalise mean-reverting
-            scores[RegimeType.MEAN_REVERTING] -= 2.0
+            scores[RegimeType.MEAN_REVERTING] -= return_strong_penalty
         elif abs_return >= self._total_return_moderate:
-            scores[RegimeType.MEAN_REVERTING] -= 1.0
+            scores[RegimeType.MEAN_REVERTING] -= return_moderate_penalty
         else:
-            # Small total return → supports range-bound classification
-            scores[RegimeType.MEAN_REVERTING] += 1.5
+            scores[RegimeType.MEAN_REVERTING] += return_small_bonus
 
         # Low ADX → range-bound
+        mr_adx_low_score = float(mr.get("adx_low_score", 2.0))
+        mr_adx_moderate_score = float(mr.get("adx_moderate_score", 1.0))
         if effective_adx < self._adx_weak:
-            scores[RegimeType.MEAN_REVERTING] += 2.0
+            scores[RegimeType.MEAN_REVERTING] += mr_adx_low_score
         elif effective_adx < self._adx_strong_trend:
-            scores[RegimeType.MEAN_REVERTING] += 1.0
+            scores[RegimeType.MEAN_REVERTING] += mr_adx_moderate_score
 
         # Price oscillates around MA (pct_above_ma near 50%)
-        if pct_away < 15:
-            scores[RegimeType.MEAN_REVERTING] += 2.0
-        elif pct_away < 25:
-            scores[RegimeType.MEAN_REVERTING] += 1.0
+        pct_away_tight = float(mr.get("pct_away_tight", 15))
+        pct_away_tight_score = float(mr.get("pct_away_tight_score", 2.0))
+        pct_away_moderate = float(mr.get("pct_away_moderate", 25))
+        pct_away_moderate_score = float(mr.get("pct_away_moderate_score", 1.0))
+        if pct_away < pct_away_tight:
+            scores[RegimeType.MEAN_REVERTING] += pct_away_tight_score
+        elif pct_away < pct_away_moderate:
+            scores[RegimeType.MEAN_REVERTING] += pct_away_moderate_score
 
         # Low/moderate volatility
+        mr_atr_below_high_score = float(mr.get("atr_below_high_score", 0.5))
+        mr_atr_below_low_score = float(mr.get("atr_below_low_score", 0.5))
         if m.atr_pct < self._atr_pct_high:
-            scores[RegimeType.MEAN_REVERTING] += 0.5
+            scores[RegimeType.MEAN_REVERTING] += mr_atr_below_high_score
         if m.atr_pct < self._atr_pct_low:
-            scores[RegimeType.MEAN_REVERTING] += 0.5
+            scores[RegimeType.MEAN_REVERTING] += mr_atr_below_low_score
 
         # Price stays close to MA
-        if m.price_ma_distance < 0.03:
-            scores[RegimeType.MEAN_REVERTING] += 1.0
+        mr_price_ma_threshold = float(mr.get("price_ma_close_threshold", 0.03))
+        mr_price_ma_score = float(mr.get("price_ma_close_score", 1.0))
+        if m.price_ma_distance < mr_price_ma_threshold:
+            scores[RegimeType.MEAN_REVERTING] += mr_price_ma_score
 
         # ════════════════════════════════════════════════════════════════
         # VOLATILE CHOPPY scoring
         # ════════════════════════════════════════════════════════════════
         # High ATR% → volatile
+        vc_atr_high_base = float(vc.get("atr_high_base", 2.0))
+        vc_atr_high_scale = float(vc.get("atr_high_scale", 30.0))
+        vc_atr_moderate_score = float(vc.get("atr_moderate_score", 0.5))
         if m.atr_pct >= self._atr_pct_high:
-            scores[RegimeType.VOLATILE_CHOPPY] += 2.0 + (m.atr_pct - self._atr_pct_high) * 30.0
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_atr_high_base + (m.atr_pct - self._atr_pct_high) * vc_atr_high_scale
         elif m.atr_pct >= self._atr_pct_low:
-            scores[RegimeType.VOLATILE_CHOPPY] += 0.5
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_atr_moderate_score
 
         # Frequent direction changes → choppy
+        vc_dc_high_score = float(vc.get("direction_change_high_score", 2.0))
+        vc_dc_moderate = float(vc.get("direction_change_moderate", 0.45))
+        vc_dc_moderate_score = float(vc.get("direction_change_moderate_score", 1.0))
         if m.direction_changes >= self._direction_change_high:
-            scores[RegimeType.VOLATILE_CHOPPY] += 2.0
-        elif m.direction_changes >= 0.45:
-            scores[RegimeType.VOLATILE_CHOPPY] += 1.0
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_dc_high_score
+        elif m.direction_changes >= vc_dc_moderate:
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_dc_moderate_score
 
         # Low ADX can also mean choppy (no trend) — but only if returns
         # are also small (otherwise it's a trend with volatile swings)
+        vc_low_adx_small_return = float(vc.get("low_adx_small_return_score", 0.5))
         if effective_adx < self._adx_weak and abs_return < self._total_return_moderate:
-            scores[RegimeType.VOLATILE_CHOPPY] += 0.5
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_low_adx_small_return
 
         # Wide Bollinger Bands → high volatility
+        vc_wide_bb_score = float(vc.get("wide_bb_score", 1.0))
         if m.bb_width_percentile > self._bb_expansion_percentile:
-            scores[RegimeType.VOLATILE_CHOPPY] += 1.0
+            scores[RegimeType.VOLATILE_CHOPPY] += vc_wide_bb_score
 
         # ════════════════════════════════════════════════════════════════
         # BREAKOUT TRANSITION scoring
         # ════════════════════════════════════════════════════════════════
         # BB squeeze (low width percentile) → potential breakout building
+        bo_bb_squeeze_score = float(bo.get("bb_squeeze_score", 2.5))
         if m.bb_width_percentile <= self._bb_squeeze_percentile:
-            scores[RegimeType.BREAKOUT_TRANSITION] += 2.5
+            scores[RegimeType.BREAKOUT_TRANSITION] += bo_bb_squeeze_score
 
         # Moderate ADX (not too high, not too low) — transition zone
+        bo_adx_moderate_score = float(bo.get("adx_moderate_score", 1.0))
         if self._adx_weak <= m.adx <= self._adx_strong_trend:
-            scores[RegimeType.BREAKOUT_TRANSITION] += 1.0
+            scores[RegimeType.BREAKOUT_TRANSITION] += bo_adx_moderate_score
 
         # Low current volatility but non-negligible direction changes
         # suggest consolidation before a move
-        if m.atr_pct < self._atr_pct_low and m.direction_changes > 0.40:
-            scores[RegimeType.BREAKOUT_TRANSITION] += 1.0
+        bo_dc_threshold = float(bo.get("direction_change_threshold", 0.40))
+        bo_low_atr_high_changes = float(bo.get("low_atr_high_changes_score", 1.0))
+        if m.atr_pct < self._atr_pct_low and m.direction_changes > bo_dc_threshold:
+            scores[RegimeType.BREAKOUT_TRANSITION] += bo_low_atr_high_changes
 
         # Price close to MA during consolidation
-        if m.price_ma_distance < 0.03 and m.bb_width_percentile < 40:
-            scores[RegimeType.BREAKOUT_TRANSITION] += 0.5
+        bo_price_ma_threshold = float(bo.get("price_ma_close_threshold", 0.03))
+        bo_bb_consol_pctl = float(bo.get("bb_consolidation_percentile", 40))
+        bo_consolidation_score = float(bo.get("consolidation_score", 0.5))
+        if m.price_ma_distance < bo_price_ma_threshold and m.bb_width_percentile < bo_bb_consol_pctl:
+            scores[RegimeType.BREAKOUT_TRANSITION] += bo_consolidation_score
 
         # Floor all scores at 0 (penalties can push negative)
         for rt in scores:
@@ -617,7 +678,7 @@ class RegimeClassifier:
         # ADX context — show both current and rolling mean
         effective_adx = max(m.adx, m.rolling_adx_mean)
         adx_note = ""
-        if m.rolling_adx_mean > m.adx + 3:
+        if m.rolling_adx_mean > m.adx + self._adx_dip_threshold:
             adx_note = f", rolling mean {m.rolling_adx_mean:.1f} (higher — current dip likely temporary)"
         if effective_adx >= self._adx_strong_trend:
             reasons.append(f"ADX = {m.adx:.1f} (strong trend){adx_note}")
@@ -674,7 +735,7 @@ class RegimeClassifier:
         if runner_up:
             runner_regime, runner_score = runner_up
             winner_score = scores[winner]
-            if winner_score > 0 and runner_score / winner_score > 0.7:
+            if winner_score > 0 and runner_score / winner_score > self._runner_up_proximity_ratio:
                 reasons.append(
                     f"Close to {REGIME_LABELS[runner_regime]} "
                     f"(score {runner_score:.1f} vs {winner_score:.1f})"

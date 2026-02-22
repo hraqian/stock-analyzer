@@ -376,6 +376,31 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "regime.breakout_transition.breakout_atr_mult": "price must move N x ATR from squeeze level to confirm breakout",
     "regime.breakout_transition.require_volume_surge": "require above-average volume to confirm breakout",
     "regime.breakout_transition.volume_surge_mult": "volume must exceed average by this multiplier (1.0–3.0)",
+    # -- New strategy params (config extraction) --
+    "strategy.trend_confirm_ma_type": "ema = exponential (responsive), sma = simple (smoother) for trend filter",
+    "strategy.trend_confirm_tolerance_pct": "tolerance band around MA; 0 = price must cross exactly, 0.01 = 1% band",
+    "strategy.cooldown_reset_on_breakeven": "if on, a 0% PnL trade resets the consecutive loss counter",
+    "strategy.trend_bias_return_threshold": "|total_return| >= this → definitive bullish/bearish bias for entries",
+    "strategy.extreme_exit_score_offset": "exit strong-trend position when score is this far beyond thresholds",
+    "strategy.breakout_min_move_ratio": "|close-open|/range >= this to qualify as a breakout candle",
+    "strategy.allow_pyramiding": "if on, can add to existing same-direction positions",
+    "strategy.allow_immediate_reversal": "if on, close + reopen in opposite direction on signal flip",
+    "strategy.disable_take_profit_in_strong_trend": "let trailing stop handle exits instead of fixed take-profit",
+    "strategy.trailing_stop_require_profit": "trailing stop only activates after position is in profit",
+    "strategy.percentile_min_fill_ratio": "min fraction of lookback window filled before percentile mode activates",
+    # -- New backtest params (config extraction) --
+    "backtest.min_warmup_bars": "absolute floor for proportional warmup calculation",
+    "backtest.min_post_warmup_bars": "minimum tradeable bars required after warmup period",
+    "backtest.trading_days_per_year": "used for return annualization (252 for US equities)",
+    "backtest.trading_day_minutes": "minutes in a trading day for intraday bar counting (390 for US)",
+    "backtest.default_score": "neutral starting score used before first rebalance computes actual scores",
+    "backtest.close_on_end_of_data": "if on, force-close any open position at end of data",
+    # -- New regime params (config extraction) --
+    "regime.min_bars_for_classification": "fewer bars than this → skip regime classification entirely",
+    "regime.trend_direction_bullish_threshold": "pct_above_ma > this → classify trend direction as bullish",
+    "regime.trend_direction_bearish_threshold": "pct_above_ma < this → classify trend direction as bearish",
+    "regime.adx_dip_threshold": "rolling ADX mean > current + this → mention 'temporary dip' in reasons",
+    "regime.runner_up_proximity_ratio": "runner-up score / winner > this → mention it in classification reasons",
 }
 
 
@@ -829,6 +854,95 @@ def _edit_strategy_params(data: dict) -> None:
         )
         _default_hint(_ds.get("global_bias_threshold"), PARAM_DESCRIPTIONS.get("strategy.global_bias_threshold"))
 
+    st.markdown("##### Advanced Strategy Tuning")
+
+    # Trend confirmation MA type
+    ma_types = ["ema", "sma"]
+    current_ma_type = strat.get("trend_confirm_ma_type", "ema")
+    ma_idx = ma_types.index(current_ma_type) if current_ma_type in ma_types else 0
+    strat["trend_confirm_ma_type"] = st.selectbox(
+        "Trend confirm MA type", ma_types, index=ma_idx, key="trend_ma_type",
+    )
+    _default_hint(_ds.get("trend_confirm_ma_type"), PARAM_DESCRIPTIONS.get("strategy.trend_confirm_ma_type"))
+
+    strat["trend_confirm_tolerance_pct"] = st.number_input(
+        "Trend confirm tolerance %",
+        0.0, 10.0,
+        value=float(strat.get("trend_confirm_tolerance_pct", 0.0)) * 100,
+        step=0.5, key="trend_tol_pct", format="%.1f",
+    ) / 100.0
+    _default_hint(
+        f"{_ds.get('trend_confirm_tolerance_pct', 0.0) * 100:.1f}%",
+        PARAM_DESCRIPTIONS.get("strategy.trend_confirm_tolerance_pct"),
+    )
+
+    strat["trend_bias_return_threshold"] = st.number_input(
+        "Trend bias return threshold",
+        0.01, 1.0,
+        value=float(strat.get("trend_bias_return_threshold", 0.15)),
+        step=0.01, key="trend_bias_ret", format="%.2f",
+    )
+    _default_hint(_ds.get("trend_bias_return_threshold"), PARAM_DESCRIPTIONS.get("strategy.trend_bias_return_threshold"))
+
+    strat["extreme_exit_score_offset"] = st.number_input(
+        "Extreme exit score offset",
+        0.0, 5.0,
+        value=float(strat.get("extreme_exit_score_offset", 1.5)),
+        step=0.1, key="extreme_exit_off", format="%.1f",
+    )
+    _default_hint(_ds.get("extreme_exit_score_offset"), PARAM_DESCRIPTIONS.get("strategy.extreme_exit_score_offset"))
+
+    strat["breakout_min_move_ratio"] = st.slider(
+        "Breakout min move ratio",
+        0.0, 1.0,
+        value=float(strat.get("breakout_min_move_ratio", 0.4)),
+        step=0.05, key="brkout_move", format="%.2f",
+    )
+    _default_hint(_ds.get("breakout_min_move_ratio"), PARAM_DESCRIPTIONS.get("strategy.breakout_min_move_ratio"))
+
+    strat["percentile_min_fill_ratio"] = st.slider(
+        "Percentile min fill ratio",
+        0.1, 1.0,
+        value=float(strat.get("percentile_min_fill_ratio", 0.8)),
+        step=0.05, key="pct_fill", format="%.2f",
+    )
+    _default_hint(_ds.get("percentile_min_fill_ratio"), PARAM_DESCRIPTIONS.get("strategy.percentile_min_fill_ratio"))
+
+    strat["cooldown_reset_on_breakeven"] = st.checkbox(
+        "Cooldown reset on breakeven",
+        value=bool(strat.get("cooldown_reset_on_breakeven", True)),
+        key="cooldown_be",
+    )
+    _default_hint(_ds.get("cooldown_reset_on_breakeven"), PARAM_DESCRIPTIONS.get("strategy.cooldown_reset_on_breakeven"))
+
+    strat["allow_pyramiding"] = st.checkbox(
+        "Allow pyramiding",
+        value=bool(strat.get("allow_pyramiding", False)),
+        key="allow_pyr",
+    )
+    _default_hint(_ds.get("allow_pyramiding"), PARAM_DESCRIPTIONS.get("strategy.allow_pyramiding"))
+
+    strat["allow_immediate_reversal"] = st.checkbox(
+        "Allow immediate reversal",
+        value=bool(strat.get("allow_immediate_reversal", True)),
+        key="allow_rev",
+    )
+    _default_hint(_ds.get("allow_immediate_reversal"), PARAM_DESCRIPTIONS.get("strategy.allow_immediate_reversal"))
+
+    strat["disable_take_profit_in_strong_trend"] = st.checkbox(
+        "Disable TP in strong trend",
+        value=bool(strat.get("disable_take_profit_in_strong_trend", True)),
+        key="disable_tp_st",
+    )
+    _default_hint(_ds.get("disable_take_profit_in_strong_trend"), PARAM_DESCRIPTIONS.get("strategy.disable_take_profit_in_strong_trend"))
+
+    strat["trailing_stop_require_profit"] = st.checkbox(
+        "Trailing stop requires profit",
+        value=bool(strat.get("trailing_stop_require_profit", True)),
+        key="trail_req_profit",
+    )
+    _default_hint(_ds.get("trailing_stop_require_profit"), PARAM_DESCRIPTIONS.get("strategy.trailing_stop_require_profit"))
+
 
 def _edit_backtest_params(data: dict) -> None:
     """Editable backtest engine params."""
@@ -882,6 +996,81 @@ def _edit_backtest_params(data: dict) -> None:
         step=0.05, key="max_warmup_r", format="%.2f",
     )
     _default_hint(_db.get("max_warmup_ratio"), PARAM_DESCRIPTIONS.get("backtest.max_warmup_ratio"))
+
+    st.markdown("##### Advanced Backtest Settings")
+
+    bt["min_warmup_bars"] = st.number_input(
+        "Min warmup bars",
+        5, 200,
+        value=int(bt.get("min_warmup_bars", 20)),
+        step=5, key="min_warmup",
+    )
+    _default_hint(_db.get("min_warmup_bars"), PARAM_DESCRIPTIONS.get("backtest.min_warmup_bars"))
+
+    bt["min_post_warmup_bars"] = st.number_input(
+        "Min post-warmup bars",
+        1, 100,
+        value=int(bt.get("min_post_warmup_bars", 10)),
+        step=1, key="min_post_warmup",
+    )
+    _default_hint(_db.get("min_post_warmup_bars"), PARAM_DESCRIPTIONS.get("backtest.min_post_warmup_bars"))
+
+    bt["trading_days_per_year"] = st.number_input(
+        "Trading days per year",
+        200, 365,
+        value=int(bt.get("trading_days_per_year", 252)),
+        step=1, key="trade_days_yr",
+    )
+    _default_hint(_db.get("trading_days_per_year"), PARAM_DESCRIPTIONS.get("backtest.trading_days_per_year"))
+
+    bt["trading_day_minutes"] = st.number_input(
+        "Trading day minutes",
+        60, 480,
+        value=int(bt.get("trading_day_minutes", 390)),
+        step=30, key="trade_day_min",
+    )
+    _default_hint(_db.get("trading_day_minutes"), PARAM_DESCRIPTIONS.get("backtest.trading_day_minutes"))
+
+    bt["default_score"] = st.number_input(
+        "Default score",
+        0.0, 10.0,
+        value=float(bt.get("default_score", 5.0)),
+        step=0.5, key="default_score", format="%.1f",
+    )
+    _default_hint(_db.get("default_score"), PARAM_DESCRIPTIONS.get("backtest.default_score"))
+
+    bt["close_on_end_of_data"] = st.checkbox(
+        "Close on end of data",
+        value=bool(bt.get("close_on_end_of_data", True)),
+        key="close_eod_cb",
+    )
+    _default_hint(_db.get("close_on_end_of_data"), PARAM_DESCRIPTIONS.get("backtest.close_on_end_of_data"))
+
+
+def _scoring_weight_inputs(
+    target: dict,
+    defaults: dict,
+    prefix: str,
+    fields: list[tuple[str, str, float, float, float]],
+) -> None:
+    """Render number_input widgets for a group of regime scoring weights.
+
+    Args:
+        target: The mutable scoring sub-dict (e.g. scoring["strong_trend"]).
+        defaults: The matching DEFAULT_CONFIG sub-dict for default hints.
+        prefix: Unique key prefix for Streamlit widget keys.
+        fields: List of (key, label, min, max, step) tuples.
+    """
+    for key, label, fmin, fmax, fstep in fields:
+        default_val = defaults.get(key, fmin)
+        current = float(target.get(key, default_val))
+        target[key] = st.number_input(
+            label,
+            min_value=fmin, max_value=fmax,
+            value=current,
+            step=fstep, key=f"{prefix}_{key}", format="%.2f",
+        )
+        _default_hint(default_val)
 
 
 def _edit_regime_params(data: dict) -> None:
@@ -1009,6 +1198,118 @@ def _edit_regime_params(data: dict) -> None:
         step=0.05, key="reg_ret_moderate", format="%.2f",
     )
     _default_hint(_dr.get("total_return_moderate"), PARAM_DESCRIPTIONS.get("regime.total_return_moderate"))
+
+    st.markdown("**Advanced Classification**")
+
+    regime["min_bars_for_classification"] = st.number_input(
+        "Min bars for classification",
+        5, 200,
+        value=int(regime.get("min_bars_for_classification", 20)),
+        step=5, key="reg_min_bars",
+    )
+    _default_hint(_dr.get("min_bars_for_classification"), PARAM_DESCRIPTIONS.get("regime.min_bars_for_classification"))
+
+    regime["trend_direction_bullish_threshold"] = st.slider(
+        "Trend dir. bullish threshold", 50.0, 90.0,
+        value=float(regime.get("trend_direction_bullish_threshold", 60)),
+        step=1.0, key="reg_dir_bull",
+    )
+    _default_hint(_dr.get("trend_direction_bullish_threshold"), PARAM_DESCRIPTIONS.get("regime.trend_direction_bullish_threshold"))
+
+    regime["trend_direction_bearish_threshold"] = st.slider(
+        "Trend dir. bearish threshold", 10.0, 50.0,
+        value=float(regime.get("trend_direction_bearish_threshold", 40)),
+        step=1.0, key="reg_dir_bear",
+    )
+    _default_hint(_dr.get("trend_direction_bearish_threshold"), PARAM_DESCRIPTIONS.get("regime.trend_direction_bearish_threshold"))
+
+    regime["adx_dip_threshold"] = st.number_input(
+        "ADX dip threshold",
+        0, 20,
+        value=int(regime.get("adx_dip_threshold", 3)),
+        step=1, key="reg_adx_dip",
+    )
+    _default_hint(_dr.get("adx_dip_threshold"), PARAM_DESCRIPTIONS.get("regime.adx_dip_threshold"))
+
+    regime["runner_up_proximity_ratio"] = st.slider(
+        "Runner-up proximity ratio", 0.0, 1.0,
+        value=float(regime.get("runner_up_proximity_ratio", 0.7)),
+        step=0.05, key="reg_runnerup", format="%.2f",
+    )
+    _default_hint(_dr.get("runner_up_proximity_ratio"), PARAM_DESCRIPTIONS.get("regime.runner_up_proximity_ratio"))
+
+    # -- Regime scoring weights --
+    st.markdown("---")
+    st.markdown("**Regime Scoring Weights**")
+    scoring = regime.setdefault("scoring", {})
+    _dscoring = _dr.get("scoring", {})
+
+    with st.expander("Strong Trend Scoring"):
+        st_sc = scoring.setdefault("strong_trend", {})
+        _dst_sc = _dscoring.get("strong_trend", {})
+        _scoring_weight_inputs(st_sc, _dst_sc, "reg_st_sc", [
+            ("return_strong_base", "Return strong base", 0.0, 10.0, 0.5),
+            ("return_strong_cap", "Return strong cap", 0.0, 2.0, 0.1),
+            ("return_strong_scale", "Return strong scale", 0.0, 10.0, 0.5),
+            ("return_moderate_base", "Return moderate base", 0.0, 10.0, 0.5),
+            ("return_moderate_scale", "Return moderate scale", 0.0, 10.0, 0.5),
+            ("adx_strong_base", "ADX strong base", 0.0, 10.0, 0.5),
+            ("adx_strong_divisor", "ADX strong divisor", 1.0, 50.0, 1.0),
+            ("adx_moderate_score", "ADX moderate score", 0.0, 5.0, 0.1),
+            ("consistency_high_score", "Consistency high score", 0.0, 5.0, 0.5),
+            ("consistency_moderate_score", "Consistency moderate score", 0.0, 5.0, 0.1),
+            ("extended_distance_score", "Extended distance score", 0.0, 5.0, 0.5),
+            ("direction_change_low", "Dir. change low", 0.0, 1.0, 0.05),
+            ("direction_change_low_score", "Dir. change low score", 0.0, 5.0, 0.5),
+            ("direction_change_mid", "Dir. change mid", 0.0, 1.0, 0.05),
+            ("direction_change_mid_score", "Dir. change mid score", 0.0, 5.0, 0.1),
+        ])
+
+    with st.expander("Mean Reverting Scoring"):
+        mr_sc = scoring.setdefault("mean_reverting", {})
+        _dmr_sc = _dscoring.get("mean_reverting", {})
+        _scoring_weight_inputs(mr_sc, _dmr_sc, "reg_mr_sc", [
+            ("return_strong_penalty", "Return strong penalty", 0.0, 10.0, 0.5),
+            ("return_moderate_penalty", "Return moderate penalty", 0.0, 10.0, 0.5),
+            ("return_small_bonus", "Return small bonus", 0.0, 5.0, 0.5),
+            ("adx_low_score", "ADX low score", 0.0, 5.0, 0.5),
+            ("adx_moderate_score", "ADX moderate score", 0.0, 5.0, 0.5),
+            ("pct_away_tight", "Pct away tight", 0.0, 50.0, 1.0),
+            ("pct_away_tight_score", "Pct away tight score", 0.0, 5.0, 0.5),
+            ("pct_away_moderate", "Pct away moderate", 0.0, 50.0, 1.0),
+            ("pct_away_moderate_score", "Pct away moderate score", 0.0, 5.0, 0.5),
+            ("atr_below_high_score", "ATR below high score", 0.0, 5.0, 0.1),
+            ("atr_below_low_score", "ATR below low score", 0.0, 5.0, 0.1),
+            ("price_ma_close_threshold", "Price-MA close threshold", 0.0, 0.20, 0.01),
+            ("price_ma_close_score", "Price-MA close score", 0.0, 5.0, 0.5),
+        ])
+
+    with st.expander("Volatile/Choppy Scoring"):
+        vc_sc = scoring.setdefault("volatile_choppy", {})
+        _dvc_sc = _dscoring.get("volatile_choppy", {})
+        _scoring_weight_inputs(vc_sc, _dvc_sc, "reg_vc_sc", [
+            ("atr_high_base", "ATR high base", 0.0, 10.0, 0.5),
+            ("atr_high_scale", "ATR high scale", 1.0, 100.0, 5.0),
+            ("atr_moderate_score", "ATR moderate score", 0.0, 5.0, 0.1),
+            ("direction_change_high_score", "Dir. change high score", 0.0, 5.0, 0.5),
+            ("direction_change_moderate", "Dir. change moderate", 0.0, 1.0, 0.05),
+            ("direction_change_moderate_score", "Dir. change moderate score", 0.0, 5.0, 0.5),
+            ("low_adx_small_return_score", "Low ADX small return score", 0.0, 5.0, 0.1),
+            ("wide_bb_score", "Wide BB score", 0.0, 5.0, 0.5),
+        ])
+
+    with st.expander("Breakout Scoring"):
+        bo_sc = scoring.setdefault("breakout", {})
+        _dbo_sc = _dscoring.get("breakout", {})
+        _scoring_weight_inputs(bo_sc, _dbo_sc, "reg_bo_sc", [
+            ("bb_squeeze_score", "BB squeeze score", 0.0, 10.0, 0.5),
+            ("adx_moderate_score", "ADX moderate score", 0.0, 5.0, 0.5),
+            ("direction_change_threshold", "Dir. change threshold", 0.0, 1.0, 0.05),
+            ("low_atr_high_changes_score", "Low ATR high changes score", 0.0, 5.0, 0.5),
+            ("price_ma_close_threshold", "Price-MA close threshold", 0.0, 0.20, 0.01),
+            ("bb_consolidation_percentile", "BB consol. percentile", 0.0, 100.0, 5.0),
+            ("consolidation_score", "Consolidation score", 0.0, 5.0, 0.1),
+        ])
 
     # -- Strategy adaptation per regime --
     st.markdown("---")
@@ -2100,9 +2401,29 @@ def render_strategy_config(cfg: Config) -> None:
     if bias_enabled:
         rows.append(("Bias Threshold", f"{strat_cfg.get('global_bias_threshold', 0.10) * 100:.0f}%"))
 
+    # New strategy params
+    rows.append(("Trend Confirm MA", strat_cfg.get("trend_confirm_ma_type", "ema").upper()))
+    tol = strat_cfg.get("trend_confirm_tolerance_pct", 0.0)
+    if tol > 0:
+        rows.append(("Trend Tolerance", f"{tol * 100:.1f}%"))
+    rows.append(("Trend Bias Return Thr.", f"{strat_cfg.get('trend_bias_return_threshold', 0.15) * 100:.0f}%"))
+    rows.append(("Extreme Exit Offset", f"{strat_cfg.get('extreme_exit_score_offset', 1.5):.1f}"))
+    rows.append(("Breakout Min Move", f"{strat_cfg.get('breakout_min_move_ratio', 0.4):.2f}"))
+    rows.append(("Pyramiding", "ON" if strat_cfg.get("allow_pyramiding", False) else "OFF"))
+    rows.append(("Immediate Reversal", "ON" if strat_cfg.get("allow_immediate_reversal", True) else "OFF"))
+    rows.append(("Disable TP (Strong Trend)", "ON" if strat_cfg.get("disable_take_profit_in_strong_trend", True) else "OFF"))
+    rows.append(("Trail Requires Profit", "ON" if strat_cfg.get("trailing_stop_require_profit", True) else "OFF"))
+    rows.append(("Pctile Min Fill Ratio", f"{strat_cfg.get('percentile_min_fill_ratio', 0.8):.2f}"))
+    rows.append(("Cooldown Reset on BE", "ON" if strat_cfg.get("cooldown_reset_on_breakeven", True) else "OFF"))
+
     rows.append(("Slippage", f"{bt_cfg.get('slippage_pct', 0.001) * 100:.2f}%"))
     rows.append(("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"))
     rows.append(("Max Warmup Ratio", f"{bt_cfg.get('max_warmup_ratio', 0.5):.0%}"))
+    rows.append(("Min Warmup Bars", f"{bt_cfg.get('min_warmup_bars', 20)}"))
+    rows.append(("Min Post-Warmup Bars", f"{bt_cfg.get('min_post_warmup_bars', 10)}"))
+    rows.append(("Trading Days/Year", f"{bt_cfg.get('trading_days_per_year', 252)}"))
+    rows.append(("Default Score", f"{bt_cfg.get('default_score', 5.0):.1f}"))
+    rows.append(("Close on End", "ON" if bt_cfg.get("close_on_end_of_data", True) else "OFF"))
 
     df = pd.DataFrame(rows, columns=["Parameter", "Value"])
     st.dataframe(df, use_container_width=True, hide_index=True)

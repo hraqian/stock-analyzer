@@ -299,6 +299,35 @@ strategy:
   global_trend_bias: true
   global_bias_threshold: 0.10    # |total_return| above this → suppress counter-trend
 
+  # Strong trend hold/entry: total return threshold for determining bullish/bearish bias
+  trend_bias_return_threshold: 0.15  # |total_return| >= this → definitive bias direction
+
+  # Extreme score exit: how far from thresholds before forcing an exit in strong trend
+  extreme_exit_score_offset: 1.5  # e.g. exit long if score < short_below - 1.5
+
+  # Breakout confirmation: minimum directional move ratio for a breakout candle
+  breakout_min_move_ratio: 0.4    # |close-open|/range >= this for valid breakout bar
+
+  # Position management
+  allow_pyramiding: false          # whether to add to existing same-direction positions
+  allow_immediate_reversal: true   # close + reopen in opposite direction on signal flip
+
+  # Take-profit suppression in strong trend regime
+  disable_take_profit_in_strong_trend: true  # trailing stop handles exits instead
+
+  # Trailing stop: require position to be in profit before trail activates
+  trailing_stop_require_profit: true
+
+  # Percentile mode: min fraction of lookback window before percentile activates
+  percentile_min_fill_ratio: 0.8
+
+  # Trend confirmation MA type and tolerance
+  trend_confirm_ma_type: "ema"       # "ema" or "sma" for trend confirmation filter
+  trend_confirm_tolerance_pct: 0.0   # tolerance band around MA (0 = exact)
+
+  # Consecutive loss cooldown: whether breakeven (0% PnL) resets loss counter
+  cooldown_reset_on_breakeven: true
+
   # Day trading: force-close all positions at the end of each trading day
   # (only applies when using intraday intervals like 1m, 5m, 15m, etc.)
   flatten_eod: false
@@ -351,6 +380,14 @@ backtest:
   # 0.3–1.3; gap/spike strength is normalised to 0–2).
   significant_pattern_min_strength: 0.5
 
+  # Engine internals — usually don't need changing
+  min_warmup_bars: 20             # absolute floor for proportional warmup
+  min_post_warmup_bars: 10        # minimum tradeable bars after warmup
+  trading_days_per_year: 252      # for annualization of returns
+  trading_day_minutes: 390        # US market: 6.5 hours (for intraday bar count)
+  default_score: 5.0              # neutral starting score before first rebalance
+  close_on_end_of_data: true      # force-close any open position at end of data
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Market Regime Classification
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,6 +419,71 @@ regime:
   price_ma_distance_extended: 0.10  # price > 10% from MA → extended trend
   total_return_strong: 0.30         # |return| > 30% over period → definitively trending
   total_return_moderate: 0.15       # |return| > 15% over period → moderate trend signal
+
+  # Classification guard
+  min_bars_for_classification: 20   # minimum bars needed before regime can be classified
+
+  # Trend direction from pct_above_ma
+  trend_direction_bullish_threshold: 60   # pct_above_ma > this → bullish
+  trend_direction_bearish_threshold: 40   # pct_above_ma < this → bearish
+
+  # Reason building
+  adx_dip_threshold: 3               # rolling mean > current + this → "temporary dip" note
+  runner_up_proximity_ratio: 0.7     # runner-up/winner score ratio > this → mention runner-up
+
+  # ── Regime Scoring Weights ─────────────────────────────────────────────
+  # All numeric values used in the regime scoring algorithm, organized by
+  # regime type.  Adjust these to change how aggressively each regime is
+  # detected.  Higher values = stronger pull toward that classification.
+  scoring:
+    strong_trend:
+      return_strong_base: 3.0           # base score when |return| >= total_return_strong
+      return_strong_cap: 0.70           # cap on excess return for scaling
+      return_strong_scale: 3.0          # max bonus from excess return
+      return_moderate_base: 1.0         # base score for moderate return
+      return_moderate_scale: 2.0        # max bonus scaling for moderate return
+      adx_strong_base: 2.0             # base score when ADX >= adx_strong_trend
+      adx_strong_divisor: 20.0         # divisor for ADX excess bonus
+      adx_moderate_score: 0.5          # score when ADX >= adx_weak
+      consistency_high_score: 2.0      # pct_above_ma strongly one-sided
+      consistency_moderate_score: 0.5  # pct_above_ma moderately one-sided
+      extended_distance_score: 1.0     # price far from MA
+      direction_change_low: 0.4        # threshold for low direction changes
+      direction_change_low_score: 1.0  # score when changes < direction_change_low
+      direction_change_mid: 0.5        # threshold for mid direction changes
+      direction_change_mid_score: 0.3  # score when changes < direction_change_mid
+    mean_reverting:
+      return_strong_penalty: 2.0       # penalty when |return| >= total_return_strong
+      return_moderate_penalty: 1.0     # penalty for moderate return
+      return_small_bonus: 1.5          # bonus when return is small (range-bound)
+      adx_low_score: 2.0              # ADX < adx_weak
+      adx_moderate_score: 1.0         # ADX < adx_strong_trend
+      pct_away_tight: 15              # pct_above_ma within 50 ± this → range-bound
+      pct_away_tight_score: 2.0
+      pct_away_moderate: 25
+      pct_away_moderate_score: 1.0
+      atr_below_high_score: 0.5       # ATR% below high threshold
+      atr_below_low_score: 0.5        # ATR% below low threshold (additional)
+      price_ma_close_threshold: 0.03  # price within this % of MA
+      price_ma_close_score: 1.0
+    volatile_choppy:
+      atr_high_base: 2.0              # base score when ATR% >= atr_pct_high
+      atr_high_scale: 30.0            # multiplier for excess ATR%
+      atr_moderate_score: 0.5         # ATR% >= atr_pct_low
+      direction_change_high_score: 2.0 # direction changes >= direction_change_high
+      direction_change_moderate: 0.45  # threshold for moderate choppy signal
+      direction_change_moderate_score: 1.0
+      low_adx_small_return_score: 0.5 # low ADX + small return
+      wide_bb_score: 1.0              # BB width > expansion percentile
+    breakout:
+      bb_squeeze_score: 2.5           # BB width <= squeeze percentile
+      adx_moderate_score: 1.0         # ADX in moderate zone
+      direction_change_threshold: 0.40 # min direction changes for consolidation signal
+      low_atr_high_changes_score: 1.0 # low ATR + high direction changes
+      price_ma_close_threshold: 0.03  # price near MA during consolidation
+      bb_consolidation_percentile: 40 # BB width below this + near MA → consolidation
+      consolidation_score: 0.5
+
   strategy_adaptation:
     strong_trend:
       use_trailing_stop: true       # trail stop instead of score-based exits

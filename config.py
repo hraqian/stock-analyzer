@@ -158,15 +158,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Trend confirmation filter
         "trend_confirm_enabled": True,   # require price above/below trend MA for entry
         "trend_confirm_period": 20,      # EMA period for trend confirmation
+        "trend_confirm_ma_type": "ema",  # "ema" or "sma" for trend confirmation MA
+        "trend_confirm_tolerance_pct": 0.0,  # tolerance band around MA (0 = exact)
         # Re-entry grace period: after exiting, skip trend confirmation for N bars
         "reentry_grace_bars": 10,        # bars after exit to allow unfiltered re-entry
         # Consecutive loss cooldown: after N consecutive losses, tighten entry requirements
         "cooldown_max_losses": 2,        # consecutive losses before cooldown activates
         "cooldown_distance_mult": 2.0,   # multiply min_distance by this during cooldown
         "cooldown_min_score": 4.5,       # minimum score required during cooldown
+        "cooldown_reset_on_breakeven": True,  # whether 0% PnL resets consecutive loss counter
         # Global trend bias: suppress counter-trend entries when total return is strong
         "global_trend_bias": True,       # enable global directional bias
         "global_bias_threshold": 0.10,   # |total_return| above this → suppress counter-trend
+        # Strong trend hold/entry: total return threshold for determining bullish/bearish bias
+        "trend_bias_return_threshold": 0.15,  # |total_return| >= this → definitive bias
+        # Extreme score exit: exit strong-trend positions when score is this far beyond thresholds
+        "extreme_exit_score_offset": 1.5,  # e.g. 1.5 → exit long if score < short_below - 1.5
+        # Breakout confirmation: minimum directional move ratio for a breakout candle
+        "breakout_min_move_ratio": 0.4,   # |close-open|/range >= this for breakout candle
+        # Position management
+        "allow_pyramiding": False,        # whether to add to existing same-direction positions
+        "allow_immediate_reversal": True, # close + reopen in opposite direction on signal flip
+        # Take-profit in strong trend
+        "disable_take_profit_in_strong_trend": True,  # let trailing stop handle exits instead
+        # Trailing stop: require position to be in profit before trail activates
+        "trailing_stop_require_profit": True,
+        # Percentile mode tuning
+        "percentile_min_fill_ratio": 0.8,  # min fraction of lookback window before percentile activates
         # Pattern-indicator combination for strategy decisions
         "combination_mode": "weighted",  # "weighted", "gate", or "boost"
         "indicator_weight": 0.7,         # weight of indicator composite in blended score
@@ -187,6 +205,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "warmup_bars": 100,
         "max_warmup_ratio": 0.5,       # warmup can't exceed this fraction of total data
         "significant_pattern_min_strength": 0.5,
+        "min_warmup_bars": 20,          # absolute floor for proportional warmup
+        "min_post_warmup_bars": 10,     # minimum tradeable bars after warmup
+        "trading_days_per_year": 252,   # for annualization
+        "trading_day_minutes": 390,     # US market: 6.5 hours = 390 minutes
+        "default_score": 5.0,           # neutral starting score before first rebalance
+        "close_on_end_of_data": True,   # whether to force-close position at end of data
     },
     # ------------------------------------------------------------------
     # Pattern Signal Detectors
@@ -280,6 +304,69 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Total return thresholds (primary trend signal)
         "total_return_strong": 0.30,         # |return| > 30% → definitively trending
         "total_return_moderate": 0.15,       # |return| > 15% → moderate trend signal
+        # Classification guard
+        "min_bars_for_classification": 20,   # minimum bars needed to classify
+        # Trend direction thresholds (pct_above_ma → bullish/bearish)
+        "trend_direction_bullish_threshold": 60,  # pct_above_ma > this → bullish
+        "trend_direction_bearish_threshold": 40,  # pct_above_ma < this → bearish
+        # Reason building
+        "adx_dip_threshold": 3,              # rolling mean > current + this → "temporary dip"
+        "runner_up_proximity_ratio": 0.7,    # runner-up score / winner score > this → mention
+        # ── Regime scoring weights ──────────────────────────────────────
+        # All magic numbers used in _score_regimes(), organized by regime.
+        "scoring": {
+            "strong_trend": {
+                "return_strong_base": 3.0,
+                "return_strong_cap": 0.70,
+                "return_strong_scale": 3.0,
+                "return_moderate_base": 1.0,
+                "return_moderate_scale": 2.0,
+                "adx_strong_base": 2.0,
+                "adx_strong_divisor": 20.0,
+                "adx_moderate_score": 0.5,
+                "consistency_high_score": 2.0,
+                "consistency_moderate_score": 0.5,
+                "extended_distance_score": 1.0,
+                "direction_change_low": 0.4,
+                "direction_change_low_score": 1.0,
+                "direction_change_mid": 0.5,
+                "direction_change_mid_score": 0.3,
+            },
+            "mean_reverting": {
+                "return_strong_penalty": 2.0,
+                "return_moderate_penalty": 1.0,
+                "return_small_bonus": 1.5,
+                "adx_low_score": 2.0,
+                "adx_moderate_score": 1.0,
+                "pct_away_tight": 15,
+                "pct_away_tight_score": 2.0,
+                "pct_away_moderate": 25,
+                "pct_away_moderate_score": 1.0,
+                "atr_below_high_score": 0.5,
+                "atr_below_low_score": 0.5,
+                "price_ma_close_threshold": 0.03,
+                "price_ma_close_score": 1.0,
+            },
+            "volatile_choppy": {
+                "atr_high_base": 2.0,
+                "atr_high_scale": 30.0,
+                "atr_moderate_score": 0.5,
+                "direction_change_high_score": 2.0,
+                "direction_change_moderate": 0.45,
+                "direction_change_moderate_score": 1.0,
+                "low_adx_small_return_score": 0.5,
+                "wide_bb_score": 1.0,
+            },
+            "breakout": {
+                "bb_squeeze_score": 2.5,
+                "adx_moderate_score": 1.0,
+                "direction_change_threshold": 0.40,
+                "low_atr_high_changes_score": 1.0,
+                "price_ma_close_threshold": 0.03,
+                "bb_consolidation_percentile": 40,
+                "consolidation_score": 0.5,
+            },
+        },
         # Strategy adaptation per regime
         "strategy_adaptation": {
             "strong_trend": {
