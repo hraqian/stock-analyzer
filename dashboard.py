@@ -251,6 +251,81 @@ def _build_score_table_html(
 # Sidebar — parameter editors
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Parameter descriptions — short guidance shown beneath each widget
+# ---------------------------------------------------------------------------
+
+PARAM_DESCRIPTIONS: dict[str, str] = {
+    # -- Indicator weights --
+    "iw_rsi": "higher weight = RSI has more influence on composite score",
+    "iw_macd": "higher weight = MACD has more influence on composite score",
+    "iw_bollinger_bands": "higher weight = Bollinger Bands has more influence on composite score",
+    "iw_moving_averages": "higher weight = MA crossovers have more influence on composite score",
+    "iw_stochastic": "higher weight = Stochastic has more influence on composite score",
+    "iw_adx": "higher weight = trend strength has more influence on composite score",
+    "iw_volume": "higher weight = volume analysis has more influence on composite score",
+    "iw_fibonacci": "higher weight = Fibonacci levels have more influence on composite score",
+    # -- Indicator params --
+    "rsi.period": "shorter = more reactive to price changes, longer = smoother",
+    "rsi.thresholds.oversold": "higher = fewer oversold signals, more conservative",
+    "rsi.thresholds.overbought": "lower = fewer overbought signals, more conservative",
+    "macd.fast_period": "shorter = more sensitive to recent price moves",
+    "macd.slow_period": "shorter = more reactive, longer = filters out noise",
+    "macd.signal_period": "shorter = faster signal crossovers, more trades",
+    "bollinger_bands.period": "shorter = tighter bands, more frequent breakout signals",
+    "bollinger_bands.std_dev": "higher = wider bands, fewer signals but more reliable",
+    "moving_averages.periods": "add shorter periods for faster signals, longer for trend confirmation",
+    "stochastic.k_period": "shorter = more reactive, longer = smoother",
+    "stochastic.d_period": "shorter = faster signal line, more crossovers",
+    "stochastic.smooth_k": "higher = smoother %K, fewer false signals",
+    "stochastic.thresholds.oversold": "higher = fewer oversold signals, more conservative",
+    "stochastic.thresholds.overbought": "lower = fewer overbought signals, more conservative",
+    "adx.period": "shorter = detects trend changes faster, noisier",
+    "adx.thresholds.weak": "higher = requires stronger trend to score above neutral",
+    "adx.thresholds.moderate": "higher = requires very strong trend for high scores",
+    "volume.obv_trend_period": "shorter = faster OBV trend detection, noisier",
+    "volume.price_trend_period": "shorter = faster price-volume divergence detection",
+    "fibonacci.swing_lookback": "shorter = more local swings, longer = major support/resistance",
+    # -- Pattern weights --
+    "pw_gaps": "higher = gap patterns have more influence on pattern score",
+    "pw_volume_range": "higher = volume-range correlation has more influence",
+    "pw_candlesticks": "higher = candlestick patterns have more influence",
+    "pw_spikes": "higher = price spikes have more influence",
+    "pw_inside_outside": "higher = inside/outside bars have more influence",
+    # -- Combination mode --
+    "strategy.combination_mode": "weighted = blend scores, gate = both must agree, boost = patterns amplify indicator signal",
+    "strategy.indicator_weight": "higher = indicator score dominates the blended signal",
+    "strategy.pattern_weight": "higher = pattern score dominates the blended signal",
+    "strategy.gate_indicator_min": "higher = requires stronger indicator signal to go long",
+    "strategy.gate_indicator_max": "lower = requires weaker indicator signal to go short",
+    "strategy.gate_pattern_min": "higher = requires stronger pattern signal to go long",
+    "strategy.gate_pattern_max": "lower = requires weaker pattern signal to go short",
+    "strategy.boost_strength": "higher = patterns amplify/dampen the indicator signal more",
+    "strategy.boost_dead_zone": "higher = patterns need to deviate more from 5.0 to have any effect",
+    # -- Scoring thresholds --
+    "strategy.threshold_mode": "fixed = static thresholds, percentile = adaptive to recent score distribution",
+    "strategy.score_thresholds.short_below": "lower = fewer short signals, more conservative",
+    "strategy.score_thresholds.hold_below": "lower = more long signals, more aggressive",
+    "strategy.percentile_thresholds.short_percentile": "lower = fewer short signals, more conservative",
+    "strategy.percentile_thresholds.long_percentile": "lower = more long signals, more aggressive",
+    "strategy.percentile_thresholds.lookback_bars": "shorter = adapts to recent conditions faster",
+    # -- Strategy params --
+    "strategy.stop_loss_pct": "tighter = limits losses but more likely to be stopped out",
+    "strategy.take_profit_pct": "tighter = locks in gains sooner but caps upside",
+    "strategy.position_sizing": "percent_equity = risk scales with portfolio, fixed = constant share count",
+    "strategy.percent_equity": "higher = larger positions, more risk per trade",
+    "strategy.fixed_quantity": "higher = more shares per trade",
+    "strategy.rebalance_interval": "lower = checks signals more often, more responsive",
+    "strategy.flatten_eod": "enable for day-trading to close all positions at end of day",
+    # -- Backtest params --
+    "backtest.initial_cash": "starting portfolio value for the simulation",
+    "backtest.commission_per_trade": "higher = more realistic, reduces net returns",
+    "backtest.slippage_pct": "higher = more realistic fill price slippage",
+    "backtest.warmup_bars": "more bars = indicators are fully warmed up before trading begins",
+    "backtest.significant_pattern_min_strength": "higher = only the strongest patterns appear in the timeline",
+}
+
+
 def _get_default(path: str) -> object:
     """Look up a value in DEFAULT_CONFIG by dot-separated path.
 
@@ -266,17 +341,21 @@ def _get_default(path: str) -> object:
     return node
 
 
-def _default_hint(value: object) -> None:
-    """Render a small gray caption showing the default value."""
-    if value is None:
-        return
-    if isinstance(value, float):
-        text = f"{value:.4g}"
-    elif isinstance(value, list):
-        text = ", ".join(str(v) for v in value)
-    else:
-        text = str(value)
-    st.caption(f"default: {text}")
+def _default_hint(value: object, desc: str | None = None) -> None:
+    """Render a small gray caption showing the default value and optional description."""
+    parts: list[str] = []
+    if value is not None:
+        if isinstance(value, float):
+            text = f"{value:.4g}"
+        elif isinstance(value, list):
+            text = ", ".join(str(v) for v in value)
+        else:
+            text = str(value)
+        parts.append(f"default: {text}")
+    if desc:
+        parts.append(desc)
+    if parts:
+        st.caption(" · ".join(parts))
 
 def _edit_indicator_weights(data: dict) -> None:
     """Editable indicator weight sliders (auto-normalised display)."""
@@ -296,7 +375,7 @@ def _edit_indicator_weights(data: dict) -> None:
             format="%.2f",
         )
         weights[name] = new_val
-        _default_hint(default_weights.get(name))
+        _default_hint(default_weights.get(name), PARAM_DESCRIPTIONS.get(f"iw_{name}"))
 
     new_total = sum(weights.values())
     if new_total > 0:
@@ -359,13 +438,14 @@ def _edit_indicator_params(data: dict) -> None:
 
                 # Look up default from DEFAULT_CONFIG
                 default_val = _get_default(f"{ind_key}.{path}")
+                desc = PARAM_DESCRIPTIONS.get(f"{ind_key}.{path}")
 
                 if ptype == "int_list":
                     # Special: comma-separated integer list
                     current = target.get(field, [20, 50, 200])
                     current_str = ", ".join(str(x) for x in current)
                     new_str = st.text_input(label, value=current_str, key=f"ip_{ind_key}_{path}")
-                    _default_hint(default_val)
+                    _default_hint(default_val, desc)
                     try:
                         parsed = [int(x.strip()) for x in new_str.split(",") if x.strip()]
                         target[field] = sorted(parsed)
@@ -377,7 +457,7 @@ def _edit_indicator_params(data: dict) -> None:
                         label, min_value=pmin, max_value=pmax,
                         value=current, step=1, key=f"ip_{ind_key}_{path}",
                     )
-                    _default_hint(default_val)
+                    _default_hint(default_val, desc)
                     target[field] = int(new_val)
                 elif ptype is float:
                     current = float(target.get(field, pmin))
@@ -386,7 +466,7 @@ def _edit_indicator_params(data: dict) -> None:
                         value=current, step=0.1, key=f"ip_{ind_key}_{path}",
                         format="%.2f",
                     )
-                    _default_hint(default_val)
+                    _default_hint(default_val, desc)
                     target[field] = float(new_val)
 
 
@@ -408,7 +488,7 @@ def _edit_pattern_weights(data: dict) -> None:
             format="%.2f",
         )
         weights[name] = new_val
-        _default_hint(default_weights.get(name))
+        _default_hint(default_weights.get(name), PARAM_DESCRIPTIONS.get(f"pw_{name}"))
 
     new_total = sum(weights.values())
     if new_total > 0:
@@ -427,7 +507,7 @@ def _edit_pattern_indicator_combination(data: dict) -> None:
     idx = modes.index(current_mode) if current_mode in modes else 0
     mode = st.selectbox("Combination mode", modes, index=idx, key="combo_mode")
     strat["combination_mode"] = mode
-    _default_hint(_ds.get("combination_mode"))
+    _default_hint(_ds.get("combination_mode"), PARAM_DESCRIPTIONS.get("strategy.combination_mode"))
 
     if mode == "weighted":
         ind_w = st.slider(
@@ -436,14 +516,14 @@ def _edit_pattern_indicator_combination(data: dict) -> None:
             value=float(strat.get("indicator_weight", 0.7)),
             step=0.05, key="combo_ind_w", format="%.2f",
         )
-        _default_hint(_ds.get("indicator_weight"))
+        _default_hint(_ds.get("indicator_weight"), PARAM_DESCRIPTIONS.get("strategy.indicator_weight"))
         pat_w = st.slider(
             "Pattern weight",
             0.0, 1.0,
             value=float(strat.get("pattern_weight", 0.3)),
             step=0.05, key="combo_pat_w", format="%.2f",
         )
-        _default_hint(_ds.get("pattern_weight"))
+        _default_hint(_ds.get("pattern_weight"), PARAM_DESCRIPTIONS.get("strategy.pattern_weight"))
         strat["indicator_weight"] = ind_w
         strat["pattern_weight"] = pat_w
         total = ind_w + pat_w
@@ -455,38 +535,38 @@ def _edit_pattern_indicator_combination(data: dict) -> None:
             0.0, 10.0, float(strat.get("gate_indicator_min", 5.5)),
             step=0.1, key="gate_ind_min", format="%.1f",
         )
-        _default_hint(_ds.get("gate_indicator_min"))
+        _default_hint(_ds.get("gate_indicator_min"), PARAM_DESCRIPTIONS.get("strategy.gate_indicator_min"))
         strat["gate_indicator_max"] = st.number_input(
             "Indicator SHORT threshold",
             0.0, 10.0, float(strat.get("gate_indicator_max", 4.5)),
             step=0.1, key="gate_ind_max", format="%.1f",
         )
-        _default_hint(_ds.get("gate_indicator_max"))
+        _default_hint(_ds.get("gate_indicator_max"), PARAM_DESCRIPTIONS.get("strategy.gate_indicator_max"))
         strat["gate_pattern_min"] = st.number_input(
             "Pattern LONG threshold",
             0.0, 10.0, float(strat.get("gate_pattern_min", 5.5)),
             step=0.1, key="gate_pat_min", format="%.1f",
         )
-        _default_hint(_ds.get("gate_pattern_min"))
+        _default_hint(_ds.get("gate_pattern_min"), PARAM_DESCRIPTIONS.get("strategy.gate_pattern_min"))
         strat["gate_pattern_max"] = st.number_input(
             "Pattern SHORT threshold",
             0.0, 10.0, float(strat.get("gate_pattern_max", 4.5)),
             step=0.1, key="gate_pat_max", format="%.1f",
         )
-        _default_hint(_ds.get("gate_pattern_max"))
+        _default_hint(_ds.get("gate_pattern_max"), PARAM_DESCRIPTIONS.get("strategy.gate_pattern_max"))
     elif mode == "boost":
         strat["boost_strength"] = st.slider(
             "Boost strength",
             0.0, 2.0, float(strat.get("boost_strength", 0.5)),
             step=0.1, key="boost_str", format="%.1f",
         )
-        _default_hint(_ds.get("boost_strength"))
+        _default_hint(_ds.get("boost_strength"), PARAM_DESCRIPTIONS.get("strategy.boost_strength"))
         strat["boost_dead_zone"] = st.slider(
             "Dead zone (+-)",
             0.0, 2.0, float(strat.get("boost_dead_zone", 0.3)),
             step=0.1, key="boost_dz", format="%.1f",
         )
-        _default_hint(_ds.get("boost_dead_zone"))
+        _default_hint(_ds.get("boost_dead_zone"), PARAM_DESCRIPTIONS.get("strategy.boost_dead_zone"))
 
 
 def _edit_scoring_thresholds(data: dict) -> None:
@@ -502,7 +582,7 @@ def _edit_scoring_thresholds(data: dict) -> None:
         key="threshold_mode_radio",
     )
     strat["threshold_mode"] = mode
-    _default_hint(_ds.get("threshold_mode"))
+    _default_hint(_ds.get("threshold_mode"), PARAM_DESCRIPTIONS.get("strategy.threshold_mode"))
 
     if mode == "fixed":
         _ds_thr = _ds.get("score_thresholds", {})
@@ -512,13 +592,13 @@ def _edit_scoring_thresholds(data: dict) -> None:
             0.0, 10.0, float(thresholds.get("short_below", 4.5)),
             step=0.1, key="fix_short", format="%.1f",
         )
-        _default_hint(_ds_thr.get("short_below"))
+        _default_hint(_ds_thr.get("short_below"), PARAM_DESCRIPTIONS.get("strategy.score_thresholds.short_below"))
         hold_below = st.slider(
             "LONG when score >",
             0.0, 10.0, float(thresholds.get("hold_below", 5.5)),
             step=0.1, key="fix_long", format="%.1f",
         )
-        _default_hint(_ds_thr.get("hold_below"))
+        _default_hint(_ds_thr.get("hold_below"), PARAM_DESCRIPTIONS.get("strategy.score_thresholds.hold_below"))
         thresholds["short_below"] = short_below
         thresholds["hold_below"] = hold_below
         if short_below >= hold_below:
@@ -531,19 +611,19 @@ def _edit_scoring_thresholds(data: dict) -> None:
             0, 100, int(pct.get("short_percentile", 25)),
             step=1, key="pct_short",
         )
-        _default_hint(_ds_pct.get("short_percentile"))
+        _default_hint(_ds_pct.get("short_percentile"), PARAM_DESCRIPTIONS.get("strategy.percentile_thresholds.short_percentile"))
         pct["long_percentile"] = st.number_input(
             "LONG percentile >=",
             0, 100, int(pct.get("long_percentile", 75)),
             step=1, key="pct_long",
         )
-        _default_hint(_ds_pct.get("long_percentile"))
+        _default_hint(_ds_pct.get("long_percentile"), PARAM_DESCRIPTIONS.get("strategy.percentile_thresholds.long_percentile"))
         pct["lookback_bars"] = st.number_input(
             "Lookback bars",
             10, 500, int(pct.get("lookback_bars", 60)),
             step=5, key="pct_lookback",
         )
-        _default_hint(_ds_pct.get("lookback_bars"))
+        _default_hint(_ds_pct.get("lookback_bars"), PARAM_DESCRIPTIONS.get("strategy.percentile_thresholds.lookback_bars"))
 
 
 def _edit_strategy_params(data: dict) -> None:
@@ -557,7 +637,7 @@ def _edit_strategy_params(data: dict) -> None:
         value=float(strat.get("stop_loss_pct", 0.05)) * 100,
         step=0.5, key="sl_pct", format="%.1f",
     ) / 100.0
-    _default_hint(f"{_ds.get('stop_loss_pct', 0.05) * 100:.1f}%")
+    _default_hint(f"{_ds.get('stop_loss_pct', 0.05) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.stop_loss_pct"))
 
     strat["take_profit_pct"] = st.number_input(
         "Take profit %",
@@ -565,7 +645,7 @@ def _edit_strategy_params(data: dict) -> None:
         value=float(strat.get("take_profit_pct", 0.20)) * 100,
         step=0.5, key="tp_pct", format="%.1f",
     ) / 100.0
-    _default_hint(f"{_ds.get('take_profit_pct', 0.20) * 100:.1f}%")
+    _default_hint(f"{_ds.get('take_profit_pct', 0.20) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.take_profit_pct"))
 
     sizing_modes = ["percent_equity", "fixed"]
     current_sizing = strat.get("position_sizing", "percent_equity")
@@ -573,7 +653,7 @@ def _edit_strategy_params(data: dict) -> None:
     strat["position_sizing"] = st.selectbox(
         "Position sizing", sizing_modes, index=sizing_idx, key="pos_sizing",
     )
-    _default_hint(_ds.get("position_sizing"))
+    _default_hint(_ds.get("position_sizing"), PARAM_DESCRIPTIONS.get("strategy.position_sizing"))
 
     if strat["position_sizing"] == "percent_equity":
         strat["percent_equity"] = st.slider(
@@ -581,28 +661,28 @@ def _edit_strategy_params(data: dict) -> None:
             0.1, 1.0, float(strat.get("percent_equity", 0.80)),
             step=0.05, key="pct_equity", format="%.2f",
         )
-        _default_hint(_ds.get("percent_equity"))
+        _default_hint(_ds.get("percent_equity"), PARAM_DESCRIPTIONS.get("strategy.percent_equity"))
     else:
         strat["fixed_quantity"] = st.number_input(
             "Fixed quantity",
             1, 10000, int(strat.get("fixed_quantity", 100)),
             step=10, key="fix_qty",
         )
-        _default_hint(_ds.get("fixed_quantity"))
+        _default_hint(_ds.get("fixed_quantity"), PARAM_DESCRIPTIONS.get("strategy.fixed_quantity"))
 
     strat["rebalance_interval"] = st.number_input(
         "Rebalance interval (bars)",
         1, 100, int(strat.get("rebalance_interval", 5)),
         step=1, key="rebal",
     )
-    _default_hint(_ds.get("rebalance_interval"))
+    _default_hint(_ds.get("rebalance_interval"), PARAM_DESCRIPTIONS.get("strategy.rebalance_interval"))
 
     strat["flatten_eod"] = st.checkbox(
         "Flatten at EOD",
         value=bool(strat.get("flatten_eod", False)),
         key="flatten_eod_cb",
     )
-    _default_hint(_ds.get("flatten_eod"))
+    _default_hint(_ds.get("flatten_eod"), PARAM_DESCRIPTIONS.get("strategy.flatten_eod"))
 
 
 def _edit_backtest_params(data: dict) -> None:
@@ -616,7 +696,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("initial_cash", 100_000)),
         step=10_000.0, key="init_cash", format="%.0f",
     )
-    _default_hint(f"${_db.get('initial_cash', 100_000):,.0f}")
+    _default_hint(f"${_db.get('initial_cash', 100_000):,.0f}", PARAM_DESCRIPTIONS.get("backtest.initial_cash"))
 
     bt["commission_per_trade"] = st.number_input(
         "Commission per trade ($)",
@@ -624,7 +704,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("commission_per_trade", 0.0)),
         step=1.0, key="commission", format="%.2f",
     )
-    _default_hint(_db.get("commission_per_trade"))
+    _default_hint(_db.get("commission_per_trade"), PARAM_DESCRIPTIONS.get("backtest.commission_per_trade"))
 
     bt["slippage_pct"] = st.number_input(
         "Slippage %",
@@ -632,7 +712,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("slippage_pct", 0.001)) * 100,
         step=0.01, key="slippage", format="%.3f",
     ) / 100.0
-    _default_hint(f"{_db.get('slippage_pct', 0.001) * 100:.3f}%")
+    _default_hint(f"{_db.get('slippage_pct', 0.001) * 100:.3f}%", PARAM_DESCRIPTIONS.get("backtest.slippage_pct"))
 
     bt["warmup_bars"] = st.number_input(
         "Warmup bars",
@@ -640,7 +720,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=int(bt.get("warmup_bars", 200)),
         step=10, key="warmup",
     )
-    _default_hint(_db.get("warmup_bars"))
+    _default_hint(_db.get("warmup_bars"), PARAM_DESCRIPTIONS.get("backtest.warmup_bars"))
 
     bt["significant_pattern_min_strength"] = st.number_input(
         "Sig. pattern min strength",
@@ -648,7 +728,7 @@ def _edit_backtest_params(data: dict) -> None:
         value=float(bt.get("significant_pattern_min_strength", 0.5)),
         step=0.1, key="sig_min_str", format="%.1f",
     )
-    _default_hint(_db.get("significant_pattern_min_strength"))
+    _default_hint(_db.get("significant_pattern_min_strength"), PARAM_DESCRIPTIONS.get("backtest.significant_pattern_min_strength"))
 
 
 # ---------------------------------------------------------------------------
