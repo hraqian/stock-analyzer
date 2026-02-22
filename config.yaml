@@ -358,6 +358,8 @@ regime:
   direction_change_high: 0.55   # fraction of bars reversing direction → choppy
   direction_change_period: 20
   price_ma_distance_extended: 0.10  # price > 10% from MA → extended trend
+  total_return_strong: 0.30         # |return| > 30% over period → definitively trending
+  total_return_moderate: 0.15       # |return| > 15% over period → moderate trend signal
   strategy_adaptation:
     strong_trend:
       use_trailing_stop: true       # trail stop instead of score-based exits

@@ -77,7 +77,9 @@ REGIME_DESCRIPTIONS: dict[RegimeType, str] = {
 @dataclass
 class RegimeMetrics:
     """Raw metrics computed during regime classification."""
-    adx: float = 0.0                   # ADX value (0-100)
+    adx: float = 0.0                   # ADX value (0-100) — current/latest
+    rolling_adx_mean: float = 0.0      # Mean ADX over the full period
+    total_return: float = 0.0          # Total price return over the period (e.g. 0.80 = +80%)
     pct_above_ma: float = 50.0         # % of bars where close > trend MA
     atr_pct: float = 0.0               # ATR as % of price
     bb_width: float = 0.0              # Bollinger Band width (normalised)
@@ -149,6 +151,10 @@ class RegimeClassifier:
         # ── Price-MA distance ───────────────────────────────────────────
         self._price_ma_distance_extended: float = float(r.get("price_ma_distance_extended", 0.10))
 
+        # ── Total return thresholds (primary trend signal) ──────────────
+        self._total_return_strong: float = float(r.get("total_return_strong", 0.30))
+        self._total_return_moderate: float = float(r.get("total_return_moderate", 0.15))
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -199,8 +205,17 @@ class RegimeClassifier:
         high = df["high"]
         low = df["low"]
 
-        # ── ADX ─────────────────────────────────────────────────────────
+        # ── Total return over the period ────────────────────────────────
+        first_close = float(close.iloc[0])
+        last_close = float(close.iloc[-1])
+        if first_close > 0:
+            metrics.total_return = (last_close - first_close) / first_close
+
+        # ── ADX (current) ───────────────────────────────────────────────
         metrics.adx = self._compute_adx(df)
+
+        # ── Rolling ADX mean (over the full period) ─────────────────────
+        metrics.rolling_adx_mean = self._compute_rolling_adx_mean(df)
 
         # ── Trend MA and % above ────────────────────────────────────────
         period = min(self._trend_ma_period, len(df) - 1)
@@ -345,6 +360,80 @@ class RegimeClassifier:
             return 0.0
         return float(atr) / last_close
 
+    def _compute_rolling_adx_mean(self, df: pd.DataFrame) -> float:
+        """Compute the mean ADX value over the full period.
+
+        Instead of relying solely on the last ADX value (which can be low
+        during short-term consolidations even within strong trends), this
+        computes the full ADX series and returns the mean.
+        """
+        period = self._atr_period
+
+        if len(df) < period * 3:
+            return self._compute_adx(df)
+
+        high = df["high"].values
+        low = df["low"].values
+        close = df["close"].values
+
+        plus_dm = []
+        minus_dm = []
+        tr_list = []
+
+        for i in range(1, len(df)):
+            up_move = high[i] - high[i - 1]
+            down_move = low[i - 1] - low[i]
+
+            plus_dm.append(up_move if up_move > down_move and up_move > 0 else 0.0)
+            minus_dm.append(down_move if down_move > up_move and down_move > 0 else 0.0)
+
+            tr1 = high[i] - low[i]
+            tr2 = abs(high[i] - close[i - 1])
+            tr3 = abs(low[i] - close[i - 1])
+            tr_list.append(max(tr1, tr2, tr3))
+
+        if len(tr_list) < period:
+            return 0.0
+
+        def wilder_smooth(values: list[float], n: int) -> list[float]:
+            if len(values) < n:
+                return []
+            first = sum(values[:n]) / n
+            smoothed = [first]
+            for v in values[n:]:
+                smoothed.append(smoothed[-1] * (1 - 1 / n) + v * (1 / n))
+            return smoothed
+
+        sm_plus_dm = wilder_smooth(plus_dm, period)
+        sm_minus_dm = wilder_smooth(minus_dm, period)
+        sm_tr = wilder_smooth(tr_list, period)
+
+        if not sm_tr or not sm_plus_dm or not sm_minus_dm:
+            return 0.0
+
+        dx_values = []
+        length = min(len(sm_plus_dm), len(sm_minus_dm), len(sm_tr))
+        for i in range(length):
+            if sm_tr[i] == 0:
+                dx_values.append(0.0)
+                continue
+            plus_di = 100 * sm_plus_dm[i] / sm_tr[i]
+            minus_di = 100 * sm_minus_dm[i] / sm_tr[i]
+            di_sum = plus_di + minus_di
+            if di_sum == 0:
+                dx_values.append(0.0)
+            else:
+                dx_values.append(100 * abs(plus_di - minus_di) / di_sum)
+
+        if len(dx_values) < period:
+            return sum(dx_values) / len(dx_values) if dx_values else 0.0
+
+        adx_smoothed = wilder_smooth(dx_values, period)
+        if not adx_smoothed:
+            return 0.0
+
+        return sum(adx_smoothed) / len(adx_smoothed)
+
     # ------------------------------------------------------------------
     # Regime scoring
     # ------------------------------------------------------------------
@@ -354,6 +443,11 @@ class RegimeClassifier:
 
         Each regime gets a base score of 0.  Matching criteria add points.
         The regime with the highest total wins.
+
+        Total return over the analysis period is the primary trend signal —
+        a stock up 30%+ is in a trend regardless of current ADX.  Rolling
+        ADX mean (average over the period) supplements current ADX, since
+        the current value can dip during short-term consolidations.
         """
         scores: dict[RegimeType, float] = {
             RegimeType.STRONG_TREND: 0.0,
@@ -362,13 +456,30 @@ class RegimeClassifier:
             RegimeType.BREAKOUT_TRANSITION: 0.0,
         }
 
+        # Use the better of current ADX and rolling ADX mean — a stock
+        # in a strong long-term trend that's temporarily consolidating
+        # should still register its trend character.
+        effective_adx = max(m.adx, m.rolling_adx_mean)
+        abs_return = abs(m.total_return)
+
         # ════════════════════════════════════════════════════════════════
         # STRONG TREND scoring
         # ════════════════════════════════════════════════════════════════
-        # High ADX → strong trend
-        if m.adx >= self._adx_strong_trend:
-            scores[RegimeType.STRONG_TREND] += 2.0 + (m.adx - self._adx_strong_trend) / 20.0
-        elif m.adx >= self._adx_weak:
+
+        # --- Primary signal: total return over the period ---
+        # A stock up 30%+ (or down 30%+) is definitively trending.
+        if abs_return >= self._total_return_strong:
+            # Scale bonus: 30% → 3.0, 60% → 4.5, 100% → 6.0
+            scores[RegimeType.STRONG_TREND] += 3.0 + min(abs_return - self._total_return_strong, 0.70) / 0.70 * 3.0
+        elif abs_return >= self._total_return_moderate:
+            # Moderate return: some trend signal
+            frac = (abs_return - self._total_return_moderate) / (self._total_return_strong - self._total_return_moderate)
+            scores[RegimeType.STRONG_TREND] += 1.0 + frac * 2.0
+
+        # --- ADX (use effective = max of current and rolling mean) ---
+        if effective_adx >= self._adx_strong_trend:
+            scores[RegimeType.STRONG_TREND] += 2.0 + (effective_adx - self._adx_strong_trend) / 20.0
+        elif effective_adx >= self._adx_weak:
             scores[RegimeType.STRONG_TREND] += 0.5
 
         # Trend consistency: price consistently on one side of MA
@@ -376,7 +487,6 @@ class RegimeClassifier:
         if pct_away > (self._trend_consistency_high - 50.0):
             scores[RegimeType.STRONG_TREND] += 2.0
         elif pct_away > (self._trend_consistency_low - 50.0):
-            # Partial credit
             scores[RegimeType.STRONG_TREND] += 0.5
 
         # Extended price distance from MA (trending far away)
@@ -392,10 +502,22 @@ class RegimeClassifier:
         # ════════════════════════════════════════════════════════════════
         # MEAN REVERTING scoring
         # ════════════════════════════════════════════════════════════════
+
+        # --- Total return suppresses mean-reverting ---
+        # A big move over the period means it's NOT range-bound.
+        if abs_return >= self._total_return_strong:
+            # Strong trend → penalise mean-reverting
+            scores[RegimeType.MEAN_REVERTING] -= 2.0
+        elif abs_return >= self._total_return_moderate:
+            scores[RegimeType.MEAN_REVERTING] -= 1.0
+        else:
+            # Small total return → supports range-bound classification
+            scores[RegimeType.MEAN_REVERTING] += 1.5
+
         # Low ADX → range-bound
-        if m.adx < self._adx_weak:
+        if effective_adx < self._adx_weak:
             scores[RegimeType.MEAN_REVERTING] += 2.0
-        elif m.adx < self._adx_strong_trend:
+        elif effective_adx < self._adx_strong_trend:
             scores[RegimeType.MEAN_REVERTING] += 1.0
 
         # Price oscillates around MA (pct_above_ma near 50%)
@@ -429,8 +551,9 @@ class RegimeClassifier:
         elif m.direction_changes >= 0.45:
             scores[RegimeType.VOLATILE_CHOPPY] += 1.0
 
-        # Low ADX can also mean choppy (no trend)
-        if m.adx < self._adx_weak:
+        # Low ADX can also mean choppy (no trend) — but only if returns
+        # are also small (otherwise it's a trend with volatile swings)
+        if effective_adx < self._adx_weak and abs_return < self._total_return_moderate:
             scores[RegimeType.VOLATILE_CHOPPY] += 0.5
 
         # Wide Bollinger Bands → high volatility
@@ -457,6 +580,10 @@ class RegimeClassifier:
         if m.price_ma_distance < 0.03 and m.bb_width_percentile < 40:
             scores[RegimeType.BREAKOUT_TRANSITION] += 0.5
 
+        # Floor all scores at 0 (penalties can push negative)
+        for rt in scores:
+            scores[rt] = max(scores[rt], 0.0)
+
         return scores
 
     # ------------------------------------------------------------------
@@ -476,13 +603,28 @@ class RegimeClassifier:
         winner = ranked[0][0]
         runner_up = ranked[1] if len(ranked) > 1 else None
 
-        # ADX context
-        if m.adx >= self._adx_strong_trend:
-            reasons.append(f"ADX = {m.adx:.1f} (strong trend signal)")
-        elif m.adx >= self._adx_weak:
-            reasons.append(f"ADX = {m.adx:.1f} (moderate trend)")
+        # Total return — the primary trend signal
+        ret_pct = m.total_return * 100
+        direction = "up" if m.total_return >= 0 else "down"
+        abs_ret = abs(m.total_return)
+        if abs_ret >= self._total_return_strong:
+            reasons.append(f"Total return: {ret_pct:+.1f}% ({direction} — strong trend signal)")
+        elif abs_ret >= self._total_return_moderate:
+            reasons.append(f"Total return: {ret_pct:+.1f}% ({direction} — moderate trend signal)")
         else:
-            reasons.append(f"ADX = {m.adx:.1f} (weak/no trend)")
+            reasons.append(f"Total return: {ret_pct:+.1f}% (small move — range-bound signal)")
+
+        # ADX context — show both current and rolling mean
+        effective_adx = max(m.adx, m.rolling_adx_mean)
+        adx_note = ""
+        if m.rolling_adx_mean > m.adx + 3:
+            adx_note = f", rolling mean {m.rolling_adx_mean:.1f} (higher — current dip likely temporary)"
+        if effective_adx >= self._adx_strong_trend:
+            reasons.append(f"ADX = {m.adx:.1f} (strong trend){adx_note}")
+        elif effective_adx >= self._adx_weak:
+            reasons.append(f"ADX = {m.adx:.1f} (moderate trend){adx_note}")
+        else:
+            reasons.append(f"ADX = {m.adx:.1f} (weak/no trend){adx_note}")
 
         # Trend consistency
         if m.pct_above_ma > self._trend_consistency_high:

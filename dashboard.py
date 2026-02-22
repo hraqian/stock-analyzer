@@ -348,6 +348,8 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "regime.direction_change_high": "fraction of bars reversing above this = choppy market",
     "regime.direction_change_period": "lookback window for counting direction changes",
     "regime.price_ma_distance_extended": "price > this % from MA = extended trend, potential reversion",
+    "regime.total_return_strong": "absolute return above this over the period = definitively trending",
+    "regime.total_return_moderate": "absolute return above this = moderate trend signal",
     # -- Regime strategy adaptation --
     "regime.strong_trend.use_trailing_stop": "trail stop with trend instead of score-based exits",
     "regime.strong_trend.trailing_stop_atr_mult": "trailing stop distance = N x ATR; higher = wider stop",
@@ -932,6 +934,20 @@ def _edit_regime_params(data: dict) -> None:
         step=0.01, key="reg_pma_ext", format="%.2f",
     )
     _default_hint(_dr.get("price_ma_distance_extended"), PARAM_DESCRIPTIONS.get("regime.price_ma_distance_extended"))
+
+    regime["total_return_strong"] = st.slider(
+        "Total return strong", 0.10, 1.00,
+        value=float(regime.get("total_return_strong", 0.30)),
+        step=0.05, key="reg_ret_strong", format="%.2f",
+    )
+    _default_hint(_dr.get("total_return_strong"), PARAM_DESCRIPTIONS.get("regime.total_return_strong"))
+
+    regime["total_return_moderate"] = st.slider(
+        "Total return moderate", 0.05, 0.50,
+        value=float(regime.get("total_return_moderate", 0.15)),
+        step=0.05, key="reg_ret_moderate", format="%.2f",
+    )
+    _default_hint(_dr.get("total_return_moderate"), PARAM_DESCRIPTIONS.get("regime.total_return_moderate"))
 
     # -- Strategy adaptation per regime --
     st.markdown("---")
@@ -1826,12 +1842,13 @@ def render_regime(regime: RegimeAssessment | None) -> None:
 
     # Metrics row
     m = regime.metrics
-    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-    mc1.metric("ADX", f"{m.adx:.1f}")
-    mc2.metric("Trend MA %", f"{m.pct_above_ma:.0f}%")
-    mc3.metric("ATR%", f"{m.atr_pct:.3f}")
-    mc4.metric("BB Width Pctl", f"{m.bb_width_percentile:.0f}%")
-    mc5.metric("Dir Changes", f"{m.direction_changes:.0%}")
+    mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
+    mc1.metric("Total Return", f"{m.total_return:+.1%}")
+    mc2.metric("ADX (current)", f"{m.adx:.1f}")
+    mc3.metric("ADX (avg)", f"{m.rolling_adx_mean:.1f}")
+    mc4.metric("Trend MA %", f"{m.pct_above_ma:.0f}%")
+    mc5.metric("ATR%", f"{m.atr_pct:.3f}")
+    mc6.metric("Dir Changes", f"{m.direction_changes:.0%}")
 
     # Reasons
     if regime.reasons:

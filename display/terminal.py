@@ -213,10 +213,10 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
         # Metrics summary
         m = regime.metrics
         regime_lines.append(
-            f"[dim]ADX: {m.adx:.1f}  |  "
+            f"[dim]Return: {m.total_return:+.1%}  |  "
+            f"ADX: {m.adx:.1f} (avg {m.rolling_adx_mean:.1f})  |  "
             f"Trend MA {m.pct_above_ma:.0f}% above  |  "
             f"ATR%: {m.atr_pct:.3f}  |  "
-            f"BB width pctl: {m.bb_width_percentile:.0f}%  |  "
             f"Dir changes: {m.direction_changes:.0%}[/dim]"
         )
 

@@ -268,6 +268,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "direction_change_period": 20,  # lookback for direction change calculation
         # Price-MA distance
         "price_ma_distance_extended": 0.10,  # price > 10% from MA → extended trend
+        # Total return thresholds (primary trend signal)
+        "total_return_strong": 0.30,         # |return| > 30% → definitively trending
+        "total_return_moderate": 0.15,       # |return| > 15% → moderate trend signal
         # Strategy adaptation per regime
         "strategy_adaptation": {
             "strong_trend": {
