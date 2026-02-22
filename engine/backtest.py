@@ -34,6 +34,7 @@ from patterns.registry import PatternRegistry
 from analysis.pattern_scorer import PatternCompositeScorer
 from engine.strategy import Signal, StrategyContext, TradeOrder
 from engine.suitability import TradingMode
+from engine.regime import RegimeClassifier, RegimeAssessment, RegimeType
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,9 @@ class BacktestResult:
 
     # Significant patterns detected during the backtest period
     significant_patterns: list[SignificantPattern] = field(default_factory=list)
+
+    # Market regime classification (from the full data at end of backtest)
+    regime: RegimeAssessment | None = None
 
     # Performance metrics (populated by _compute_metrics)
     total_return_pct: float = 0.0
@@ -328,6 +332,10 @@ class BacktestEngine:
         last_overall: float = 5.0
         last_pattern_overall: float = 5.0
 
+        # Regime classification (re-evaluated each rebalance)
+        regime_classifier = RegimeClassifier(self._cfg)
+        current_regime: RegimeType | None = None
+
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
 
@@ -360,7 +368,7 @@ class BacktestEngine:
 
             # -- Check stop-loss / take-profit on every bar --
             if position is not None:
-                exit_reason = self._check_exit_triggers(position, close)
+                exit_reason = self._check_exit_triggers(position, close, current_regime)
                 if exit_reason:
                     trade = self._close_position(
                         position, close, date_str, exit_reason
@@ -386,6 +394,13 @@ class BacktestEngine:
                 trailing_df = df.iloc[: i + 1].copy()
 
                 last_scores, last_overall, last_pattern_overall = self._compute_scores(trailing_df)
+
+                # Re-evaluate market regime on trailing data
+                try:
+                    regime_assessment = regime_classifier.classify(trailing_df)
+                    current_regime = regime_assessment.regime
+                except Exception:
+                    pass  # keep previous regime if classification fails
 
             # Build context and ask strategy for order
             portfolio_value = cash
@@ -418,6 +433,7 @@ class BacktestEngine:
                 cash=cash,
                 portfolio_value=portfolio_value,
                 trend_ma=current_trend_ma,
+                regime=current_regime,
             )
 
             order = self._strategy.on_bar(ctx)
@@ -512,6 +528,13 @@ class BacktestEngine:
         post_warmup_df = df.iloc[effective_warmup:].copy()
         significant_patterns = self._extract_significant_patterns(post_warmup_df)
 
+        # 5b. Final regime classification on the full dataset
+        final_regime: RegimeAssessment | None = None
+        try:
+            final_regime = regime_classifier.classify(df)
+        except Exception:
+            pass
+
         # 6. Build result
         result = BacktestResult(
             ticker=ticker.upper(),
@@ -522,6 +545,7 @@ class BacktestEngine:
             trades=trades,
             equity_curve=equity_curve,
             significant_patterns=significant_patterns,
+            regime=final_regime,
         )
         self._compute_metrics(result, interval)
         self._strategy.on_end({"total_trades": len(trades)})
@@ -617,12 +641,20 @@ class BacktestEngine:
             return price * (1 + self._slippage_pct)
         return price * (1 - self._slippage_pct)
 
-    def _check_exit_triggers(self, position: _Position, current_price: float) -> str:
+    def _check_exit_triggers(
+        self,
+        position: _Position,
+        current_price: float,
+        regime: RegimeType | None = None,
+    ) -> str:
         """Check stop-loss and take-profit. Returns exit reason or empty string.
 
         When ATR-adaptive stop is enabled and the position has a valid entry_atr,
         the stop is ``atr_stop_multiplier * entry_atr / entry_price``, capped by
         the fixed ``stop_loss_pct`` as a safety ceiling.
+
+        In volatile/choppy regime, the stop loss is widened by the configured
+        ``stop_loss_mult`` to avoid premature exits from noisy price action.
         """
         pnl_pct = position.unrealized_pnl_pct(current_price)
 
@@ -631,6 +663,14 @@ class BacktestEngine:
         if self._atr_stop_enabled and position.entry_atr > 0 and position.entry_price > 0:
             atr_stop = self._atr_stop_multiplier * position.entry_atr / position.entry_price
             effective_stop = min(self._stop_loss_pct, atr_stop)
+
+        # Regime adjustment: widen stops in volatile/choppy markets
+        if regime == RegimeType.VOLATILE_CHOPPY:
+            regime_cfg = self._cfg.section("regime")
+            adapt = regime_cfg.get("strategy_adaptation", {}).get("volatile_choppy", {})
+            if adapt.get("widen_stops", True):
+                stop_mult = float(adapt.get("stop_loss_mult", 1.5))
+                effective_stop *= stop_mult
 
         if pnl_pct <= -effective_stop:
             return "stop_loss"

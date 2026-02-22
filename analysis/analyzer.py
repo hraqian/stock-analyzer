@@ -16,6 +16,7 @@ from patterns.base import PatternResult
 from analysis.support_resistance import calculate_levels, SRLevel
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
+from engine.regime import RegimeClassifier, RegimeAssessment
 
 if TYPE_CHECKING:
     from config import Config
@@ -36,6 +37,7 @@ class AnalysisResult:
     composite: dict[str, Any]          # from CompositeScorer.score() (indicators)
     pattern_composite: dict[str, Any]  # from PatternCompositeScorer.score()
     df: pd.DataFrame = field(repr=False)
+    regime: RegimeAssessment | None = None  # market regime classification
 
 
 class Analyzer:
@@ -94,6 +96,14 @@ class Analyzer:
         pattern_scorer = PatternCompositeScorer(self._cfg)
         pattern_composite = pattern_scorer.score(pattern_results)
 
+        # 6. Regime classification
+        regime_assessment: RegimeAssessment | None = None
+        try:
+            classifier = RegimeClassifier(self._cfg)
+            regime_assessment = classifier.classify(df)
+        except Exception:
+            pass  # regime is optional — don't break analysis if it fails
+
         return AnalysisResult(
             ticker=ticker.upper(),
             period=period_label,
@@ -105,4 +115,5 @@ class Analyzer:
             composite=composite,
             pattern_composite=pattern_composite,
             df=df,
+            regime=regime_assessment,
         )

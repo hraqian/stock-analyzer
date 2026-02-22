@@ -330,6 +330,56 @@ backtest:
   significant_pattern_min_strength: 0.5
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Market Regime Classification
+# ─────────────────────────────────────────────────────────────────────────────
+# Classifies the current market environment into one of four regimes.
+# The regime drives strategy adaptation in backtesting — e.g. strong-trend
+# regimes use trailing stops, range-bound regimes use score thresholds.
+#
+# Regimes:
+#   strong_trend        — High ADX, consistent trend. Best: trailing stop / hold.
+#   mean_reverting      — Low ADX, oscillates around MA. Best: swing trades.
+#   volatile_choppy     — High ATR%, frequent reversals. Best: reduce size / sit out.
+#   breakout_transition — BB squeeze then expansion. Best: momentum breakout entry.
+
+regime:
+  trend_ma_period: 50           # MA period for trend analysis
+  adx_strong_trend: 30.0        # ADX above this → strong trend signal
+  adx_weak: 20.0                # ADX below this → weak/no trend
+  trend_consistency_high: 70.0  # % bars above MA → strong directional bias
+  trend_consistency_low: 40.0   # below 100-this on bear side → strong bear bias
+  atr_pct_high: 0.03            # ATR% above this → high volatility
+  atr_pct_low: 0.01             # ATR% below this → low volatility
+  atr_period: 14
+  bb_period: 20
+  bb_std_dev: 2.0
+  bb_squeeze_percentile: 20.0   # BB width below this percentile → squeeze
+  bb_expansion_percentile: 80.0 # BB width above this → expansion
+  direction_change_high: 0.55   # fraction of bars reversing direction → choppy
+  direction_change_period: 20
+  price_ma_distance_extended: 0.10  # price > 10% from MA → extended trend
+  strategy_adaptation:
+    strong_trend:
+      use_trailing_stop: true       # trail stop instead of score-based exits
+      trailing_stop_atr_mult: 3.0   # trailing stop distance = N × ATR
+      ignore_score_entries: true     # don't use score thresholds for entry
+      hold_with_trend: true          # stay in position while trend persists
+    mean_reverting:
+      use_trailing_stop: false
+      tighten_thresholds: true      # narrow the HOLD zone for more trades
+      threshold_adjustment: 0.3     # narrow SHORT/LONG thresholds by this
+    volatile_choppy:
+      reduce_position_size: true
+      position_size_mult: 0.5       # halve position size
+      widen_stops: true
+      stop_loss_mult: 1.5           # widen stop loss by this factor
+    breakout_transition:
+      use_momentum_entry: true      # enter on breakout confirmation
+      breakout_atr_mult: 1.5        # price must move N×ATR from squeeze level
+      require_volume_surge: true
+      volume_surge_mult: 1.3        # volume must exceed avg by this factor
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Trading Mode Suitability Detection
 # ─────────────────────────────────────────────────────────────────────────────
 # Auto-detects whether a stock is suitable for shorting / active trading,

@@ -402,9 +402,11 @@ def main() -> None:
             console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (auto-detected)[/dim]")
 
         # ── Create strategy and engine ────────────────────────────────────
+        regime_adapt = cfg.section("regime").get("strategy_adaptation", {})
         strategy = ScoreBasedStrategy(
             params=cfg.section("strategy"),
             trading_mode=trading_mode,
+            regime_adaptation=regime_adapt,
         )
 
         engine = BacktestEngine(

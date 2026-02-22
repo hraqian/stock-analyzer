@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from config import Config
     from engine.backtest import BacktestResult
     from engine.suitability import SuitabilityAssessment
+    from engine.regime import RegimeAssessment
 
 console = Console()
 
@@ -121,6 +122,59 @@ def _render_significant_patterns(result: "BacktestResult") -> None:
     )
 
 
+def _render_regime_panel(regime: "RegimeAssessment") -> None:
+    """Render a market regime classification panel."""
+    regime_colors = {
+        "strong_trend": "green",
+        "mean_reverting": "cyan",
+        "volatile_choppy": "red",
+        "breakout_transition": "yellow",
+    }
+    r_color = regime_colors.get(regime.regime.value, "white")
+    confidence_pct = regime.confidence * 100
+
+    lines = [
+        f"[bold {r_color}]{regime.label}[/bold {r_color}]  "
+        f"[dim]Confidence: {confidence_pct:.0f}%[/dim]",
+        f"[dim italic]{regime.description}[/dim italic]",
+        "",
+    ]
+
+    # Metrics summary
+    m = regime.metrics
+    lines.append(
+        f"[dim]ADX: {m.adx:.1f}  |  "
+        f"Trend MA {m.pct_above_ma:.0f}% above  |  "
+        f"ATR%: {m.atr_pct:.3f}  |  "
+        f"BB width pctl: {m.bb_width_percentile:.0f}%  |  "
+        f"Dir changes: {m.direction_changes:.0%}[/dim]"
+    )
+
+    # Reasons
+    if regime.reasons:
+        lines.append("")
+        for reason in regime.reasons[:4]:
+            lines.append(f"  [dim]- {reason}[/dim]")
+
+    # Regime scores comparison
+    if regime.regime_scores:
+        lines.append("")
+        score_parts = []
+        for label, score in sorted(regime.regime_scores.items(), key=lambda x: -x[1]):
+            name = label.replace("_", " ").title()
+            marker = " *" if label == regime.regime.value else ""
+            score_parts.append(f"{name}: {score:.1f}{marker}")
+        lines.append(f"[dim]Scores: {' | '.join(score_parts)}[/dim]")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title="[bold]Market Regime[/bold]",
+        box=box.ROUNDED,
+        expand=True,
+        padding=(0, 2),
+    ))
+
+
 def render_suitability(
     assessment: "SuitabilityAssessment",
     ticker: str,
@@ -189,6 +243,10 @@ def render_backtest(
     # ── Suitability Assessment Panel ────────────────────────────────────────
     if assessment is not None:
         render_suitability(assessment, result.ticker)
+
+    # ── Market Regime Panel ─────────────────────────────────────────────────
+    if result.regime is not None:
+        _render_regime_panel(result.regime)
 
     # ── Performance Metrics Table ───────────────────────────────────────────
     metrics_table = Table(
@@ -300,6 +358,11 @@ def render_backtest(
         ("Commission", f"${bt_cfg.get('commission_per_trade', 0.0):.2f} / trade"),
         ("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"),
     ]
+
+    # Regime adaptation status
+    if result.regime is not None:
+        regime_label = result.regime.label
+        config_rows.append(("Regime Adaptation", f"[bold]{regime_label}[/bold]"))
 
     for label, value in config_rows:
         config_table.add_row(label, value)

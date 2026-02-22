@@ -243,6 +243,58 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "inside_outside": 0.15,
         },
     },
+    # ------------------------------------------------------------------
+    # Market Regime Classification
+    # ------------------------------------------------------------------
+    "regime": {
+        "trend_ma_period": 50,           # MA period for trend analysis
+        # ADX thresholds
+        "adx_strong_trend": 30.0,        # ADX above this → strong trend signal
+        "adx_weak": 20.0,               # ADX below this → weak/no trend
+        # Trend consistency (% of bars above MA)
+        "trend_consistency_high": 70.0,  # above this → strong directional bias
+        "trend_consistency_low": 40.0,   # below 100-this on bear side → strong bear bias
+        # ATR% volatility thresholds
+        "atr_pct_high": 0.03,           # ATR% above this → high volatility
+        "atr_pct_low": 0.01,            # ATR% below this → low volatility
+        "atr_period": 14,               # ATR calculation period
+        # Bollinger Band squeeze detection
+        "bb_period": 20,                # BB calculation period
+        "bb_std_dev": 2.0,             # BB standard deviation multiplier
+        "bb_squeeze_percentile": 20.0,  # BB width below this percentile → squeeze
+        "bb_expansion_percentile": 80.0, # BB width above this → expansion
+        # Direction changes
+        "direction_change_high": 0.55,  # fraction of bars reversing → choppy
+        "direction_change_period": 20,  # lookback for direction change calculation
+        # Price-MA distance
+        "price_ma_distance_extended": 0.10,  # price > 10% from MA → extended trend
+        # Strategy adaptation per regime
+        "strategy_adaptation": {
+            "strong_trend": {
+                "use_trailing_stop": True,       # trail stop instead of score-based exits
+                "trailing_stop_atr_mult": 3.0,   # trailing stop = N × ATR
+                "ignore_score_entries": True,     # don't use score thresholds for entry
+                "hold_with_trend": True,          # stay in position while trend persists
+            },
+            "mean_reverting": {
+                "use_trailing_stop": False,       # use score-based entries/exits
+                "tighten_thresholds": True,       # narrow the HOLD zone for more trades
+                "threshold_adjustment": 0.3,      # narrow by this amount on each side
+            },
+            "volatile_choppy": {
+                "reduce_position_size": True,     # halve position size
+                "position_size_mult": 0.5,        # multiplier for position sizing
+                "widen_stops": True,              # widen stop loss
+                "stop_loss_mult": 1.5,            # multiply stop loss % by this
+            },
+            "breakout_transition": {
+                "use_momentum_entry": True,       # enter on breakout confirmation
+                "breakout_atr_mult": 1.5,         # price must move N×ATR from squeeze level
+                "require_volume_surge": True,      # require above-avg volume for entry
+                "volume_surge_mult": 1.3,         # volume must be N× the average
+            },
+        },
+    },
     "suitability": {
         "mode_override": "auto",
         "min_volume": 100_000,
@@ -800,6 +852,33 @@ class Config:
             errors.append(
                 f"suitability.max_pct_above_ma must be between 0 and 100, got {max_pct!r}"
             )
+
+        # Regime parameters
+        regime = self._data.get("regime", {})
+        for key in ("adx_strong_trend", "adx_weak", "atr_pct_high", "atr_pct_low"):
+            val = regime.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                errors.append(f"regime.{key} must be non-negative, got {val!r}")
+
+        adx_strong = regime.get("adx_strong_trend", 30.0)
+        adx_weak = regime.get("adx_weak", 20.0)
+        if isinstance(adx_strong, (int, float)) and isinstance(adx_weak, (int, float)):
+            if adx_weak >= adx_strong:
+                errors.append("regime.adx_weak must be less than regime.adx_strong_trend")
+
+        for key in ("trend_consistency_high", "trend_consistency_low"):
+            val = regime.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or not (0 <= val <= 100)):
+                errors.append(f"regime.{key} must be between 0 and 100, got {val!r}")
+
+        for key in ("bb_squeeze_percentile", "bb_expansion_percentile"):
+            val = regime.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or not (0 <= val <= 100)):
+                errors.append(f"regime.{key} must be between 0 and 100, got {val!r}")
+
+        regime_adapt = regime.get("strategy_adaptation", {})
+        if not isinstance(regime_adapt, dict):
+            errors.append("regime.strategy_adaptation must be a dict")
 
         # Objectives — must be dicts with valid structure
         objectives = self._data.get("objectives", {})

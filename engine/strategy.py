@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from engine.regime import RegimeType
+
 
 class Signal(Enum):
     """Trading signal emitted by a strategy on each bar."""
@@ -46,6 +48,7 @@ class StrategyContext:
     cash: float = 100_000.0             # available cash
     portfolio_value: float = 100_000.0  # total portfolio value
     trend_ma: float = 0.0               # short-term trend MA for confirmation filter
+    regime: RegimeType | None = None    # current market regime classification
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

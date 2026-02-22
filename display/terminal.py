@@ -190,6 +190,50 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
 
         console.print(pat_table)
 
+    # ── Market Regime ────────────────────────────────────────────────────────
+    if result.regime is not None:
+        regime = result.regime
+        # Color based on regime type
+        regime_colors = {
+            "strong_trend": "green",
+            "mean_reverting": "cyan",
+            "volatile_choppy": "red",
+            "breakout_transition": "yellow",
+        }
+        r_color = regime_colors.get(regime.regime.value, "white")
+        confidence_pct = regime.confidence * 100
+
+        regime_lines = [
+            f"[bold {r_color}]{regime.label}[/bold {r_color}]  "
+            f"[dim]Confidence: {confidence_pct:.0f}%[/dim]",
+            f"[dim italic]{regime.description}[/dim italic]",
+            "",
+        ]
+
+        # Metrics summary
+        m = regime.metrics
+        regime_lines.append(
+            f"[dim]ADX: {m.adx:.1f}  |  "
+            f"Trend MA {m.pct_above_ma:.0f}% above  |  "
+            f"ATR%: {m.atr_pct:.3f}  |  "
+            f"BB width pctl: {m.bb_width_percentile:.0f}%  |  "
+            f"Dir changes: {m.direction_changes:.0%}[/dim]"
+        )
+
+        # Reasons
+        if regime.reasons:
+            regime_lines.append("")
+            for reason in regime.reasons[:4]:  # cap at 4 reasons
+                regime_lines.append(f"  [dim]- {reason}[/dim]")
+
+        console.print(Panel(
+            "\n".join(regime_lines),
+            title="[bold]Market Regime[/bold]",
+            box=box.ROUNDED,
+            expand=True,
+            padding=(0, 2),
+        ))
+
     # ── Support & Resistance ─────────────────────────────────────────────────
     sr_table = Table(
         box=box.SIMPLE_HEAD,

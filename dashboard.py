@@ -46,6 +46,7 @@ from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
+from engine.regime import RegimeAssessment, RegimeType, REGIME_LABELS
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 
@@ -331,6 +332,37 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     # -- Trend confirmation --
     "strategy.trend_confirm_enabled": "require price on correct side of trend EMA before entering",
     "strategy.trend_confirm_period": "shorter = faster trend detection, more trades; longer = stronger filter",
+    # -- Regime classification thresholds --
+    "regime.trend_ma_period": "MA period used to measure trend consistency and direction",
+    "regime.adx_strong_trend": "ADX above this = strong trend signal; higher = stricter",
+    "regime.adx_weak": "ADX below this = no meaningful trend; lower = more lenient",
+    "regime.trend_consistency_high": "% bars above MA needed for strong directional bias",
+    "regime.trend_consistency_low": "% bars above MA below this (or above 100-this on bear side) = ranging",
+    "regime.atr_pct_high": "ATR% above this = high volatility regime",
+    "regime.atr_pct_low": "ATR% below this = low volatility / calm market",
+    "regime.atr_period": "ATR lookback period for volatility measurement",
+    "regime.bb_period": "Bollinger Band period for squeeze detection",
+    "regime.bb_std_dev": "BB standard deviation multiplier",
+    "regime.bb_squeeze_percentile": "BB width below this percentile = squeeze (potential breakout)",
+    "regime.bb_expansion_percentile": "BB width above this percentile = expanded volatility",
+    "regime.direction_change_high": "fraction of bars reversing above this = choppy market",
+    "regime.direction_change_period": "lookback window for counting direction changes",
+    "regime.price_ma_distance_extended": "price > this % from MA = extended trend, potential reversion",
+    # -- Regime strategy adaptation --
+    "regime.strong_trend.use_trailing_stop": "trail stop with trend instead of score-based exits",
+    "regime.strong_trend.trailing_stop_atr_mult": "trailing stop distance = N x ATR; higher = wider stop",
+    "regime.strong_trend.ignore_score_entries": "skip score thresholds; enter based on trend direction instead",
+    "regime.strong_trend.hold_with_trend": "hold position as long as trend persists, ignore sell signals",
+    "regime.mean_reverting.tighten_thresholds": "narrow the HOLD zone to generate more swing trades",
+    "regime.mean_reverting.threshold_adjustment": "how much to narrow thresholds on each side (0.1–0.5)",
+    "regime.volatile_choppy.reduce_position_size": "halve position size to limit risk in choppy markets",
+    "regime.volatile_choppy.position_size_mult": "position size multiplier (0.1–1.0); lower = smaller positions",
+    "regime.volatile_choppy.widen_stops": "widen stop loss to avoid frequent stop-outs in volatile markets",
+    "regime.volatile_choppy.stop_loss_mult": "stop loss multiplier (1.0–3.0); higher = wider stops",
+    "regime.breakout_transition.use_momentum_entry": "enter on breakout confirmation instead of score-based entry",
+    "regime.breakout_transition.breakout_atr_mult": "price must move N x ATR from squeeze level to confirm breakout",
+    "regime.breakout_transition.require_volume_surge": "require above-average volume to confirm breakout",
+    "regime.breakout_transition.volume_surge_mult": "volume must exceed average by this multiplier (1.0–3.0)",
 }
 
 
@@ -789,6 +821,236 @@ def _edit_backtest_params(data: dict) -> None:
     _default_hint(_db.get("max_warmup_ratio"), PARAM_DESCRIPTIONS.get("backtest.max_warmup_ratio"))
 
 
+def _edit_regime_params(data: dict) -> None:
+    """Edit regime classification thresholds and strategy adaptation params."""
+    regime = data.setdefault("regime", {})
+    _dr = DEFAULT_CONFIG.get("regime", {})
+
+    st.markdown("**Classification Thresholds**")
+
+    regime["trend_ma_period"] = st.number_input(
+        "Trend MA period", min_value=5, max_value=200,
+        value=int(regime.get("trend_ma_period", 50)),
+        step=5, key="reg_trend_ma",
+    )
+    _default_hint(_dr.get("trend_ma_period"), PARAM_DESCRIPTIONS.get("regime.trend_ma_period"))
+
+    regime["adx_strong_trend"] = st.slider(
+        "ADX strong trend", 15.0, 50.0,
+        value=float(regime.get("adx_strong_trend", 30.0)),
+        step=1.0, key="reg_adx_strong",
+    )
+    _default_hint(_dr.get("adx_strong_trend"), PARAM_DESCRIPTIONS.get("regime.adx_strong_trend"))
+
+    regime["adx_weak"] = st.slider(
+        "ADX weak", 5.0, 35.0,
+        value=float(regime.get("adx_weak", 20.0)),
+        step=1.0, key="reg_adx_weak",
+    )
+    _default_hint(_dr.get("adx_weak"), PARAM_DESCRIPTIONS.get("regime.adx_weak"))
+
+    regime["trend_consistency_high"] = st.slider(
+        "Trend consistency high %", 50.0, 95.0,
+        value=float(regime.get("trend_consistency_high", 70.0)),
+        step=1.0, key="reg_tc_high",
+    )
+    _default_hint(_dr.get("trend_consistency_high"), PARAM_DESCRIPTIONS.get("regime.trend_consistency_high"))
+
+    regime["trend_consistency_low"] = st.slider(
+        "Trend consistency low %", 20.0, 60.0,
+        value=float(regime.get("trend_consistency_low", 40.0)),
+        step=1.0, key="reg_tc_low",
+    )
+    _default_hint(_dr.get("trend_consistency_low"), PARAM_DESCRIPTIONS.get("regime.trend_consistency_low"))
+
+    regime["atr_pct_high"] = st.slider(
+        "ATR% high", 0.01, 0.10,
+        value=float(regime.get("atr_pct_high", 0.03)),
+        step=0.005, key="reg_atr_high", format="%.3f",
+    )
+    _default_hint(_dr.get("atr_pct_high"), PARAM_DESCRIPTIONS.get("regime.atr_pct_high"))
+
+    regime["atr_pct_low"] = st.slider(
+        "ATR% low", 0.001, 0.05,
+        value=float(regime.get("atr_pct_low", 0.01)),
+        step=0.001, key="reg_atr_low", format="%.3f",
+    )
+    _default_hint(_dr.get("atr_pct_low"), PARAM_DESCRIPTIONS.get("regime.atr_pct_low"))
+
+    regime["atr_period"] = st.number_input(
+        "ATR period", min_value=5, max_value=50,
+        value=int(regime.get("atr_period", 14)),
+        step=1, key="reg_atr_period",
+    )
+    _default_hint(_dr.get("atr_period"), PARAM_DESCRIPTIONS.get("regime.atr_period"))
+
+    regime["bb_period"] = st.number_input(
+        "BB period", min_value=5, max_value=50,
+        value=int(regime.get("bb_period", 20)),
+        step=5, key="reg_bb_period",
+    )
+    _default_hint(_dr.get("bb_period"), PARAM_DESCRIPTIONS.get("regime.bb_period"))
+
+    regime["bb_std_dev"] = st.slider(
+        "BB std dev", 1.0, 4.0,
+        value=float(regime.get("bb_std_dev", 2.0)),
+        step=0.25, key="reg_bb_std", format="%.2f",
+    )
+    _default_hint(_dr.get("bb_std_dev"), PARAM_DESCRIPTIONS.get("regime.bb_std_dev"))
+
+    regime["bb_squeeze_percentile"] = st.slider(
+        "BB squeeze percentile", 5.0, 40.0,
+        value=float(regime.get("bb_squeeze_percentile", 20.0)),
+        step=1.0, key="reg_bb_squeeze",
+    )
+    _default_hint(_dr.get("bb_squeeze_percentile"), PARAM_DESCRIPTIONS.get("regime.bb_squeeze_percentile"))
+
+    regime["bb_expansion_percentile"] = st.slider(
+        "BB expansion percentile", 60.0, 95.0,
+        value=float(regime.get("bb_expansion_percentile", 80.0)),
+        step=1.0, key="reg_bb_expand",
+    )
+    _default_hint(_dr.get("bb_expansion_percentile"), PARAM_DESCRIPTIONS.get("regime.bb_expansion_percentile"))
+
+    regime["direction_change_high"] = st.slider(
+        "Direction change high", 0.30, 0.80,
+        value=float(regime.get("direction_change_high", 0.55)),
+        step=0.05, key="reg_dir_high", format="%.2f",
+    )
+    _default_hint(_dr.get("direction_change_high"), PARAM_DESCRIPTIONS.get("regime.direction_change_high"))
+
+    regime["direction_change_period"] = st.number_input(
+        "Direction change period", min_value=5, max_value=50,
+        value=int(regime.get("direction_change_period", 20)),
+        step=5, key="reg_dir_period",
+    )
+    _default_hint(_dr.get("direction_change_period"), PARAM_DESCRIPTIONS.get("regime.direction_change_period"))
+
+    regime["price_ma_distance_extended"] = st.slider(
+        "Price-MA distance extended", 0.02, 0.30,
+        value=float(regime.get("price_ma_distance_extended", 0.10)),
+        step=0.01, key="reg_pma_ext", format="%.2f",
+    )
+    _default_hint(_dr.get("price_ma_distance_extended"), PARAM_DESCRIPTIONS.get("regime.price_ma_distance_extended"))
+
+    # -- Strategy adaptation per regime --
+    st.markdown("---")
+    st.markdown("**Strategy Adaptation**")
+
+    adapt = regime.setdefault("strategy_adaptation", {})
+    _da = _dr.get("strategy_adaptation", {})
+
+    # Strong Trend
+    st.markdown("_Strong Trend_")
+    st_adapt = adapt.setdefault("strong_trend", {})
+    _dst = _da.get("strong_trend", {})
+
+    st_adapt["use_trailing_stop"] = st.checkbox(
+        "Use trailing stop", value=st_adapt.get("use_trailing_stop", True),
+        key="reg_st_trail",
+    )
+    _default_hint(_dst.get("use_trailing_stop"), PARAM_DESCRIPTIONS.get("regime.strong_trend.use_trailing_stop"))
+
+    st_adapt["trailing_stop_atr_mult"] = st.slider(
+        "Trailing stop ATR mult", 1.0, 6.0,
+        value=float(st_adapt.get("trailing_stop_atr_mult", 3.0)),
+        step=0.5, key="reg_st_trail_mult", format="%.1f",
+    )
+    _default_hint(_dst.get("trailing_stop_atr_mult"), PARAM_DESCRIPTIONS.get("regime.strong_trend.trailing_stop_atr_mult"))
+
+    st_adapt["ignore_score_entries"] = st.checkbox(
+        "Ignore score entries", value=st_adapt.get("ignore_score_entries", True),
+        key="reg_st_ignore_score",
+    )
+    _default_hint(_dst.get("ignore_score_entries"), PARAM_DESCRIPTIONS.get("regime.strong_trend.ignore_score_entries"))
+
+    st_adapt["hold_with_trend"] = st.checkbox(
+        "Hold with trend", value=st_adapt.get("hold_with_trend", True),
+        key="reg_st_hold",
+    )
+    _default_hint(_dst.get("hold_with_trend"), PARAM_DESCRIPTIONS.get("regime.strong_trend.hold_with_trend"))
+
+    # Mean Reverting
+    st.markdown("_Mean Reverting_")
+    mr_adapt = adapt.setdefault("mean_reverting", {})
+    _dmr = _da.get("mean_reverting", {})
+
+    mr_adapt["tighten_thresholds"] = st.checkbox(
+        "Tighten thresholds", value=mr_adapt.get("tighten_thresholds", True),
+        key="reg_mr_tighten",
+    )
+    _default_hint(_dmr.get("tighten_thresholds"), PARAM_DESCRIPTIONS.get("regime.mean_reverting.tighten_thresholds"))
+
+    mr_adapt["threshold_adjustment"] = st.slider(
+        "Threshold adjustment", 0.1, 1.0,
+        value=float(mr_adapt.get("threshold_adjustment", 0.3)),
+        step=0.05, key="reg_mr_adj", format="%.2f",
+    )
+    _default_hint(_dmr.get("threshold_adjustment"), PARAM_DESCRIPTIONS.get("regime.mean_reverting.threshold_adjustment"))
+
+    # Volatile / Choppy
+    st.markdown("_Volatile / Choppy_")
+    vc_adapt = adapt.setdefault("volatile_choppy", {})
+    _dvc = _da.get("volatile_choppy", {})
+
+    vc_adapt["reduce_position_size"] = st.checkbox(
+        "Reduce position size", value=vc_adapt.get("reduce_position_size", True),
+        key="reg_vc_reduce",
+    )
+    _default_hint(_dvc.get("reduce_position_size"), PARAM_DESCRIPTIONS.get("regime.volatile_choppy.reduce_position_size"))
+
+    vc_adapt["position_size_mult"] = st.slider(
+        "Position size multiplier", 0.1, 1.0,
+        value=float(vc_adapt.get("position_size_mult", 0.5)),
+        step=0.05, key="reg_vc_size", format="%.2f",
+    )
+    _default_hint(_dvc.get("position_size_mult"), PARAM_DESCRIPTIONS.get("regime.volatile_choppy.position_size_mult"))
+
+    vc_adapt["widen_stops"] = st.checkbox(
+        "Widen stops", value=vc_adapt.get("widen_stops", True),
+        key="reg_vc_widen",
+    )
+    _default_hint(_dvc.get("widen_stops"), PARAM_DESCRIPTIONS.get("regime.volatile_choppy.widen_stops"))
+
+    vc_adapt["stop_loss_mult"] = st.slider(
+        "Stop loss multiplier", 1.0, 3.0,
+        value=float(vc_adapt.get("stop_loss_mult", 1.5)),
+        step=0.1, key="reg_vc_stop", format="%.1f",
+    )
+    _default_hint(_dvc.get("stop_loss_mult"), PARAM_DESCRIPTIONS.get("regime.volatile_choppy.stop_loss_mult"))
+
+    # Breakout / Transition
+    st.markdown("_Breakout / Transition_")
+    bo_adapt = adapt.setdefault("breakout_transition", {})
+    _dbo = _da.get("breakout_transition", {})
+
+    bo_adapt["use_momentum_entry"] = st.checkbox(
+        "Use momentum entry", value=bo_adapt.get("use_momentum_entry", True),
+        key="reg_bo_momentum",
+    )
+    _default_hint(_dbo.get("use_momentum_entry"), PARAM_DESCRIPTIONS.get("regime.breakout_transition.use_momentum_entry"))
+
+    bo_adapt["breakout_atr_mult"] = st.slider(
+        "Breakout ATR mult", 0.5, 3.0,
+        value=float(bo_adapt.get("breakout_atr_mult", 1.5)),
+        step=0.25, key="reg_bo_atr", format="%.2f",
+    )
+    _default_hint(_dbo.get("breakout_atr_mult"), PARAM_DESCRIPTIONS.get("regime.breakout_transition.breakout_atr_mult"))
+
+    bo_adapt["require_volume_surge"] = st.checkbox(
+        "Require volume surge", value=bo_adapt.get("require_volume_surge", True),
+        key="reg_bo_vol",
+    )
+    _default_hint(_dbo.get("require_volume_surge"), PARAM_DESCRIPTIONS.get("regime.breakout_transition.require_volume_surge"))
+
+    bo_adapt["volume_surge_mult"] = st.slider(
+        "Volume surge multiplier", 1.0, 3.0,
+        value=float(bo_adapt.get("volume_surge_mult", 1.3)),
+        step=0.1, key="reg_bo_vol_mult", format="%.1f",
+    )
+    _default_hint(_dbo.get("volume_surge_mult"), PARAM_DESCRIPTIONS.get("regime.breakout_transition.volume_surge_mult"))
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -876,6 +1138,9 @@ def render_sidebar() -> dict:
 
     with st.sidebar.expander("Backtest"):
         _edit_backtest_params(data)
+
+    with st.sidebar.expander("Regime Classification"):
+        _edit_regime_params(data)
 
     # Write back to session state (widgets already mutated `data` in-place)
     st.session_state["config_data"] = data
@@ -999,9 +1264,11 @@ def load_backtest(
             "reasons": assessment.reasons,
         }
 
+    regime_adapt = cfg.section("regime").get("strategy_adaptation", {})
     strategy = ScoreBasedStrategy(
         params=cfg.section("strategy"),
         trading_mode=trading_mode,
+        regime_adaptation=regime_adapt,
     )
     engine = BacktestEngine(
         data_provider=provider,
@@ -1530,6 +1797,62 @@ def render_suitability(assessment_dict: dict, ticker: str) -> None:
             st.success(reason)
 
 
+def render_regime(regime: RegimeAssessment | None) -> None:
+    """Render market regime classification as a colored info box with metrics."""
+    if regime is None:
+        return
+
+    # Color and icon based on regime type
+    regime_styles = {
+        RegimeType.STRONG_TREND: ("#2ecc71", "trending_up"),        # green
+        RegimeType.MEAN_REVERTING: ("#3498db", "swap_horiz"),       # blue
+        RegimeType.VOLATILE_CHOPPY: ("#e74c3c", "warning"),         # red
+        RegimeType.BREAKOUT_TRANSITION: ("#f39c12", "bolt"),        # orange
+    }
+    color, icon = regime_styles.get(regime.regime, ("#95a5a6", "help"))
+    confidence_pct = regime.confidence * 100
+
+    # Header with colored badge
+    st.markdown(
+        f'<div style="background:{color}22; border-left:4px solid {color}; '
+        f'padding:12px 16px; border-radius:4px; margin-bottom:8px;">'
+        f'<span style="font-size:1.2em; font-weight:bold; color:{color};">'
+        f'{regime.label}</span>'
+        f'<span style="margin-left:12px; color:#888;">Confidence: {confidence_pct:.0f}%</span>'
+        f'<br><span style="color:#aaa; font-size:0.9em;">{regime.description}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Metrics row
+    m = regime.metrics
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+    mc1.metric("ADX", f"{m.adx:.1f}")
+    mc2.metric("Trend MA %", f"{m.pct_above_ma:.0f}%")
+    mc3.metric("ATR%", f"{m.atr_pct:.3f}")
+    mc4.metric("BB Width Pctl", f"{m.bb_width_percentile:.0f}%")
+    mc5.metric("Dir Changes", f"{m.direction_changes:.0%}")
+
+    # Reasons
+    if regime.reasons:
+        with st.expander("Classification Reasoning", expanded=False):
+            for reason in regime.reasons:
+                st.markdown(f"- {reason}")
+
+            # Regime scores comparison
+            if regime.regime_scores:
+                st.markdown("**Regime Scores:**")
+                score_parts = []
+                for label, score in sorted(
+                    regime.regime_scores.items(), key=lambda x: -x[1]
+                ):
+                    name = label.replace("_", " ").title()
+                    marker = " **" if label == regime.regime.value else ""
+                    end_marker = "**" if label == regime.regime.value else ""
+                    score_parts.append(f"- {marker}{name}{end_marker}: {score:.2f}")
+                st.markdown("\n".join(score_parts))
+
+
 def render_backtest_metrics(bt_result: BacktestResult) -> None:
     """Render backtest performance metrics as metric cards."""
     c1, c2, c3, c4 = st.columns(4)
@@ -1760,6 +2083,11 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    # ── Market Regime ─────────────────────────────────────────────────────
+    if result.regime is not None:
+        st.subheader("Market Regime")
+        render_regime(result.regime)
+
     # ── Score Distribution ────────────────────────────────────────────────
     if score_df is not None and not score_df.empty:
         st.subheader("Score Distribution")
@@ -1798,6 +2126,11 @@ def main() -> None:
         if assessment_dict is not None:
             st.subheader("Suitability Assessment")
             render_suitability(assessment_dict, params["ticker"])
+
+        # Market regime (from backtest)
+        if bt_result.regime is not None:
+            st.subheader("Market Regime")
+            render_regime(bt_result.regime)
 
         # Trading mode badge
         mode_label = trading_mode_val.replace("_", " ").upper()
