@@ -164,7 +164,7 @@ def score_color(score: float) -> str:
     """Return hex color for a 0-10 score."""
     if score <= 3.5:
         return COLOR_BEARISH
-    if score <= 6.5:
+    if score <= 6.0:
         return COLOR_NEUTRAL
     return COLOR_BULLISH
 
@@ -2627,9 +2627,9 @@ def main() -> None:
         f'Score legend: '
         f'<span style="color:{COLOR_BEARISH};font-weight:600;">0 – 3.5 Bearish</span>'
         f'&nbsp;&nbsp;'
-        f'<span style="color:{COLOR_NEUTRAL};font-weight:600;">3.5 – 6.5 Neutral</span>'
+        f'<span style="color:{COLOR_NEUTRAL};font-weight:600;">3.5 – 6.0 Neutral</span>'
         f'&nbsp;&nbsp;'
-        f'<span style="color:{COLOR_BULLISH};font-weight:600;">6.5 – 10 Bullish</span>'
+        f'<span style="color:{COLOR_BULLISH};font-weight:600;">6.0 – 10 Bullish</span>'
         f'</div>',
         unsafe_allow_html=True,
     )

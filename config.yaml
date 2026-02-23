@@ -220,7 +220,7 @@ display:
   price_decimal_places: 2
   color_thresholds:
     bearish_max: 3.5    # score <= this → red
-    neutral_max: 6.5    # score <= this → yellow, above → green
+    neutral_max: 6.0    # score <= this → yellow, above → green (matches hold_below)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategy & Backtesting Configuration
@@ -241,7 +241,7 @@ strategy:
 
   score_thresholds:
     short_below: 3.5      # composite score <= this → SHORT
-    hold_below: 6.5       # composite score <= this → HOLD
+    hold_below: 6.0       # composite score <= this → HOLD (optimized from 6.5)
     # composite score > hold_below → LONG
 
   # Percentile mode settings (only used when threshold_mode = "percentile")
@@ -257,13 +257,13 @@ strategy:
 
   # Risk management
   stop_loss_pct: 0.05       # exit if position loses this fraction (0.05 = 5%)
-  take_profit_pct: 0.50     # exit if position gains this fraction (0.50 = 50%)
+  take_profit_pct: 0.30     # exit if position gains this fraction (0.30 = 30%) — optimized from 0.50
                              # disabled in strong_trend regime (trailing stop manages exit)
 
   # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop.
   # The fixed stop_loss_pct is the minimum safety net; ATR can only make it wider.
   atr_stop_enabled: true    # set false to use only the fixed stop_loss_pct
-  atr_stop_multiplier: 3.0  # N in "N × ATR" — higher = wider stop
+  atr_stop_multiplier: 4.0  # N in "N × ATR" — higher = wider stop (optimized from 3.0)
   atr_stop_period: 14       # ATR calculation lookback period
 
   # Trend confirmation filter — before entering a new position, check that

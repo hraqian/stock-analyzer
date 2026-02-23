@@ -131,13 +131,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_disclaimer": True,
         "score_decimal_places": 1,
         "price_decimal_places": 2,
-        "color_thresholds": {"bearish_max": 3.5, "neutral_max": 6.5},
+        "color_thresholds": {"bearish_max": 3.5, "neutral_max": 6.0},
     },
     "strategy": {
         "threshold_mode": "fixed",
         "score_thresholds": {
             "short_below": 3.5,
-            "hold_below": 6.5,
+            "hold_below": 6.0,
         },
         "percentile_thresholds": {
             "short_percentile": 25,
@@ -148,12 +148,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fixed_quantity": 100,
         "percent_equity": 0.80,
         "stop_loss_pct": 0.05,
-        "take_profit_pct": 0.50,
+        "take_profit_pct": 0.30,
         "rebalance_interval": 5,
         "flatten_eod": False,  # force-close all positions at end of each trading day
         # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop
         "atr_stop_enabled": True,       # use ATR-based stop instead of fixed %
-        "atr_stop_multiplier": 3.0,     # stop = N × ATR at entry time
+        "atr_stop_multiplier": 4.0,     # stop = N × ATR at entry time
         "atr_stop_period": 14,          # ATR calculation period
         # Trend confirmation filter
         "trend_confirm_enabled": True,   # require price above/below trend MA for entry
@@ -824,7 +824,7 @@ class Config:
         strat = self._data.get("strategy", {})
         st = strat.get("score_thresholds", {})
         short_below = st.get("short_below", 3.5)
-        hold_below = st.get("hold_below", 6.5)
+        hold_below = st.get("hold_below", 6.0)
         if short_below >= hold_below:
             errors.append(
                 "strategy.score_thresholds.short_below must be less than hold_below"
