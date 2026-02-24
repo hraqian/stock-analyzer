@@ -382,19 +382,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
+                # Sub-type overrides (merged on top of base strong_trend params).
+                # Currently empty — sub-types are used for classification/display.
+                # Tested entry-only overrides (min_distance, min_score) but they
+                # were either no-ops or caused regressions (MARA: +10.9pp worse).
+                # The base strong_trend params (trailing_stop_atr_mult=8.0, etc.)
+                # already handle all sub-types well.  Override slots remain for
+                # future tuning via optimize.py grid search.
                 "sub_types": {
-                    "explosive_mover": {
-                        "min_distance": 0.015,             # require stronger trend confirmation
-                    },
-                    "steady_compounder": {
-                        "min_distance": 0.005,             # enter sooner — low-vol grinders
-                    },
-                    "volatile_directionless": {
-                        "min_score": 4.5,                  # higher score floor
-                    },
-                    "stagnant": {
-                        # Low vol + low momentum — hold_only territory
-                    },
+                    "explosive_mover": {},
+                    "steady_compounder": {},
+                    "volatile_directionless": {},
+                    "stagnant": {},
                 },
             },
             "mean_reverting": {
