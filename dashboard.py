@@ -46,7 +46,8 @@ from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
-from engine.regime import RegimeAssessment, RegimeType, REGIME_LABELS
+from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LABELS
+from engine.strategy import StrategyContext
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 
@@ -1633,14 +1634,15 @@ def render_sidebar() -> dict:
 
     ticker = st.sidebar.text_input("Ticker", value="AAPL").upper().strip()
 
-    st.sidebar.markdown("#### Classification Period")
+    st.sidebar.markdown("#### Analysis Period")
     period_idx = CLASSIFICATION_PERIODS.index(DEFAULT_CLASSIFICATION_PERIOD)
     period = st.sidebar.selectbox(
         "Period",
         CLASSIFICATION_PERIODS,
         index=period_idx,
-        help="Data window for regime classification. 2y is the tuned default.",
+        help="Data window for regime classification and quick backtest. 2y is the tuned default.",
     )
+    st.sidebar.caption("Used for regime classification and quick backtest.")
 
     # ------------------------------------------------------------------
     # Loadout save / load
@@ -2584,99 +2586,198 @@ def compute_recommendation(
     bt_result: BacktestResult | None,
     cfg: Config,
 ) -> dict:
-    """Compute a buy/hold/sell recommendation from latest scores and backtest state.
+    """Compute a BUY/HOLD/SELL recommendation using the strategy's own decision logic.
+
+    Creates a fresh ``ScoreBasedStrategy`` with no accumulated state and calls
+    ``on_bar()`` with a ``StrategyContext`` built from the analysis result's
+    last bar.  Position is set to 0 (flat) so the answer is "if you had money
+    to deploy right now, what would the strategy say?"
+
+    The strategy's full decision pipeline applies: score thresholds, trend
+    confirmation, regime adaptation, global directional bias, breakout gates,
+    and trading mode constraints.
 
     Returns a dict with:
         signal: "BUY" | "HOLD" | "SELL"
-        score_signal: "BUY" | "HOLD" | "SELL"  (from current indicator scores)
-        position_signal: str  (from last backtest position state)
         confidence: "high" | "medium" | "low"
         reasons: list[str]
+        score: float   (effective blended score for display)
     """
     strat_cfg = cfg.section("strategy")
+    regime_adapt = cfg.section("regime").get("strategy_adaptation", {})
+
+    # ── Determine trading mode from backtest (or default to long_short) ──
+    trading_mode = TradingMode.LONG_SHORT
+    if bt_result is not None and hasattr(bt_result, "regime"):
+        # The backtest was run with a specific trading mode; we could
+        # recover it from the engine, but we don't store it on the result.
+        # Use auto mode (long_short) for a fresh-entry recommendation.
+        pass
+
+    # ── Create a fresh strategy instance (no accumulated state) ──────────
+    strategy = ScoreBasedStrategy(
+        params=strat_cfg,
+        trading_mode=trading_mode,
+        regime_adaptation=regime_adapt,
+    )
+    strategy.on_start({"ticker": result.ticker, "recommendation": True})
+
+    # ── Build StrategyContext from the analysis result's last bar ─────────
+    df = result.df
+    if df is None or df.empty:
+        return {
+            "signal": "HOLD",
+            "confidence": "low",
+            "reasons": ["No data available for recommendation."],
+            "score": 5.0,
+        }
+
+    last_row = df.iloc[-1]
+    bar_dict = {
+        "open": float(last_row["open"]),
+        "high": float(last_row["high"]),
+        "low": float(last_row["low"]),
+        "close": float(last_row["close"]),
+        "volume": float(last_row["volume"]),
+    }
+
+    # Overall scores from analysis
+    overall_score = result.composite.get("overall", 5.0)
+    pattern_score = result.pattern_composite.get("overall", 5.0)
+
+    # Per-indicator scores (needed for StrategyContext.scores)
+    per_scores: dict[str, float] = {}
+    if result.indicator_results:
+        for ir in result.indicator_results:
+            if not ir.error:
+                per_scores[ir.config_key] = ir.score
+
+    # Compute trend MA for the last bar (same logic as backtest engine)
+    trend_confirm_period = int(strat_cfg.get("trend_confirm_period", 20))
+    trend_confirm_ma_type = str(strat_cfg.get("trend_confirm_ma_type", "ema"))
+    if trend_confirm_ma_type.lower() == "sma":
+        trend_ma_series = df["close"].rolling(
+            window=trend_confirm_period, min_periods=1
+        ).mean()
+    else:
+        trend_ma_series = df["close"].ewm(
+            span=trend_confirm_period, adjust=False
+        ).mean()
+    current_trend_ma = float(trend_ma_series.iloc[-1])
+
+    # Regime information from the analysis result
+    regime: RegimeType | None = None
+    regime_sub_type: RegimeSubType | None = None
+    regime_trend: str = "neutral"
+    regime_total_return: float = 0.0
+
+    regime_source = result.regime
+    if bt_result is not None and bt_result.regime is not None:
+        regime_source = bt_result.regime
+
+    if regime_source is not None:
+        regime = regime_source.regime
+        regime_sub_type = regime_source.sub_type
+        regime_trend = regime_source.metrics.trend_direction
+        regime_total_return = regime_source.metrics.total_return
+
+    ctx = StrategyContext(
+        bar=bar_dict,
+        indicators={},
+        scores=per_scores,
+        overall_score=overall_score,
+        pattern_score=pattern_score,
+        position=0.0,           # flat — "fresh entry" question
+        cash=100_000.0,
+        portfolio_value=100_000.0,
+        trend_ma=current_trend_ma,
+        regime=regime,
+        regime_sub_type=regime_sub_type,
+        regime_trend=regime_trend,
+        regime_total_return=regime_total_return,
+    )
+
+    # ── Call the strategy ────────────────────────────────────────────────
+    order = strategy.on_bar(ctx)
+    signal = order.signal.value  # "BUY", "SELL", or "HOLD"
+
+    # ── Derive confidence from score distance to thresholds ──────────────
     thresholds = strat_cfg.get("score_thresholds", {})
-    short_below = float(thresholds.get("short_below", 4.5))
-    hold_below = float(thresholds.get("hold_below", 5.5))
+    short_below = float(thresholds.get("short_below", 3.5))
+    hold_below = float(thresholds.get("hold_below", 6.5))
 
-    overall = result.composite["overall"]
+    # Compute the effective blended score (same as strategy internals)
+    combination_mode = str(strat_cfg.get("combination_mode", "weighted"))
+    ind_weight = float(strat_cfg.get("indicator_weight", 0.7))
+    pat_weight = float(strat_cfg.get("pattern_weight", 0.3))
 
-    # ── Score-based signal ────────────────────────────────────────────────
-    if overall > hold_below:
-        score_signal = "BUY"
-    elif overall <= short_below:
-        score_signal = "SELL"
-    else:
-        score_signal = "HOLD"
-
-    reasons = [f"Current indicator composite: {overall:.1f}/10"]
-
-    # ── Backtest position signal ──────────────────────────────────────────
-    position_signal = "No backtest"
-    if bt_result is not None and bt_result.trades:
-        last_trade = bt_result.trades[-1]
-        if last_trade.exit_date is None:
-            # Still in position
-            if last_trade.side.lower() == "long":
-                position_signal = "In long position"
-            else:
-                position_signal = "In short position"
+    if combination_mode == "boost":
+        boost_strength = float(strat_cfg.get("boost_strength", 0.5))
+        boost_dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
+        pat_dev = pattern_score - 5.0
+        if abs(pat_dev) <= boost_dead_zone:
+            effective_score = overall_score
         else:
-            # Last trade closed
-            if last_trade.pnl_pct > 0:
-                position_signal = f"Last trade: +{last_trade.pnl_pct:.1f}% ({last_trade.side})"
-            else:
-                position_signal = f"Last trade: {last_trade.pnl_pct:.1f}% ({last_trade.side})"
-
-        reasons.append(position_signal)
-
-    # ── Combined signal ───────────────────────────────────────────────────
-    # Score signal is the primary driver; backtest state adds context
-    signal = score_signal
-    confidence = "medium"
-
-    if bt_result is not None and bt_result.trades:
-        last_trade = bt_result.trades[-1]
-        in_position = last_trade.exit_date is None
-
-        if score_signal == "BUY" and in_position and last_trade.side.lower() == "long":
-            confidence = "high"
-            reasons.append("Score and position agree: bullish")
-        elif score_signal == "SELL" and in_position and last_trade.side.lower() == "short":
-            confidence = "high"
-            reasons.append("Score and position agree: bearish")
-        elif score_signal == "BUY" and not in_position:
-            confidence = "medium"
-            reasons.append("Score is bullish but no open position")
-        elif score_signal == "SELL" and not in_position:
-            confidence = "medium"
-            reasons.append("Score is bearish but no open position")
-        elif score_signal == "HOLD":
-            confidence = "low"
-            reasons.append("Score is neutral")
+            eff_dev = pat_dev - (boost_dead_zone if pat_dev > 0 else -boost_dead_zone)
+            effective_score = max(0.0, min(10.0, overall_score + eff_dev * boost_strength))
+    elif combination_mode == "gate":
+        effective_score = overall_score  # gate mode doesn't blend
     else:
-        # No backtest — score only
-        if score_signal == "HOLD":
-            confidence = "low"
+        w_total = ind_weight + pat_weight
+        if w_total > 0:
+            effective_score = (ind_weight * overall_score + pat_weight * pattern_score) / w_total
         else:
-            confidence = "medium"
+            effective_score = overall_score
+
+    # Confidence: how far the effective score is from the nearest threshold
+    if signal == "BUY":
+        distance = effective_score - hold_below
+        confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+    elif signal == "SELL":
+        distance = short_below - effective_score
+        confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+    else:
+        # HOLD — confidence reflects how firmly neutral
+        dist_to_buy = hold_below - effective_score
+        dist_to_sell = effective_score - short_below
+        min_dist = min(dist_to_buy, dist_to_sell)
+        confidence = "high" if min_dist >= 1.0 else ("medium" if min_dist >= 0.3 else "low")
+
+    # ── Build reasons list ───────────────────────────────────────────────
+    reasons: list[str] = []
+    reasons.append(f"Effective score: {effective_score:.1f}/10 (indicator: {overall_score:.1f}, pattern: {pattern_score:.1f})")
+    reasons.append(f"Thresholds: BUY > {hold_below}, SELL <= {short_below}")
+
+    if regime is not None:
+        regime_label = REGIME_LABELS.get(regime, regime.value)
+        reasons.append(f"Regime: {regime_label}")
+        if regime_total_return != 0:
+            reasons.append(f"Regime total return: {regime_total_return:+.1%}")
+
+    close = bar_dict["close"]
+    if current_trend_ma > 0:
+        ma_dist = (close - current_trend_ma) / current_trend_ma
+        side = "above" if ma_dist >= 0 else "below"
+        reasons.append(f"Price {side} trend MA by {abs(ma_dist):.1%}")
+
+    # Strategy notes often contain useful detail about why
+    if order.notes:
+        reasons.append(f"Strategy: {order.notes}")
 
     return {
         "signal": signal,
-        "score_signal": score_signal,
-        "position_signal": position_signal,
         "confidence": confidence,
         "reasons": reasons,
-        "score": overall,
+        "score": effective_score,
     }
 
 
 def render_recommendation(rec: dict) -> None:
-    """Render the recommendation panel."""
+    """Render the recommendation panel — single BUY/HOLD/SELL signal."""
     signal = rec["signal"]
     confidence = rec["confidence"]
 
     color_map = {"BUY": "#2ecc71", "SELL": "#e74c3c", "HOLD": "#f39c12"}
-    icon_map = {"BUY": "arrow_upward", "SELL": "arrow_downward", "HOLD": "pause"}
     conf_badge = {"high": ("#2ecc71", "High"), "medium": ("#f39c12", "Medium"), "low": ("#e74c3c", "Low")}
 
     color = color_map.get(signal, "#95a5a6")
@@ -2691,7 +2792,7 @@ def render_recommendation(rec: dict) -> None:
         f'border-radius:12px; font-size:0.9em;">{conf_label} confidence</span>'
         f'</div>'
         f'<div style="margin-top:8px; color:#aaa; font-size:0.9em;">'
-        f'Score: {rec["score"]:.1f}/10 | {rec["position_signal"]}'
+        f'Effective score: {rec["score"]:.1f}/10'
         f'</div>'
         f'</div>',
         unsafe_allow_html=True,
@@ -2702,8 +2803,9 @@ def render_recommendation(rec: dict) -> None:
         for reason in rec["reasons"]:
             st.markdown(f"- {reason}")
         st.caption(
-            "This recommendation is based on the current indicator composite score "
-            "and the most recent backtest position state. It is not financial advice."
+            "This recommendation is based on the strategy's full decision logic "
+            "(score thresholds, trend confirmation, regime adaptation, directional bias) "
+            "applied to the latest bar with a flat position. It is not financial advice."
         )
 
 

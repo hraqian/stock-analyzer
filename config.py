@@ -376,19 +376,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strategy_adaptation": {
             "strong_trend": {
                 "use_trailing_stop": True,       # trail stop instead of score-based exits
-                "trailing_stop_atr_mult": 8.0,   # trailing stop = N × ATR
+                "trailing_stop_atr_mult": 6.0,   # trailing stop = N × ATR (optimized from 8.0)
                 "ignore_score_entries": True,     # don't use score thresholds for entry
                 "hold_with_trend": True,          # stay in position while trend persists
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
-                # Sub-type overrides (merged on top of base strong_trend params).
-                # Currently empty — sub-types are used for classification/display.
-                # Tested entry-only overrides (min_distance, min_score) but they
-                # were either no-ops or caused regressions (MARA: +10.9pp worse).
-                # The base strong_trend params (trailing_stop_atr_mult=8.0, etc.)
-                # already handle all sub-types well.  Override slots remain for
-                # future tuning via optimize.py grid search.
+                # Sub-type overrides — currently empty.  Sub-types are re-classified
+                # every rebalance_interval bars using trailing data, so they shift
+                # mid-trade (e.g. QQQ oscillates steady_compounder/stagnant).
+                # This makes sub-type-specific overrides unreliable; global
+                # strong_trend params are the correct lever instead.
                 "sub_types": {
                     "explosive_mover": {},
                     "steady_compounder": {},
