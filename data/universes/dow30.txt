@@ -1,0 +1,33 @@
+# Dow Jones Industrial Average — 30 components
+# Last updated: 2026-02-24
+# Source: https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average
+AAPL
+AMGN
+AMZN
+AXP
+BA
+CAT
+CRM
+CSCO
+CVX
+DIS
+GS
+HD
+HON
+IBM
+JNJ
+JPM
+KO
+MCD
+MMM
+MRK
+MSFT
+NKE
+NVDA
+PG
+SHW
+TRV
+UNH
+V
+VZ
+WMT
