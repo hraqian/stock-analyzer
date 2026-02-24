@@ -1612,8 +1612,20 @@ def _edit_suitability_params(data: dict) -> None:
 # Sidebar
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Constants — classification periods
+# ---------------------------------------------------------------------------
+
+CLASSIFICATION_PERIODS = ["1y", "2y", "5y", "max"]
+DEFAULT_CLASSIFICATION_PERIOD = "2y"
+
+
+# ---------------------------------------------------------------------------
+# Sidebar (minimal — just ticker + classification period + loadouts)
+# ---------------------------------------------------------------------------
+
 def render_sidebar() -> dict:
-    """Render sidebar controls and return user selections."""
+    """Render the simplified sidebar: ticker, classification period, loadouts."""
     _init_config_data()
 
     st.sidebar.title("Stock Analyzer")
@@ -1621,89 +1633,14 @@ def render_sidebar() -> dict:
 
     ticker = st.sidebar.text_input("Ticker", value="AAPL").upper().strip()
 
-    st.sidebar.markdown("#### Data Range")
-    date_mode = st.sidebar.radio(
-        "Range mode",
-        ["Period", "Custom dates"],
-        horizontal=True,
+    st.sidebar.markdown("#### Classification Period")
+    period_idx = CLASSIFICATION_PERIODS.index(DEFAULT_CLASSIFICATION_PERIOD)
+    period = st.sidebar.selectbox(
+        "Period",
+        CLASSIFICATION_PERIODS,
+        index=period_idx,
+        help="Data window for regime classification. 2y is the tuned default.",
     )
-
-    period = None
-    start_date = None
-    end_date = None
-
-    if date_mode == "Period":
-        period = st.sidebar.selectbox("Period", VALID_PERIODS, index=2)
-    else:
-        today = datetime.date.today()
-        default_start = today - datetime.timedelta(days=365 * 2)
-        start_date = st.sidebar.date_input("Start date", value=default_start)
-        end_date = st.sidebar.date_input("End date", value=today)
-        start_date = start_date.strftime("%Y-%m-%d")
-        end_date = end_date.strftime("%Y-%m-%d")
-
-    interval = st.sidebar.selectbox("Interval", ALL_INTERVALS, index=ALL_INTERVALS.index("1d"))
-
-    st.sidebar.markdown("---")
-
-    # Objective preset
-    cfg_temp = Config.load()
-    objectives = ["(none)"] + cfg_temp.available_objectives()
-    objective = st.sidebar.selectbox("Objective preset", objectives, index=0)
-    if objective == "(none)":
-        objective = None
-
-    # When objective changes, re-apply from scratch
-    prev_obj = st.session_state.get("_prev_objective")
-    if objective != prev_obj:
-        _apply_objective_to_session(objective)
-        st.session_state["_prev_objective"] = objective
-
-    st.sidebar.markdown("---")
-
-    # Backtest toggle
-    run_backtest = st.sidebar.checkbox("Run backtest", value=False)
-    trading_mode = "auto"
-    if run_backtest:
-        trading_mode = st.sidebar.selectbox("Trading mode", TRADING_MODES, index=0)
-
-    # ------------------------------------------------------------------
-    # Parameter editors (Phase 2)
-    # ------------------------------------------------------------------
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("#### Parameter Tuning")
-
-    data = st.session_state["config_data"]
-
-    with st.sidebar.expander("Indicator Weights"):
-        _edit_indicator_weights(data)
-
-    with st.sidebar.expander("Indicator Parameters"):
-        _edit_indicator_params(data)
-
-    with st.sidebar.expander("Pattern Weights"):
-        _edit_pattern_weights(data)
-
-    with st.sidebar.expander("Pattern-Indicator Combination"):
-        _edit_pattern_indicator_combination(data)
-
-    with st.sidebar.expander("Scoring Thresholds"):
-        _edit_scoring_thresholds(data)
-
-    with st.sidebar.expander("Strategy"):
-        _edit_strategy_params(data)
-
-    with st.sidebar.expander("Backtest"):
-        _edit_backtest_params(data)
-
-    with st.sidebar.expander("Regime Classification"):
-        _edit_regime_params(data)
-
-    with st.sidebar.expander("Suitability Detection"):
-        _edit_suitability_params(data)
-
-    # Write back to session state (widgets already mutated `data` in-place)
-    st.session_state["config_data"] = data
 
     # ------------------------------------------------------------------
     # Loadout save / load
@@ -1733,18 +1670,7 @@ def render_sidebar() -> dict:
     return {
         "ticker": ticker,
         "period": period,
-        "start": start_date,
-        "end": end_date,
-        "interval": interval,
-        "objective": objective,
-        "run_backtest": run_backtest,
-        "trading_mode": trading_mode,
     }
-
-
-# ---------------------------------------------------------------------------
-# Data loading (cached)
-# ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner="Fetching market data...")
 def load_analysis(
@@ -2423,7 +2349,6 @@ def render_regime(regime: RegimeAssessment | None) -> None:
                     score_parts.append(f"- {marker}{name}{end_marker}: {score:.2f}")
                 st.markdown("\n".join(score_parts))
 
-
 def render_backtest_metrics(bt_result: BacktestResult) -> None:
     """Render backtest performance metrics as metric cards."""
     c1, c2, c3, c4 = st.columns(4)
@@ -2598,8 +2523,354 @@ def render_strategy_config(cfg: Config) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+
 # ---------------------------------------------------------------------------
-# Main
+# Stock overview (Step 1)
+# ---------------------------------------------------------------------------
+
+def render_stock_overview(
+    result: AnalysisResult, cfg: Config,
+) -> None:
+    """Render the stock overview: basic info, regime, sub-type, scores, price chart."""
+
+    # ── Header: name, price, scores ───────────────────────────────────────
+    info = result.info
+    price = info.get("current_price") or float(result.df["close"].iloc[-1])
+    name = info.get("name", result.ticker)
+    overall_ind = result.composite["overall"]
+    overall_pat = result.pattern_composite["overall"]
+
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    with col1:
+        st.markdown(f"### {name} ({result.ticker})")
+        meta_parts = []
+        if info.get("sector") and info["sector"] != "N/A":
+            meta_parts.append(info["sector"])
+        if info.get("exchange") and info["exchange"] != "N/A":
+            meta_parts.append(info["exchange"])
+        if meta_parts:
+            st.caption(" | ".join(meta_parts))
+    with col2:
+        st.metric("Price", f"${price:.2f}")
+    with col3:
+        st.metric("Indicator Score", f"{overall_ind:.1f} / 10")
+    with col4:
+        st.metric("Pattern Score", f"{overall_pat:.1f} / 10")
+
+    # ── Regime & Sub-Type (prominent display) ─────────────────────────────
+    if result.regime is not None:
+        render_regime(result.regime)
+
+    st.markdown("---")
+
+    # ── Price chart ───────────────────────────────────────────────────────
+    st.subheader("Price Chart")
+    price_fig = create_price_chart(result, score_df=None, cfg=cfg)
+    st.plotly_chart(price_fig, use_container_width=True)
+
+    # ── Indicator & Pattern breakdown (collapsed by default) ──────────────
+    with st.expander("Indicator Breakdown"):
+        render_indicator_table(result, cfg)
+    with st.expander("Pattern Signals"):
+        render_pattern_table(result, cfg)
+
+
+# ---------------------------------------------------------------------------
+# Recommendation engine
+# ---------------------------------------------------------------------------
+
+def compute_recommendation(
+    result: AnalysisResult,
+    bt_result: BacktestResult | None,
+    cfg: Config,
+) -> dict:
+    """Compute a buy/hold/sell recommendation from latest scores and backtest state.
+
+    Returns a dict with:
+        signal: "BUY" | "HOLD" | "SELL"
+        score_signal: "BUY" | "HOLD" | "SELL"  (from current indicator scores)
+        position_signal: str  (from last backtest position state)
+        confidence: "high" | "medium" | "low"
+        reasons: list[str]
+    """
+    strat_cfg = cfg.section("strategy")
+    thresholds = strat_cfg.get("score_thresholds", {})
+    short_below = float(thresholds.get("short_below", 4.5))
+    hold_below = float(thresholds.get("hold_below", 5.5))
+
+    overall = result.composite["overall"]
+
+    # ── Score-based signal ────────────────────────────────────────────────
+    if overall > hold_below:
+        score_signal = "BUY"
+    elif overall <= short_below:
+        score_signal = "SELL"
+    else:
+        score_signal = "HOLD"
+
+    reasons = [f"Current indicator composite: {overall:.1f}/10"]
+
+    # ── Backtest position signal ──────────────────────────────────────────
+    position_signal = "No backtest"
+    if bt_result is not None and bt_result.trades:
+        last_trade = bt_result.trades[-1]
+        if last_trade.exit_date is None:
+            # Still in position
+            if last_trade.side.lower() == "long":
+                position_signal = "In long position"
+            else:
+                position_signal = "In short position"
+        else:
+            # Last trade closed
+            if last_trade.pnl_pct > 0:
+                position_signal = f"Last trade: +{last_trade.pnl_pct:.1f}% ({last_trade.side})"
+            else:
+                position_signal = f"Last trade: {last_trade.pnl_pct:.1f}% ({last_trade.side})"
+
+        reasons.append(position_signal)
+
+    # ── Combined signal ───────────────────────────────────────────────────
+    # Score signal is the primary driver; backtest state adds context
+    signal = score_signal
+    confidence = "medium"
+
+    if bt_result is not None and bt_result.trades:
+        last_trade = bt_result.trades[-1]
+        in_position = last_trade.exit_date is None
+
+        if score_signal == "BUY" and in_position and last_trade.side.lower() == "long":
+            confidence = "high"
+            reasons.append("Score and position agree: bullish")
+        elif score_signal == "SELL" and in_position and last_trade.side.lower() == "short":
+            confidence = "high"
+            reasons.append("Score and position agree: bearish")
+        elif score_signal == "BUY" and not in_position:
+            confidence = "medium"
+            reasons.append("Score is bullish but no open position")
+        elif score_signal == "SELL" and not in_position:
+            confidence = "medium"
+            reasons.append("Score is bearish but no open position")
+        elif score_signal == "HOLD":
+            confidence = "low"
+            reasons.append("Score is neutral")
+    else:
+        # No backtest — score only
+        if score_signal == "HOLD":
+            confidence = "low"
+        else:
+            confidence = "medium"
+
+    return {
+        "signal": signal,
+        "score_signal": score_signal,
+        "position_signal": position_signal,
+        "confidence": confidence,
+        "reasons": reasons,
+        "score": overall,
+    }
+
+
+def render_recommendation(rec: dict) -> None:
+    """Render the recommendation panel."""
+    signal = rec["signal"]
+    confidence = rec["confidence"]
+
+    color_map = {"BUY": "#2ecc71", "SELL": "#e74c3c", "HOLD": "#f39c12"}
+    icon_map = {"BUY": "arrow_upward", "SELL": "arrow_downward", "HOLD": "pause"}
+    conf_badge = {"high": ("#2ecc71", "High"), "medium": ("#f39c12", "Medium"), "low": ("#e74c3c", "Low")}
+
+    color = color_map.get(signal, "#95a5a6")
+    conf_color, conf_label = conf_badge.get(confidence, ("#95a5a6", "?"))
+
+    st.markdown(
+        f'<div style="background:{color}22; border-left:4px solid {color}; '
+        f'padding:16px 20px; border-radius:4px; margin-bottom:12px;">'
+        f'<div style="display:flex; align-items:center; gap:12px;">'
+        f'<span style="font-size:2em; font-weight:bold; color:{color};">{signal}</span>'
+        f'<span style="background:{conf_color}33; color:{conf_color}; padding:2px 10px; '
+        f'border-radius:12px; font-size:0.9em;">{conf_label} confidence</span>'
+        f'</div>'
+        f'<div style="margin-top:8px; color:#aaa; font-size:0.9em;">'
+        f'Score: {rec["score"]:.1f}/10 | {rec["position_signal"]}'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Reasons
+    with st.expander("Recommendation details"):
+        for reason in rec["reasons"]:
+            st.markdown(f"- {reason}")
+        st.caption(
+            "This recommendation is based on the current indicator composite score "
+            "and the most recent backtest position state. It is not financial advice."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Custom backtest parameter panel
+# ---------------------------------------------------------------------------
+
+def render_custom_backtest_params() -> dict:
+    """Render custom backtest parameter controls and return selections.
+
+    Returns dict with: period, interval, start, end, objective, trading_mode
+    """
+    data = st.session_state["config_data"]
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("##### Data Range")
+        date_mode = st.radio(
+            "Range mode",
+            ["Period", "Custom dates"],
+            horizontal=True,
+            key="custom_bt_range_mode",
+        )
+
+        period = None
+        start_date = None
+        end_date = None
+
+        if date_mode == "Period":
+            period = st.selectbox(
+                "Period", VALID_PERIODS, index=VALID_PERIODS.index("2y"),
+                key="custom_bt_period",
+            )
+        else:
+            today = datetime.date.today()
+            default_start = today - datetime.timedelta(days=365 * 2)
+            start_date = st.date_input("Start date", value=default_start, key="custom_bt_start")
+            end_date = st.date_input("End date", value=today, key="custom_bt_end")
+            start_date = start_date.strftime("%Y-%m-%d")
+            end_date = end_date.strftime("%Y-%m-%d")
+
+        interval = st.selectbox(
+            "Interval", ALL_INTERVALS, index=ALL_INTERVALS.index("1d"),
+            key="custom_bt_interval",
+        )
+
+    with col2:
+        st.markdown("##### Strategy")
+        cfg_temp = Config.load()
+        objectives = ["(none)"] + cfg_temp.available_objectives()
+        objective = st.selectbox(
+            "Objective preset", objectives, index=0, key="custom_bt_objective",
+        )
+        if objective == "(none)":
+            objective = None
+
+        # When objective changes, re-apply from scratch
+        prev_obj = st.session_state.get("_prev_custom_objective")
+        if objective != prev_obj:
+            _apply_objective_to_session(objective)
+            st.session_state["_prev_custom_objective"] = objective
+
+        trading_mode = st.selectbox(
+            "Trading mode", TRADING_MODES, index=0, key="custom_bt_mode",
+        )
+
+    # ── Parameter tuning expanders ────────────────────────────────────────
+    st.markdown("##### Parameter Tuning")
+
+    with st.expander("Indicator Weights"):
+        _edit_indicator_weights(data)
+
+    with st.expander("Indicator Parameters"):
+        _edit_indicator_params(data)
+
+    with st.expander("Pattern Weights"):
+        _edit_pattern_weights(data)
+
+    with st.expander("Pattern-Indicator Combination"):
+        _edit_pattern_indicator_combination(data)
+
+    with st.expander("Scoring Thresholds"):
+        _edit_scoring_thresholds(data)
+
+    with st.expander("Strategy"):
+        _edit_strategy_params(data)
+
+    with st.expander("Backtest"):
+        _edit_backtest_params(data)
+
+    with st.expander("Regime Classification"):
+        _edit_regime_params(data)
+
+    with st.expander("Suitability Detection"):
+        _edit_suitability_params(data)
+
+    # Write back to session state
+    st.session_state["config_data"] = data
+
+    return {
+        "period": period,
+        "start": start_date,
+        "end": end_date,
+        "interval": interval,
+        "objective": objective,
+        "trading_mode": trading_mode,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backtest results display
+# ---------------------------------------------------------------------------
+
+def render_backtest_section(
+    bt_result: BacktestResult,
+    result: AnalysisResult,
+    cfg: Config,
+    trading_mode_val: str,
+    assessment_dict: dict | None,
+) -> None:
+    """Render the full backtest results section with recommendation."""
+
+    # ── Recommendation ────────────────────────────────────────────────────
+    st.subheader("Recommendation")
+    rec = compute_recommendation(result, bt_result, cfg)
+    render_recommendation(rec)
+
+    # ── Suitability ───────────────────────────────────────────────────────
+    if assessment_dict is not None:
+        with st.expander("Suitability Assessment"):
+            render_suitability(assessment_dict, bt_result.ticker)
+
+    # Market regime (from backtest)
+    if bt_result.regime is not None:
+        with st.expander("Market Regime (Backtest)"):
+            render_regime(bt_result.regime)
+
+    # Trading mode badge
+    mode_label = trading_mode_val.replace("_", " ").upper()
+    st.info(f"Trading mode: **{mode_label}**")
+
+    # ── Performance ───────────────────────────────────────────────────────
+    st.subheader("Performance Summary")
+    render_backtest_metrics(bt_result)
+
+    # ── Equity curve ──────────────────────────────────────────────────────
+    st.subheader("Equity Curve")
+    eq_fig = create_equity_chart(bt_result, result.df)
+    st.plotly_chart(eq_fig, use_container_width=True)
+
+    # ── Strategy config ───────────────────────────────────────────────────
+    with st.expander("Strategy Configuration"):
+        render_strategy_config(cfg)
+
+    # ── Trade log ─────────────────────────────────────────────────────────
+    with st.expander(f"Trade Log ({bt_result.total_trades} trades)"):
+        render_trade_log(bt_result)
+
+    # ── Significant patterns ──────────────────────────────────────────────
+    sig_count = len(bt_result.significant_patterns)
+    with st.expander(f"Significant Patterns Timeline ({sig_count} patterns)"):
+        render_significant_patterns(bt_result)
+
+
+# ---------------------------------------------------------------------------
+# Main (new stepped flow)
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -2609,157 +2880,140 @@ def main() -> None:
         st.info("Enter a ticker symbol in the sidebar to begin.")
         return
 
-    # Validate day_trading + interval
-    if params["objective"] == "day_trading" and not is_intraday(params["interval"]):
-        st.error(
-            "The **day_trading** objective requires an intraday interval "
-            "(1m, 5m, 15m, 30m, 1h). Please change the interval in the sidebar."
-        )
-        return
+    ticker = params["ticker"]
+    period = params["period"]
 
-    # Build Config from current session state
+    # ── Build Config ──────────────────────────────────────────────────────
     cfg = _get_config()
     cfg_data = st.session_state["config_data"]
     cfg_h = _config_hash(cfg_data)
 
-    # ── Run analysis ──────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # STEP 1: Stock Overview (always runs)
+    # ══════════════════════════════════════════════════════════════════════
     try:
         result, _ = load_analysis(
-            ticker=params["ticker"],
-            period=params["period"],
-            interval=params["interval"],
-            start=params["start"],
-            end=params["end"],
+            ticker=ticker,
+            period=period,
+            interval="1d",
+            start=None,
+            end=None,
             config_hash=cfg_h,
             config_data=cfg_data,
         )
     except Exception as e:
-        st.error(f"Analysis failed: {e}")
+        st.error(f"Failed to fetch data for {ticker}: {e}")
         return
 
-    # ── Header ────────────────────────────────────────────────────────────
-    render_header(result, cfg)
+    render_stock_overview(result, cfg)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # STEP 2: Choose Backtest Path
+    # ══════════════════════════════════════════════════════════════════════
     st.markdown("---")
+    st.header("Backtest")
 
-    # ── Compute score timeseries (expensive — adjust step for performance) ─
-    n_bars = len(result.df)
-    step = max(1, n_bars // 150)  # aim for ~150 data points
+    tab_auto, tab_custom = st.tabs([
+        "Quick Backtest (Recommended)",
+        "Custom Backtest",
+    ])
 
-    try:
-        score_df = compute_score_timeseries(
-            ticker=params["ticker"],
-            period=params["period"],
-            interval=params["interval"],
-            start=params["start"],
-            end=params["end"],
-            config_hash=cfg_h,
-            config_data=cfg_data,
-            step=step,
+    # ── Tab 1: Quick Backtest ─────────────────────────────────────────────
+    with tab_auto:
+        st.markdown(
+            f"Run a backtest using the **{period}** classification period with "
+            f"**auto-detected** trading mode and **regime-adapted** strategy parameters."
         )
-    except Exception:
-        score_df = None
+        if result.regime:
+            regime_label = result.regime.label
+            sub_label = result.regime.sub_type_label
+            desc = f"Detected: **{regime_label}**"
+            if sub_label:
+                desc += f" / **{sub_label}**"
+            st.markdown(desc)
 
-    # ── Price Chart ───────────────────────────────────────────────────────
-    st.subheader("Price Chart")
-    price_fig = create_price_chart(result, score_df, cfg=cfg)
-    st.plotly_chart(price_fig, use_container_width=True)
+        run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
 
-    # ── Indicator & Pattern Tables ────────────────────────────────────────
-    col_ind, col_pat = st.columns(2)
-    with col_ind:
-        st.subheader("Indicator Breakdown")
-        render_indicator_table(result, cfg)
-    with col_pat:
-        st.subheader("Pattern Signals")
-        render_pattern_table(result, cfg)
+        if run_quick or st.session_state.get("_quick_bt_ran"):
+            st.session_state["_quick_bt_ran"] = True
+            try:
+                bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
+                    ticker=ticker,
+                    period=period,
+                    interval="1d",
+                    start=None,
+                    end=None,
+                    trading_mode_str="auto",
+                    config_hash=cfg_h,
+                    config_data=cfg_data,
+                )
+            except Exception as e:
+                st.error(f"Backtest failed: {e}")
+                return
 
-    # Score legend
-    st.markdown(
-        f'<div style="text-align:center;font-size:0.85rem;padding:4px 0 8px 0;color:#aaa;">'
-        f'Score legend: '
-        f'<span style="color:{COLOR_BEARISH};font-weight:600;">0 – 3.5 Bearish</span>'
-        f'&nbsp;&nbsp;'
-        f'<span style="color:{COLOR_NEUTRAL};font-weight:600;">3.5 – 6.0 Neutral</span>'
-        f'&nbsp;&nbsp;'
-        f'<span style="color:{COLOR_BULLISH};font-weight:600;">6.0 – 10 Bullish</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Market Regime ─────────────────────────────────────────────────────
-    if result.regime is not None:
-        st.subheader("Market Regime")
-        render_regime(result.regime)
-
-    # ── Score Distribution ────────────────────────────────────────────────
-    if score_df is not None and not score_df.empty:
-        st.subheader("Score Distribution")
-        hist_fig = create_score_histogram(score_df, cfg=cfg)
-        st.plotly_chart(hist_fig, use_container_width=True)
-
-        # Score stats
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-        ind_scores = score_df["indicator_score"]
-        col_s1.metric("Ind. Mean", f"{ind_scores.mean():.2f}")
-        col_s2.metric("Ind. Std", f"{ind_scores.std():.2f}")
-        col_s3.metric("Ind. Min", f"{ind_scores.min():.2f}")
-        col_s4.metric("Ind. Max", f"{ind_scores.max():.2f}")
-
-    # ── Backtest ──────────────────────────────────────────────────────────
-    if params["run_backtest"]:
-        st.markdown("---")
-        st.header("Backtest Results")
-
-        try:
-            bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
-                ticker=params["ticker"],
-                period=params["period"],
-                interval=params["interval"],
-                start=params["start"],
-                end=params["end"],
-                trading_mode_str=params["trading_mode"],
-                config_hash=cfg_h,
-                config_data=cfg_data,
+            render_backtest_section(
+                bt_result, result, cfg, trading_mode_val, assessment_dict,
             )
-        except Exception as e:
-            st.error(f"Backtest failed: {e}")
-            return
 
-        # Suitability
-        if assessment_dict is not None:
-            st.subheader("Suitability Assessment")
-            render_suitability(assessment_dict, params["ticker"])
+    # ── Tab 2: Custom Backtest ────────────────────────────────────────────
+    with tab_custom:
+        st.markdown("Configure custom parameters for the backtest.")
 
-        # Market regime (from backtest)
-        if bt_result.regime is not None:
-            st.subheader("Market Regime")
-            render_regime(bt_result.regime)
+        custom_params = render_custom_backtest_params()
 
-        # Trading mode badge
-        mode_label = trading_mode_val.replace("_", " ").upper()
-        st.info(f"Trading mode: **{mode_label}**")
+        # Validate day_trading + interval
+        if custom_params["objective"] == "day_trading" and not is_intraday(custom_params["interval"]):
+            st.error(
+                "The **day_trading** objective requires an intraday interval "
+                "(1m, 5m, 15m, 30m, 1h). Please change the interval."
+            )
+        else:
+            run_custom = st.button(
+                "Run Custom Backtest", type="primary", key="run_custom_bt",
+            )
 
-        # Metrics
-        st.subheader("Performance Summary")
-        render_backtest_metrics(bt_result)
+            if run_custom or st.session_state.get("_custom_bt_ran"):
+                st.session_state["_custom_bt_ran"] = True
 
-        # Equity curve
-        st.subheader("Equity Curve")
-        eq_fig = create_equity_chart(bt_result, result.df)
-        st.plotly_chart(eq_fig, use_container_width=True)
+                # Re-read config (may have been mutated by param editors)
+                custom_cfg_data = st.session_state["config_data"]
+                custom_cfg_h = _config_hash(custom_cfg_data)
+                custom_cfg = Config.from_dict(custom_cfg_data)
 
-        # Strategy config
-        with st.expander("Strategy Configuration"):
-            render_strategy_config(cfg)
+                try:
+                    bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
+                        ticker=ticker,
+                        period=custom_params["period"],
+                        interval=custom_params["interval"],
+                        start=custom_params["start"],
+                        end=custom_params["end"],
+                        trading_mode_str=custom_params["trading_mode"],
+                        config_hash=custom_cfg_h,
+                        config_data=custom_cfg_data,
+                    )
+                except Exception as e:
+                    st.error(f"Backtest failed: {e}")
+                    return
 
-        # Trade log
-        with st.expander(f"Trade Log ({bt_result.total_trades} trades)"):
-            render_trade_log(bt_result)
+                # For custom backtest, run analysis on the custom period/interval
+                # for the recommendation engine
+                try:
+                    custom_result, _ = load_analysis(
+                        ticker=ticker,
+                        period=custom_params["period"],
+                        interval=custom_params["interval"],
+                        start=custom_params["start"],
+                        end=custom_params["end"],
+                        config_hash=custom_cfg_h,
+                        config_data=custom_cfg_data,
+                    )
+                except Exception:
+                    custom_result = result  # fall back to overview analysis
 
-        # Significant patterns timeline
-        sig_count = len(bt_result.significant_patterns)
-        with st.expander(f"Significant Patterns Timeline ({sig_count} patterns)"):
-            render_significant_patterns(bt_result)
+                render_backtest_section(
+                    bt_result, custom_result, custom_cfg,
+                    trading_mode_val, assessment_dict,
+                )
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.markdown("---")
@@ -2768,6 +3022,7 @@ def main() -> None:
         "Do your own research. Backtest results are hypothetical and "
         "do not guarantee future performance."
     )
+
 
 
 if __name__ == "__main__":
