@@ -22,6 +22,7 @@ import copy
 import itertools
 import sys
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,7 +39,7 @@ from config import Config, DEFAULT_CONFIG, _deep_merge
 from data.provider import DataProvider
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
-from engine.regime import RegimeType
+from engine.regime import RegimeType, RegimeSubType
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import TradingMode
 
@@ -178,6 +179,7 @@ class TickerResult:
     period: str
     regime: str                 # RegimeType.value
     regime_confidence: float
+    sub_type: str               # RegimeSubType label (e.g. "Explosive Mover")
     strategy_return: float      # percentage
     buyhold_return: float       # percentage
     tracking_error: float       # |strategy - buyhold|
@@ -269,11 +271,13 @@ def _extract_ticker_result(
     regime_str = "unknown"
     regime_conf = 0.0
     buyhold = 0.0
+    sub_type_label = ""
 
     if result.regime:
         regime_str = result.regime.regime.value
         regime_conf = result.regime.confidence
         buyhold = result.regime.metrics.total_return * 100  # to pct
+        sub_type_label = result.regime.sub_type_label or ""
 
     strategy_ret = result.total_return_pct
     tracking_err = abs(strategy_ret - buyhold)
@@ -283,6 +287,7 @@ def _extract_ticker_result(
         period=period,
         regime=regime_str,
         regime_confidence=regime_conf,
+        sub_type=sub_type_label,
         strategy_return=round(strategy_ret, 2),
         buyhold_return=round(buyhold, 2),
         tracking_error=round(tracking_err, 2),
@@ -295,15 +300,16 @@ def _extract_ticker_result(
 
 def _print_results_table(results: list[TickerResult], title: str = "Results") -> None:
     """Pretty-print a results table."""
-    print(f"\n{'='*90}")
+    print(f"\n{'='*110}")
     print(f"  {title}")
-    print(f"{'='*90}")
-    print(f"  {'Ticker':<7} {'Period':<6} {'Regime':<22} {'Strat%':>8} {'B&H%':>8} "
+    print(f"{'='*110}")
+    print(f"  {'Ticker':<7} {'Period':<6} {'Regime':<18} {'Sub-Type':<22} {'Strat%':>8} {'B&H%':>8} "
           f"{'TrkErr':>8} {'Trades':>7} {'MaxDD%':>8} {'Sharpe':>7} {'WinR%':>7}")
-    print(f"  {'-'*7} {'-'*6} {'-'*22} {'-'*8} {'-'*8} {'-'*8} {'-'*7} {'-'*8} {'-'*7} {'-'*7}")
+    print(f"  {'-'*7} {'-'*6} {'-'*18} {'-'*22} {'-'*8} {'-'*8} {'-'*8} {'-'*7} {'-'*8} {'-'*7} {'-'*7}")
 
     for r in results:
-        print(f"  {r.ticker:<7} {r.period:<6} {r.regime:<22} "
+        sub = r.sub_type or "—"
+        print(f"  {r.ticker:<7} {r.period:<6} {r.regime:<18} {sub:<22} "
               f"{r.strategy_return:>+8.2f} {r.buyhold_return:>+8.2f} "
               f"{r.tracking_error:>8.2f} {r.total_trades:>7d} "
               f"{r.max_drawdown:>8.2f} {r.sharpe:>7.2f} {r.win_rate:>7.1f}")
@@ -313,14 +319,14 @@ def _print_results_table(results: list[TickerResult], title: str = "Results") ->
         avg_te = sum(r.tracking_error for r in results) / len(results)
         avg_strat = sum(r.strategy_return for r in results) / len(results)
         avg_bnh = sum(r.buyhold_return for r in results) / len(results)
-        print(f"  {'-'*86}")
-        print(f"  {'AVG':<7} {'':6} {'':22} {avg_strat:>+8.2f} {avg_bnh:>+8.2f} "
+        print(f"  {'-'*106}")
+        print(f"  {'AVG':<7} {'':6} {'':18} {'':22} {avg_strat:>+8.2f} {avg_bnh:>+8.2f} "
               f"{avg_te:>8.2f}")
     print()
 
 
 def _print_regime_summary(groups: dict[str, RegimeGroup]) -> None:
-    """Print per-regime summary."""
+    """Print per-regime summary with sub-type breakdown."""
     print(f"\n{'='*60}")
     print(f"  Per-Regime Summary")
     print(f"{'='*60}")
@@ -330,6 +336,16 @@ def _print_regime_summary(groups: dict[str, RegimeGroup]) -> None:
         print(f"    Avg Strategy Return: {group.avg_strategy_return:+.2f}%")
         print(f"    Avg Buy & Hold:      {group.avg_buyhold_return:+.2f}%")
         print(f"    Avg Tracking Error:  {group.avg_tracking_error:.2f}%")
+
+        # Sub-type breakdown
+        sub_groups: dict[str, list[str]] = defaultdict(list)
+        for r in group.results:
+            key = r.sub_type or "(none)"
+            sub_groups[key].append(r.ticker)
+        if len(sub_groups) > 1 or list(sub_groups.keys()) != ["(none)"]:
+            print(f"    Sub-types:")
+            for sub, st_tickers in sorted(sub_groups.items()):
+                print(f"      {sub}: {', '.join(st_tickers)}")
     print()
 
 
@@ -365,7 +381,8 @@ def run_baseline(
 
         tr = _extract_ticker_result(ticker, period, bt)
         results.append(tr)
-        print(f"{tr.regime} | strat={tr.strategy_return:+.1f}% | "
+        sub_info = f" [{tr.sub_type}]" if tr.sub_type else ""
+        print(f"{tr.regime}{sub_info} | strat={tr.strategy_return:+.1f}% | "
               f"b&h={tr.buyhold_return:+.1f}% | err={tr.tracking_error:.1f}% "
               f"({elapsed:.1f}s)")
 
