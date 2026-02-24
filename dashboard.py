@@ -50,6 +50,8 @@ from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LA
 from engine.strategy import StrategyContext
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
+from scanner import Scanner, ScanResult
+from data.universes import available as available_universes, load as load_universe
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -2972,150 +2974,448 @@ def render_backtest_section(
 
 
 # ---------------------------------------------------------------------------
+# Scanner tab
+# ---------------------------------------------------------------------------
+
+SCANNER_UNIVERSES = ["dow30", "nasdaq100", "sp500"]
+SCANNER_UNIVERSE_LABELS = {
+    "dow30": "Dow 30",
+    "nasdaq100": "NASDAQ 100",
+    "sp500": "S&P 500",
+}
+
+
+def _signal_color(signal: str) -> str:
+    """Return hex color for a BUY/SELL/HOLD signal."""
+    return {
+        "BUY": COLOR_BULLISH,
+        "SELL": COLOR_BEARISH,
+        "HOLD": COLOR_NEUTRAL,
+    }.get(signal, "#aaa")
+
+
+def _confidence_dots(confidence: str) -> str:
+    """Return dot-style confidence indicator."""
+    if confidence == "high":
+        return "●●●"
+    elif confidence == "medium":
+        return "●●○"
+    return "●○○"
+
+
+def _build_scanner_results_html(
+    results: list[ScanResult],
+    title: str,
+    signal_type: str,
+) -> str:
+    """Build an HTML table for scanner results (BUY or SELL group)."""
+    if not results:
+        return f"<p style='color:#666;padding:8px 0;'>No {signal_type} signals found.</p>"
+
+    title_color = _signal_color(signal_type)
+
+    header = (
+        "<tr>"
+        "<th style='width:30px;'>#</th>"
+        "<th>Ticker</th>"
+        "<th>Signal</th>"
+        "<th>Conf</th>"
+        "<th>Score</th>"
+        "<th style='width:100px;'>Ind</th>"
+        "<th style='width:100px;'>Pat</th>"
+        "<th style='text-align:right;'>Price</th>"
+        "<th>Regime</th>"
+        "<th>Sub-Type</th>"
+        "</tr>"
+    )
+
+    rows_html = []
+    for i, r in enumerate(results, 1):
+        sig_color = _signal_color(r.signal)
+        conf_color = {
+            "high": COLOR_BULLISH, "medium": COLOR_NEUTRAL, "low": "#666",
+        }.get(r.confidence, "#666")
+
+        row = (
+            f"<tr>"
+            f"<td style='color:#888;'>{i}</td>"
+            f"<td style='font-weight:700;'>{r.ticker}</td>"
+            f"<td style='color:{sig_color};font-weight:700;'>{r.signal}</td>"
+            f"<td style='color:{conf_color};font-size:0.75rem;'>"
+            f"{_confidence_dots(r.confidence)}</td>"
+            f"<td>{score_bar_html(r.effective_score, width=80)}</td>"
+            f"<td>{score_bar_html(r.indicator_score, width=60)}</td>"
+            f"<td>{score_bar_html(r.pattern_score, width=60)}</td>"
+            f"<td style='text-align:right;font-family:monospace;'>"
+            f"${r.price:,.2f}</td>"
+            f"<td style='color:#aaa;'>{r.regime_label or '—'}</td>"
+            f"<td style='color:#aaa;'>{r.sub_type_label or '—'}</td>"
+            f"</tr>"
+        )
+        rows_html.append(row)
+
+    style = (
+        "<style>"
+        ".scanner-table { width:100%; border-collapse:collapse; font-size:0.82rem; }"
+        ".scanner-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
+        "  color:#aaa; font-weight:600; }"
+        ".scanner-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
+        "  vertical-align:middle; }"
+        ".scanner-table tr:hover td { background:#1a1d2e; }"
+        "</style>"
+    )
+
+    return (
+        f"{style}"
+        f"<div style='border-left:3px solid {title_color};padding-left:12px;"
+        f"margin:12px 0 4px 0;'>"
+        f"<span style='color:{title_color};font-weight:700;font-size:1rem;'>"
+        f"{title}</span></div>"
+        f'<table class="scanner-table">'
+        f"<thead>{header}</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        f"</table>"
+    )
+
+
+def render_scanner() -> None:
+    """Render the stock universe scanner tab."""
+    st.header("Stock Universe Scanner")
+    st.markdown(
+        "Scan a predefined stock universe through the full analysis + strategy "
+        "pipeline to surface the top **BUY** and **SELL** candidates."
+    )
+
+    # ── Controls ──────────────────────────────────────────────────────────
+    col_univ, col_period, col_top, col_workers = st.columns([2, 1, 1, 1])
+
+    with col_univ:
+        universe_options = SCANNER_UNIVERSES
+        universe_labels = [
+            f"{SCANNER_UNIVERSE_LABELS[u]} ({len(load_universe(u))} tickers)"
+            for u in universe_options
+        ]
+        universe_idx = st.selectbox(
+            "Universe",
+            range(len(universe_options)),
+            format_func=lambda i: universe_labels[i],
+            index=0,
+            key="scanner_universe",
+        )
+        universe = universe_options[universe_idx]
+
+    with col_period:
+        period = st.selectbox(
+            "Period",
+            CLASSIFICATION_PERIODS,
+            index=CLASSIFICATION_PERIODS.index(DEFAULT_CLASSIFICATION_PERIOD),
+            key="scanner_period",
+        )
+
+    with col_top:
+        top_n = st.number_input(
+            "Top N",
+            min_value=1,
+            max_value=50,
+            value=10,
+            step=1,
+            key="scanner_top_n",
+        )
+
+    with col_workers:
+        workers = st.number_input(
+            "Workers",
+            min_value=1,
+            max_value=16,
+            value=8,
+            step=1,
+            key="scanner_workers",
+            help="Number of parallel threads for fetching data.",
+        )
+
+    # ── Run button ────────────────────────────────────────────────────────
+    run_scan = st.button("Run Scan", type="primary", key="run_scan_btn")
+
+    # ── Execute scan ──────────────────────────────────────────────────────
+    if run_scan:
+        tickers = load_universe(universe)
+        total = len(tickers)
+
+        progress_bar = st.progress(0, text=f"Scanning {SCANNER_UNIVERSE_LABELS[universe]}...")
+        status_text = st.empty()
+
+        # Accumulate results for display
+        scan_results: list[ScanResult] = []
+        errors: list[ScanResult] = []
+
+        def _on_progress(
+            completed: int, total_: int, ticker: str, result: ScanResult | None
+        ) -> None:
+            pct = completed / total_
+            if result and not result.error:
+                sig = result.signal
+                status_text.markdown(
+                    f"**[{completed}/{total_}]** {ticker} "
+                    f"→ **{sig}** ({result.effective_score:.2f})"
+                )
+            elif result and result.error:
+                status_text.markdown(
+                    f"**[{completed}/{total_}]** {ticker} → *error*"
+                )
+            progress_bar.progress(pct, text=f"Scanning... {completed}/{total_}")
+
+        cfg = _get_config()
+        scanner = Scanner(
+            universe=universe,
+            period=period,
+            max_workers=int(workers),
+            cfg=cfg,
+            on_progress=_on_progress,
+        )
+
+        import time as _time
+
+        t0 = _time.time()
+        scanner.run()
+        elapsed = _time.time() - t0
+
+        # Clear progress
+        progress_bar.empty()
+        status_text.empty()
+
+        # Store results in session state so they persist across reruns
+        st.session_state["scanner_results"] = scanner.results
+        st.session_state["scanner_summary"] = scanner.summary()
+        st.session_state["scanner_elapsed"] = elapsed
+        st.session_state["scanner_top_n"] = int(top_n)
+
+    # ── Display results (from session state) ──────────────────────────────
+    if "scanner_results" in st.session_state:
+        results_all = st.session_state["scanner_results"]
+        summary = st.session_state["scanner_summary"]
+        elapsed = st.session_state["scanner_elapsed"]
+        display_n = st.session_state.get("scanner_top_n", 10)
+
+        # Summary metrics
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Universe", f"{summary['universe']}")
+        c2.metric("Scanned", f"{summary['scanned']}")
+        c3.metric("BUY", f"{summary['buy_count']}")
+        c4.metric("SELL", f"{summary['sell_count']}")
+        c5.metric("HOLD", f"{summary['hold_count']}")
+        c6.metric("Time", f"{elapsed:.1f}s")
+
+        if summary["errors"] > 0:
+            st.warning(f"{summary['errors']} ticker(s) failed during scan.")
+
+        # Build ranked lists
+        ok_results = [r for r in results_all if not r.error]
+        buys = sorted(
+            [r for r in ok_results if r.signal == "BUY"],
+            key=lambda r: r.effective_score,
+            reverse=True,
+        )[:display_n]
+        sells = sorted(
+            [r for r in ok_results if r.signal == "SELL"],
+            key=lambda r: r.effective_score,
+        )[:display_n]
+
+        # Render tables
+        col_buy, col_sell = st.columns(2)
+        with col_buy:
+            st.markdown(
+                _build_scanner_results_html(
+                    buys, f"Top {len(buys)} BUY Signals", "BUY"
+                ),
+                unsafe_allow_html=True,
+            )
+        with col_sell:
+            st.markdown(
+                _build_scanner_results_html(
+                    sells, f"Top {len(sells)} SELL Signals", "SELL"
+                ),
+                unsafe_allow_html=True,
+            )
+
+        # Expandable: all HOLD signals
+        holds = sorted(
+            [r for r in ok_results if r.signal == "HOLD"],
+            key=lambda r: r.effective_score,
+            reverse=True,
+        )
+        if holds:
+            with st.expander(f"All HOLD Signals ({len(holds)})", expanded=False):
+                st.markdown(
+                    _build_scanner_results_html(holds, "HOLD Signals", "HOLD"),
+                    unsafe_allow_html=True,
+                )
+
+        # Expandable: errors
+        err_results = [r for r in results_all if r.error]
+        if err_results:
+            with st.expander(f"Failed Tickers ({len(err_results)})", expanded=False):
+                for r in err_results:
+                    st.text(f"{r.ticker}: {r.error[:120]}")
+
+
+# ---------------------------------------------------------------------------
 # Main (new stepped flow)
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     params = render_sidebar()
 
-    if not params["ticker"]:
-        st.info("Enter a ticker symbol in the sidebar to begin.")
-        return
-
-    ticker = params["ticker"]
-    period = params["period"]
-
-    # ── Build Config ──────────────────────────────────────────────────────
-    cfg = _get_config()
-    cfg_data = st.session_state["config_data"]
-    cfg_h = _config_hash(cfg_data)
+    # ── Top-level navigation tabs ─────────────────────────────────────────
+    tab_analyze, tab_scanner = st.tabs(["Analyze", "Scanner"])
 
     # ══════════════════════════════════════════════════════════════════════
-    # STEP 1: Stock Overview (always runs)
+    # SCANNER TAB
     # ══════════════════════════════════════════════════════════════════════
-    try:
-        result, _ = load_analysis(
-            ticker=ticker,
-            period=period,
-            interval="1d",
-            start=None,
-            end=None,
-            config_hash=cfg_h,
-            config_data=cfg_data,
-        )
-    except Exception as e:
-        st.error(f"Failed to fetch data for {ticker}: {e}")
-        return
-
-    render_stock_overview(result, cfg)
+    with tab_scanner:
+        render_scanner()
 
     # ══════════════════════════════════════════════════════════════════════
-    # STEP 2: Choose Backtest Path
+    # ANALYZE TAB
     # ══════════════════════════════════════════════════════════════════════
-    st.markdown("---")
-    st.header("Backtest")
+    with tab_analyze:
+        if not params["ticker"]:
+            st.info("Enter a ticker symbol in the sidebar to begin.")
+            return
 
-    tab_auto, tab_custom = st.tabs([
-        "Quick Backtest (Recommended)",
-        "Custom Backtest",
-    ])
+        ticker = params["ticker"]
+        period = params["period"]
 
-    # ── Tab 1: Quick Backtest ─────────────────────────────────────────────
-    with tab_auto:
-        st.markdown(
-            f"Run a backtest using the **{period}** classification period with "
-            f"**auto-detected** trading mode and **regime-adapted** strategy parameters."
-        )
-        if result.regime:
-            regime_label = result.regime.label
-            sub_label = result.regime.sub_type_label
-            desc = f"Detected: **{regime_label}**"
-            if sub_label:
-                desc += f" / **{sub_label}**"
-            st.markdown(desc)
+        # ── Build Config ──────────────────────────────────────────────────
+        cfg = _get_config()
+        cfg_data = st.session_state["config_data"]
+        cfg_h = _config_hash(cfg_data)
 
-        run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
-
-        if run_quick or st.session_state.get("_quick_bt_ran"):
-            st.session_state["_quick_bt_ran"] = True
-            try:
-                bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
-                    ticker=ticker,
-                    period=period,
-                    interval="1d",
-                    start=None,
-                    end=None,
-                    trading_mode_str="auto",
-                    config_hash=cfg_h,
-                    config_data=cfg_data,
-                )
-            except Exception as e:
-                st.error(f"Backtest failed: {e}")
-                return
-
-            render_backtest_section(
-                bt_result, result, cfg, trading_mode_val, assessment_dict,
+        # ══════════════════════════════════════════════════════════════════
+        # STEP 1: Stock Overview (always runs)
+        # ══════════════════════════════════════════════════════════════════
+        try:
+            result, _ = load_analysis(
+                ticker=ticker,
+                period=period,
+                interval="1d",
+                start=None,
+                end=None,
+                config_hash=cfg_h,
+                config_data=cfg_data,
             )
+        except Exception as e:
+            st.error(f"Failed to fetch data for {ticker}: {e}")
+            return
 
-    # ── Tab 2: Custom Backtest ────────────────────────────────────────────
-    with tab_custom:
-        st.markdown("Configure custom parameters for the backtest.")
+        render_stock_overview(result, cfg)
 
-        custom_params = render_custom_backtest_params()
+        # ══════════════════════════════════════════════════════════════════
+        # STEP 2: Choose Backtest Path
+        # ══════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.header("Backtest")
 
-        # Validate day_trading + interval
-        if custom_params["objective"] == "day_trading" and not is_intraday(custom_params["interval"]):
-            st.error(
-                "The **day_trading** objective requires an intraday interval "
-                "(1m, 5m, 15m, 30m, 1h). Please change the interval."
+        tab_auto, tab_custom = st.tabs([
+            "Quick Backtest (Recommended)",
+            "Custom Backtest",
+        ])
+
+        # ── Tab 1: Quick Backtest ─────────────────────────────────────────
+        with tab_auto:
+            st.markdown(
+                f"Run a backtest using the **{period}** classification period with "
+                f"**auto-detected** trading mode and **regime-adapted** strategy parameters."
             )
-        else:
-            run_custom = st.button(
-                "Run Custom Backtest", type="primary", key="run_custom_bt",
-            )
+            if result.regime:
+                regime_label = result.regime.label
+                sub_label = result.regime.sub_type_label
+                desc = f"Detected: **{regime_label}**"
+                if sub_label:
+                    desc += f" / **{sub_label}**"
+                st.markdown(desc)
 
-            if run_custom or st.session_state.get("_custom_bt_ran"):
-                st.session_state["_custom_bt_ran"] = True
+            run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
 
-                # Re-read config (may have been mutated by param editors)
-                custom_cfg_data = st.session_state["config_data"]
-                custom_cfg_h = _config_hash(custom_cfg_data)
-                custom_cfg = Config.from_dict(custom_cfg_data)
-
+            if run_quick or st.session_state.get("_quick_bt_ran"):
+                st.session_state["_quick_bt_ran"] = True
                 try:
                     bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
                         ticker=ticker,
-                        period=custom_params["period"],
-                        interval=custom_params["interval"],
-                        start=custom_params["start"],
-                        end=custom_params["end"],
-                        trading_mode_str=custom_params["trading_mode"],
-                        config_hash=custom_cfg_h,
-                        config_data=custom_cfg_data,
+                        period=period,
+                        interval="1d",
+                        start=None,
+                        end=None,
+                        trading_mode_str="auto",
+                        config_hash=cfg_h,
+                        config_data=cfg_data,
                     )
                 except Exception as e:
                     st.error(f"Backtest failed: {e}")
                     return
 
-                # For custom backtest, run analysis on the custom period/interval
-                # for the recommendation engine
-                try:
-                    custom_result, _ = load_analysis(
-                        ticker=ticker,
-                        period=custom_params["period"],
-                        interval=custom_params["interval"],
-                        start=custom_params["start"],
-                        end=custom_params["end"],
-                        config_hash=custom_cfg_h,
-                        config_data=custom_cfg_data,
-                    )
-                except Exception:
-                    custom_result = result  # fall back to overview analysis
-
                 render_backtest_section(
-                    bt_result, custom_result, custom_cfg,
-                    trading_mode_val, assessment_dict,
+                    bt_result, result, cfg, trading_mode_val, assessment_dict,
                 )
+
+        # ── Tab 2: Custom Backtest ────────────────────────────────────────
+        with tab_custom:
+            st.markdown("Configure custom parameters for the backtest.")
+
+            custom_params = render_custom_backtest_params()
+
+            # Validate day_trading + interval
+            if custom_params["objective"] == "day_trading" and not is_intraday(custom_params["interval"]):
+                st.error(
+                    "The **day_trading** objective requires an intraday interval "
+                    "(1m, 5m, 15m, 30m, 1h). Please change the interval."
+                )
+            else:
+                run_custom = st.button(
+                    "Run Custom Backtest", type="primary", key="run_custom_bt",
+                )
+
+                if run_custom or st.session_state.get("_custom_bt_ran"):
+                    st.session_state["_custom_bt_ran"] = True
+
+                    # Re-read config (may have been mutated by param editors)
+                    custom_cfg_data = st.session_state["config_data"]
+                    custom_cfg_h = _config_hash(custom_cfg_data)
+                    custom_cfg = Config.from_dict(custom_cfg_data)
+
+                    try:
+                        bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
+                            ticker=ticker,
+                            period=custom_params["period"],
+                            interval=custom_params["interval"],
+                            start=custom_params["start"],
+                            end=custom_params["end"],
+                            trading_mode_str=custom_params["trading_mode"],
+                            config_hash=custom_cfg_h,
+                            config_data=custom_cfg_data,
+                        )
+                    except Exception as e:
+                        st.error(f"Backtest failed: {e}")
+                        return
+
+                    # For custom backtest, run analysis on the custom period/interval
+                    # for the recommendation engine
+                    try:
+                        custom_result, _ = load_analysis(
+                            ticker=ticker,
+                            period=custom_params["period"],
+                            interval=custom_params["interval"],
+                            start=custom_params["start"],
+                            end=custom_params["end"],
+                            config_hash=custom_cfg_h,
+                            config_data=custom_cfg_data,
+                        )
+                    except Exception:
+                        custom_result = result  # fall back to overview analysis
+
+                    render_backtest_section(
+                        bt_result, custom_result, custom_cfg,
+                        trading_mode_val, assessment_dict,
+                    )
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.markdown("---")
