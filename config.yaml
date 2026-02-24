@@ -500,25 +500,23 @@ regime:
   strategy_adaptation:
     strong_trend:
       use_trailing_stop: true       # trail stop instead of score-based exits
-      trailing_stop_atr_mult: 6.0   # trailing stop distance = N × ATR (optimized from 8.0 — tighter trail exits losers faster; validated across 8 tickers)
+      trailing_stop_atr_mult: 8.0   # trailing stop distance = N × ATR (wide default for volatile names)
       ignore_score_entries: true     # don't use score thresholds for entry
       hold_with_trend: true          # stay in position while trend persists
       min_distance: 0.01            # price must be 1%+ from MA for trend entry
       min_score: 3.5                # don't enter when indicators are strongly bearish
       respect_trend_direction: true  # only enter in direction of long-term trend
       # ── Sub-type overrides (merged on top of base strong_trend params) ──
-      # Currently empty — sub-type overrides are unreliable because sub-types
-      # get re-classified every rebalance_interval bars using trailing data.
-      # A stock's sub-type can shift mid-trade (e.g. QQQ flips between
-      # steady_compounder/stagnant/volatile_directionless), so overrides
-      # applied only to one sub-type miss the exact bars where exits fire.
-      # Global strong_trend params (e.g. trailing_stop_atr_mult=6) are the
-      # correct lever.  Override slots remain for future use if sub-type
-      # stability improves.
+      # Sub-type is locked at the start of the backtest using the full analysis
+      # period data, so overrides apply consistently for the entire run.
+      # Low-volatility names (Steady Compounders) benefit from a tighter trail
+      # that exits losers faster; high-volatility names (Explosive Movers)
+      # need the wider default trail to hold through normal pullbacks.
       sub_types:
-        explosive_mover: {}          # high vol + high momentum (TSLA, NVDA, MARA)
-        steady_compounder: {}        # low vol + high momentum (KO, JPM, COST, AAPL, XOM)
-        volatile_directionless: {}   # high vol + low momentum (RIOT, AMD)
+        explosive_mover: {}          # high vol + high momentum (TSLA, NVDA) — uses base trail=8
+        steady_compounder:           # low vol + high momentum (QQQ, SPY, AAPL, GOOGL, META)
+          trailing_stop_atr_mult: 6.0  # tighter trail for low-vol names (validated: avg +8.0% vs +5.9%)
+        volatile_directionless: {}   # high vol + low momentum (AMD)
         stagnant: {}                 # low vol + low momentum
     mean_reverting:
       use_trailing_stop: false

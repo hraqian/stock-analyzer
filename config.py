@@ -376,20 +376,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strategy_adaptation": {
             "strong_trend": {
                 "use_trailing_stop": True,       # trail stop instead of score-based exits
-                "trailing_stop_atr_mult": 6.0,   # trailing stop = N × ATR (optimized from 8.0)
+                "trailing_stop_atr_mult": 8.0,   # trailing stop = N × ATR (wide for volatile names)
                 "ignore_score_entries": True,     # don't use score thresholds for entry
                 "hold_with_trend": True,          # stay in position while trend persists
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
-                # Sub-type overrides — currently empty.  Sub-types are re-classified
-                # every rebalance_interval bars using trailing data, so they shift
-                # mid-trade (e.g. QQQ oscillates steady_compounder/stagnant).
-                # This makes sub-type-specific overrides unreliable; global
-                # strong_trend params are the correct lever instead.
+                # Sub-type overrides — sub-type is locked at backtest start using
+                # full-period data, so these apply consistently for the entire run.
+                # Low-vol names (SC) get tighter trail; high-vol (EM) use default.
                 "sub_types": {
                     "explosive_mover": {},
-                    "steady_compounder": {},
+                    "steady_compounder": {
+                        "trailing_stop_atr_mult": 6.0,  # tighter trail for low-vol names
+                    },
                     "volatile_directionless": {},
                     "stagnant": {},
                 },

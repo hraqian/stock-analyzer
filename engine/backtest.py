@@ -359,6 +359,17 @@ class BacktestEngine:
         current_regime_total_return: float = 0.0
         current_regime_sub_type: RegimeSubType | None = None
 
+        # Lock sub-type using the full dataset — sub-types (Steady Compounder,
+        # Explosive Mover, etc.) are a structural characteristic of the stock
+        # over the analysis period, not a dynamic state.  Letting them shift
+        # every rebalance makes sub-type overrides unreliable (e.g. QQQ
+        # oscillates between steady_compounder/stagnant mid-trade).
+        try:
+            initial_assessment = regime_classifier.classify(df)
+            current_regime_sub_type = initial_assessment.sub_type
+        except Exception:
+            pass  # leave as None if classification fails
+
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
 
@@ -424,12 +435,15 @@ class BacktestEngine:
                 last_scores, last_overall, last_pattern_overall = self._compute_scores(trailing_df)
 
                 # Re-evaluate market regime on trailing data
+                # Note: regime type (strong_trend, mean_reverting, etc.) is
+                # dynamic and updates each rebalance.  Sub-type is locked at
+                # the start — see initial_assessment above.
                 try:
                     regime_assessment = regime_classifier.classify(trailing_df)
                     current_regime = regime_assessment.regime
                     current_regime_trend = regime_assessment.metrics.trend_direction
                     current_regime_total_return = regime_assessment.metrics.total_return
-                    current_regime_sub_type = regime_assessment.sub_type
+                    # current_regime_sub_type is NOT updated here — locked at start
                 except Exception:
                     pass  # keep previous regime if classification fails
 
