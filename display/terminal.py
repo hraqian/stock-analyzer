@@ -204,11 +204,14 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
         confidence_pct = regime.confidence * 100
 
         regime_lines = [
-            f"[bold {r_color}]{regime.label}[/bold {r_color}]  "
-            f"[dim]Confidence: {confidence_pct:.0f}%[/dim]",
+            f"[bold {r_color}]{regime.label}[/bold {r_color}]"
+            + (f"  [bold white]({regime.sub_type_label})[/bold white]" if regime.sub_type_label else "")
+            + f"  [dim]Confidence: {confidence_pct:.0f}%[/dim]",
             f"[dim italic]{regime.description}[/dim italic]",
-            "",
         ]
+        if regime.sub_type_description:
+            regime_lines.append(f"[dim italic]Sub-type: {regime.sub_type_description}[/dim italic]")
+        regime_lines.append("")
 
         # Metrics summary
         m = regime.metrics

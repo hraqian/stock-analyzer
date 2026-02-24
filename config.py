@@ -312,6 +312,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Reason building
         "adx_dip_threshold": 3,              # rolling mean > current + this → "temporary dip"
         "runner_up_proximity_ratio": 0.7,    # runner-up score / winner score > this → mention
+        # ── Sub-type classification (Volatility × Momentum 2×2 matrix) ──
+        "sub_type": {
+            "atr_pct_threshold": 0.02,       # ATR% >= this → high volatility
+            "momentum_threshold": 0.20,      # |total_return| >= this → high momentum
+        },
         # ── Regime scoring weights ──────────────────────────────────────
         # All magic numbers used in _score_regimes(), organized by regime.
         "scoring": {
@@ -377,6 +382,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
+                "sub_types": {
+                    "explosive_mover": {
+                        "trailing_stop_atr_mult": 8.0,  # wide stop — ride volatile waves
+                        "min_distance": 0.01,
+                    },
+                    "steady_compounder": {
+                        "trailing_stop_atr_mult": 5.0,  # tighter stop for low-vol grinders
+                        "min_distance": 0.005,
+                    },
+                    "volatile_directionless": {
+                        "reduce_position_size": True,
+                        "position_size_mult": 0.5,      # half size for directionless vol
+                    },
+                    "stagnant": {
+                        # Low vol + low momentum — hold_only territory
+                    },
+                },
             },
             "mean_reverting": {
                 "use_trailing_stop": False,       # use score-based entries/exits

@@ -134,11 +134,14 @@ def _render_regime_panel(regime: "RegimeAssessment") -> None:
     confidence_pct = regime.confidence * 100
 
     lines = [
-        f"[bold {r_color}]{regime.label}[/bold {r_color}]  "
-        f"[dim]Confidence: {confidence_pct:.0f}%[/dim]",
+        f"[bold {r_color}]{regime.label}[/bold {r_color}]"
+        + (f"  [bold white]({regime.sub_type_label})[/bold white]" if regime.sub_type_label else "")
+        + f"  [dim]Confidence: {confidence_pct:.0f}%[/dim]",
         f"[dim italic]{regime.description}[/dim italic]",
-        "",
     ]
+    if regime.sub_type_description:
+        lines.append(f"[dim italic]Sub-type: {regime.sub_type_description}[/dim italic]")
+    lines.append("")
 
     # Metrics summary
     m = regime.metrics
@@ -362,7 +365,8 @@ def render_backtest(
     # Regime adaptation status
     if result.regime is not None:
         regime_label = result.regime.label
-        config_rows.append(("Regime Adaptation", f"[bold]{regime_label}[/bold]"))
+        sub_label = f" ({result.regime.sub_type_label})" if result.regime.sub_type_label else ""
+        config_rows.append(("Regime Adaptation", f"[bold]{regime_label}{sub_label}[/bold]"))
 
     for label, value in config_rows:
         config_table.add_row(label, value)

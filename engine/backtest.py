@@ -34,7 +34,7 @@ from patterns.registry import PatternRegistry
 from analysis.pattern_scorer import PatternCompositeScorer
 from engine.strategy import Signal, StrategyContext, TradeOrder
 from engine.suitability import TradingMode
-from engine.regime import RegimeClassifier, RegimeAssessment, RegimeType
+from engine.regime import RegimeClassifier, RegimeAssessment, RegimeType, RegimeSubType
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +357,7 @@ class BacktestEngine:
         current_regime: RegimeType | None = None
         current_regime_trend: str = "neutral"
         current_regime_total_return: float = 0.0
+        current_regime_sub_type: RegimeSubType | None = None
 
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
@@ -395,7 +396,7 @@ class BacktestEngine:
 
             # -- Check stop-loss / take-profit on every bar --
             if position is not None:
-                exit_reason = self._check_exit_triggers(position, close, current_regime)
+                exit_reason = self._check_exit_triggers(position, close, current_regime, current_regime_sub_type)
                 if exit_reason:
                     trade = self._close_position(
                         position, close, date_str, exit_reason
@@ -428,6 +429,7 @@ class BacktestEngine:
                     current_regime = regime_assessment.regime
                     current_regime_trend = regime_assessment.metrics.trend_direction
                     current_regime_total_return = regime_assessment.metrics.total_return
+                    current_regime_sub_type = regime_assessment.sub_type
                 except Exception:
                     pass  # keep previous regime if classification fails
 
@@ -463,6 +465,7 @@ class BacktestEngine:
                 portfolio_value=portfolio_value,
                 trend_ma=current_trend_ma,
                 regime=current_regime,
+                regime_sub_type=current_regime_sub_type,
                 regime_trend=current_regime_trend,
                 regime_total_return=current_regime_total_return,
             )
@@ -690,6 +693,7 @@ class BacktestEngine:
         position: _Position,
         current_price: float,
         regime: RegimeType | None = None,
+        regime_sub_type: RegimeSubType | None = None,
     ) -> str:
         """Check stop-loss, trailing stop, and take-profit.
 
@@ -726,7 +730,12 @@ class BacktestEngine:
         # Check trailing stop in strong_trend regime
         if regime == RegimeType.STRONG_TREND and position.entry_atr > 0:
             regime_cfg = self._cfg.section("regime")
-            adapt = regime_cfg.get("strategy_adaptation", {}).get("strong_trend", {})
+            adapt = dict(regime_cfg.get("strategy_adaptation", {}).get("strong_trend", {}))
+            # Merge sub-type overrides on top of base params
+            if regime_sub_type is not None:
+                sub_overrides = adapt.get("sub_types", {}).get(regime_sub_type.value, {})
+                if sub_overrides:
+                    adapt.update(sub_overrides)
             if adapt.get("use_trailing_stop", True):
                 trail_mult = float(adapt.get("trailing_stop_atr_mult", 4.0))
                 trail_dist = trail_mult * position.entry_atr

@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from engine.regime import RegimeType
+from engine.regime import RegimeType, RegimeSubType
 
 
 class Signal(Enum):
@@ -49,6 +49,7 @@ class StrategyContext:
     portfolio_value: float = 100_000.0  # total portfolio value
     trend_ma: float = 0.0               # short-term trend MA for confirmation filter
     regime: RegimeType | None = None    # current market regime classification
+    regime_sub_type: "RegimeSubType | None" = None  # volatility x momentum sub-type
     regime_trend: str = "neutral"       # trend direction from regime: "bullish", "bearish", "neutral"
     regime_total_return: float = 0.0    # total return over the regime analysis period
     metadata: dict[str, Any] = field(default_factory=dict)

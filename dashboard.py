@@ -1250,6 +1250,28 @@ def _edit_regime_params(data: dict) -> None:
     )
     _default_hint(_dr.get("runner_up_proximity_ratio"), PARAM_DESCRIPTIONS.get("regime.runner_up_proximity_ratio"))
 
+    # -- Sub-type classification thresholds --
+    st.markdown("---")
+    st.markdown("**Sub-Type Classification (Volatility x Momentum)**")
+    sub_type_cfg = regime.setdefault("sub_type", {})
+    _dst_cfg = _dr.get("sub_type", {})
+
+    sub_type_cfg["atr_pct_threshold"] = st.number_input(
+        "ATR% threshold (high vol)",
+        0.005, 0.10,
+        value=float(sub_type_cfg.get("atr_pct_threshold", 0.02)),
+        step=0.005, key="reg_sub_atr", format="%.3f",
+    )
+    _default_hint(_dst_cfg.get("atr_pct_threshold"), "ATR% >= this classifies as high volatility")
+
+    sub_type_cfg["momentum_threshold"] = st.number_input(
+        "Momentum threshold (high mom)",
+        0.05, 1.0,
+        value=float(sub_type_cfg.get("momentum_threshold", 0.20)),
+        step=0.05, key="reg_sub_mom", format="%.2f",
+    )
+    _default_hint(_dst_cfg.get("momentum_threshold"), "|total_return| >= this classifies as high momentum")
+
     # -- Regime scoring weights --
     st.markdown("---")
     st.markdown("**Regime Scoring Weights**")
@@ -1382,6 +1404,68 @@ def _edit_regime_params(data: dict) -> None:
         key="reg_st_respect_dir",
     )
     _default_hint(_dst.get("respect_trend_direction"), PARAM_DESCRIPTIONS.get("regime.strong_trend.respect_trend_direction"))
+
+    # Sub-type overrides for Strong Trend
+    with st.expander("Sub-Type Overrides (Strong Trend)"):
+        st_subs = st_adapt.setdefault("sub_types", {})
+        _dst_subs = _dst.get("sub_types", {})
+
+        st.caption("Override params per sub-type. These merge on top of base Strong Trend params.")
+
+        # Explosive Mover
+        st.markdown("_Explosive Mover_ (high vol + high momentum)")
+        em = st_subs.setdefault("explosive_mover", {})
+        _dem = _dst_subs.get("explosive_mover", {})
+        em["trailing_stop_atr_mult"] = st.slider(
+            "Trail ATR mult (explosive)", 2.0, 15.0,
+            value=float(em.get("trailing_stop_atr_mult", 8.0)),
+            step=0.5, key="reg_sub_em_trail", format="%.1f",
+        )
+        _default_hint(_dem.get("trailing_stop_atr_mult"), "wide stop for volatile movers")
+        em["min_distance"] = st.number_input(
+            "Min distance (explosive)", 0.001, 0.10,
+            value=float(em.get("min_distance", 0.01)),
+            step=0.005, key="reg_sub_em_dist", format="%.3f",
+        )
+        _default_hint(_dem.get("min_distance"), "price distance from MA for entry")
+
+        # Steady Compounder
+        st.markdown("_Steady Compounder_ (low vol + high momentum)")
+        sc = st_subs.setdefault("steady_compounder", {})
+        _dsc = _dst_subs.get("steady_compounder", {})
+        sc["trailing_stop_atr_mult"] = st.slider(
+            "Trail ATR mult (steady)", 2.0, 15.0,
+            value=float(sc.get("trailing_stop_atr_mult", 5.0)),
+            step=0.5, key="reg_sub_sc_trail", format="%.1f",
+        )
+        _default_hint(_dsc.get("trailing_stop_atr_mult"), "tighter stop for low-vol grinders")
+        sc["min_distance"] = st.number_input(
+            "Min distance (steady)", 0.001, 0.10,
+            value=float(sc.get("min_distance", 0.005)),
+            step=0.001, key="reg_sub_sc_dist", format="%.3f",
+        )
+        _default_hint(_dsc.get("min_distance"), "price distance from MA for entry")
+
+        # Volatile Directionless
+        st.markdown("_Volatile Directionless_ (high vol + low momentum)")
+        vd = st_subs.setdefault("volatile_directionless", {})
+        _dvd = _dst_subs.get("volatile_directionless", {})
+        vd["reduce_position_size"] = st.checkbox(
+            "Reduce position size (vol. directionless)",
+            value=bool(vd.get("reduce_position_size", True)),
+            key="reg_sub_vd_reduce",
+        )
+        _default_hint(_dvd.get("reduce_position_size"), "halve position for directionless vol")
+        vd["position_size_mult"] = st.slider(
+            "Position size mult (vol. directionless)", 0.1, 1.0,
+            value=float(vd.get("position_size_mult", 0.5)),
+            step=0.05, key="reg_sub_vd_size", format="%.2f",
+        )
+        _default_hint(_dvd.get("position_size_mult"), "fraction of normal position size")
+
+        # Stagnant — no specific overrides yet
+        st.markdown("_Stagnant_ (low vol + low momentum)")
+        st.caption("No specific overrides. Inherits base strong_trend params.")
 
     # Mean Reverting
     st.markdown("_Mean Reverting_")
@@ -2331,14 +2415,24 @@ def render_regime(regime: RegimeAssessment | None) -> None:
     confidence_pct = regime.confidence * 100
 
     # Header with colored badge
+    sub_type_html = ""
+    if regime.sub_type_label:
+        sub_type_html = (
+            f'<span style="margin-left:8px; background:#555; color:#fff; '
+            f'padding:2px 8px; border-radius:12px; font-size:0.85em;">'
+            f'{regime.sub_type_label}</span>'
+        )
     st.markdown(
         f'<div style="background:{color}22; border-left:4px solid {color}; '
         f'padding:12px 16px; border-radius:4px; margin-bottom:8px;">'
         f'<span style="font-size:1.2em; font-weight:bold; color:{color};">'
         f'{regime.label}</span>'
+        f'{sub_type_html}'
         f'<span style="margin-left:12px; color:#888;">Confidence: {confidence_pct:.0f}%</span>'
         f'<br><span style="color:#aaa; font-size:0.9em;">{regime.description}</span>'
-        f'</div>',
+        + (f'<br><span style="color:#bbb; font-size:0.85em;">Sub-type: {regime.sub_type_description}</span>'
+           if regime.sub_type_description else "")
+        + f'</div>',
         unsafe_allow_html=True,
     )
 

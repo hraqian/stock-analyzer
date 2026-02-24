@@ -41,7 +41,7 @@ from typing import Any
 
 from engine.strategy import Signal, Strategy, StrategyContext, TradeOrder
 from engine.suitability import TradingMode
-from engine.regime import RegimeType
+from engine.regime import RegimeType, RegimeSubType
 
 
 class ScoreBasedStrategy(Strategy):
@@ -246,6 +246,38 @@ class ScoreBasedStrategy(Strategy):
         self._trading_mode = mode
 
     # ------------------------------------------------------------------
+    # Sub-type adaptation
+    # ------------------------------------------------------------------
+
+    def _get_regime_adapt(
+        self,
+        regime: RegimeType | None,
+        sub_type: RegimeSubType | None = None,
+    ) -> dict[str, Any]:
+        """Return regime adaptation params, with sub-type overrides merged.
+
+        Looks up the base regime params from ``self._regime_adapt``, then
+        if a sub-type is provided, merges any matching sub-type overrides
+        on top (shallow merge -- sub-type values win).
+
+        This means e.g. an ``explosive_mover`` sub-type can override
+        ``trailing_stop_atr_mult`` while inheriting all other
+        ``strong_trend`` base params.
+        """
+        if regime is None:
+            return {}
+        base = dict(self._regime_adapt.get(regime.value, {}))
+
+        if sub_type is not None:
+            sub_types = base.get("sub_types", {})
+            overrides = sub_types.get(sub_type.value, {})
+            if overrides:
+                # Shallow merge: sub-type values override base
+                base.update(overrides)
+
+        return base
+
+    # ------------------------------------------------------------------
     # Strategy interface
     # ------------------------------------------------------------------
 
@@ -279,7 +311,7 @@ class ScoreBasedStrategy(Strategy):
 
         # ── Strong Trend: hold-with-trend logic ─────────────────────────
         if regime == RegimeType.STRONG_TREND:
-            adapt = self._regime_adapt["strong_trend"]
+            adapt = self._get_regime_adapt(regime, ctx.regime_sub_type)
             if adapt.get("hold_with_trend", True) and ctx.position != 0:
                 return self._strong_trend_hold(ctx, ind_score, pat_score)
             if adapt.get("ignore_score_entries", True) and ctx.position == 0:
@@ -414,7 +446,7 @@ class ScoreBasedStrategy(Strategy):
         hold_below = self._hold_below
 
         if regime == RegimeType.MEAN_REVERTING:
-            adapt = self._regime_adapt["mean_reverting"]
+            adapt = self._get_regime_adapt(regime)
             if adapt.get("tighten_thresholds", True):
                 adj = float(adapt.get("threshold_adjustment", 0.3))
                 short_below = self._short_below + adj   # raise floor (easier to SHORT)
@@ -443,7 +475,7 @@ class ScoreBasedStrategy(Strategy):
         Exit only if the score turns strongly against the position.
         """
         close = ctx.bar.get("close", 0.0)
-        adapt = self._regime_adapt["strong_trend"]
+        adapt = self._get_regime_adapt(RegimeType.STRONG_TREND, ctx.regime_sub_type)
         trend_direction = ctx.regime_trend
         total_return = ctx.regime_total_return
 
@@ -547,7 +579,7 @@ class ScoreBasedStrategy(Strategy):
         if trend_ma <= 0 or close <= 0:
             return None  # no trend data — fall through
 
-        adapt = self._regime_adapt["strong_trend"]
+        adapt = self._get_regime_adapt(RegimeType.STRONG_TREND, ctx.regime_sub_type)
         min_distance = float(adapt.get("min_distance", 0.01))
         min_score = float(adapt.get("min_score", 3.5))
         respect_direction = adapt.get("respect_trend_direction", True)
@@ -640,7 +672,7 @@ class ScoreBasedStrategy(Strategy):
            available in the context).
         2. Optionally, volume exceeds volume_surge_mult × average.
         """
-        adapt = self._regime_adapt["breakout_transition"]
+        adapt = self._get_regime_adapt(RegimeType.BREAKOUT_TRANSITION, ctx.regime_sub_type)
         bar = ctx.bar
 
         # Check price momentum: current bar range should indicate expansion
@@ -820,10 +852,12 @@ class ScoreBasedStrategy(Strategy):
     def _compute_quantity(
         self, ctx: StrategyContext, regime: RegimeType | None = None
     ) -> float:
-        """Compute position size, adjusted for regime.
+        """Compute position size, adjusted for regime and sub-type.
 
         In volatile/choppy regime, the position size is reduced by
         ``position_size_mult`` (default 0.5) to manage risk.
+        Sub-type overrides can also reduce position size (e.g.
+        volatile_directionless within strong_trend).
         """
         if self._sizing == "percent_equity":
             price = ctx.bar.get("close", 0.0)
@@ -834,10 +868,9 @@ class ScoreBasedStrategy(Strategy):
             qty = float(self._fixed_qty)
 
         # Regime adjustment: reduce size in volatile/choppy markets
-        if regime == RegimeType.VOLATILE_CHOPPY:
-            adapt = self._regime_adapt["volatile_choppy"]
-            if adapt.get("reduce_position_size", True):
-                mult = float(adapt.get("position_size_mult", 0.5))
-                qty = max(1.0, qty * mult)
+        adapt = self._get_regime_adapt(regime, ctx.regime_sub_type)
+        if adapt.get("reduce_position_size", False):
+            mult = float(adapt.get("position_size_mult", 0.5))
+            qty = max(1.0, qty * mult)
 
         return qty

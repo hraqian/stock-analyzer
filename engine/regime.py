@@ -46,6 +46,53 @@ class RegimeType(Enum):
     BREAKOUT_TRANSITION = "breakout_transition"
 
 
+class RegimeSubType(Enum):
+    """Volatility × Momentum sub-type within a regime.
+
+    Classifies stocks along two axes:
+        Volatility axis  → ATR% (high vs low)
+        Momentum axis    → |total_return| (high vs low)
+
+    This gives a 2×2 matrix:
+        High Vol + High Mom  → EXPLOSIVE_MOVER     (TSLA, NVDA)
+        High Vol + Low Mom   → VOLATILE_DIRECTIONLESS (RIOT, AMD)
+        Low Vol  + High Mom  → STEADY_COMPOUNDER   (KO, JPM, COST)
+        Low Vol  + Low Mom   → STAGNANT            (PEP, PG)
+    """
+    EXPLOSIVE_MOVER = "explosive_mover"
+    VOLATILE_DIRECTIONLESS = "volatile_directionless"
+    STEADY_COMPOUNDER = "steady_compounder"
+    STAGNANT = "stagnant"
+
+
+# Human-readable display labels for sub-types
+SUBTYPE_LABELS: dict[RegimeSubType, str] = {
+    RegimeSubType.EXPLOSIVE_MOVER: "Explosive Mover",
+    RegimeSubType.VOLATILE_DIRECTIONLESS: "Volatile Directionless",
+    RegimeSubType.STEADY_COMPOUNDER: "Steady Compounder",
+    RegimeSubType.STAGNANT: "Stagnant",
+}
+
+SUBTYPE_DESCRIPTIONS: dict[RegimeSubType, str] = {
+    RegimeSubType.EXPLOSIVE_MOVER: (
+        "High volatility + strong momentum. "
+        "Wide trailing stop, ride the wave."
+    ),
+    RegimeSubType.VOLATILE_DIRECTIONLESS: (
+        "High volatility but no clear direction. "
+        "Reduce size, tight stops."
+    ),
+    RegimeSubType.STEADY_COMPOUNDER: (
+        "Low volatility + consistent momentum. "
+        "Hold with trend, less reliance on trailing stop."
+    ),
+    RegimeSubType.STAGNANT: (
+        "Low volatility + low momentum. "
+        "Not ideal for active trading."
+    ),
+}
+
+
 # Human-readable display labels
 REGIME_LABELS: dict[RegimeType, str] = {
     RegimeType.STRONG_TREND: "Strong Trend",
@@ -100,12 +147,20 @@ class RegimeAssessment:
     reasons: list[str] = field(default_factory=list)
     # Per-regime scores (0-1) — useful for seeing how close to other regimes
     regime_scores: dict[str, float] = field(default_factory=dict)
+    # Sub-type classification (volatility × momentum)
+    sub_type: RegimeSubType | None = None
+    sub_type_label: str = ""
+    sub_type_description: str = ""
 
     def __post_init__(self) -> None:
         if not self.label:
             self.label = REGIME_LABELS.get(self.regime, self.regime.value)
         if not self.description:
             self.description = REGIME_DESCRIPTIONS.get(self.regime, "")
+        if self.sub_type and not self.sub_type_label:
+            self.sub_type_label = SUBTYPE_LABELS.get(self.sub_type, self.sub_type.value)
+        if self.sub_type and not self.sub_type_description:
+            self.sub_type_description = SUBTYPE_DESCRIPTIONS.get(self.sub_type, "")
 
 
 class RegimeClassifier:
@@ -169,6 +224,11 @@ class RegimeClassifier:
         # ── Scoring weights (nested dict) ───────────────────────────────
         self._scoring: dict[str, dict[str, float]] = r.get("scoring", {})
 
+        # ── Sub-type classification thresholds ──────────────────────────
+        sub = r.get("sub_type", {})
+        self._sub_atr_pct_threshold: float = float(sub.get("atr_pct_threshold", 0.02))
+        self._sub_momentum_threshold: float = float(sub.get("momentum_threshold", 0.20))
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -196,13 +256,42 @@ class RegimeClassifier:
         # Build human-readable reasons
         reasons = self._build_reasons(metrics, scores)
 
+        # Classify sub-type (volatility × momentum)
+        sub_type = self._classify_sub_type(metrics)
+
         return RegimeAssessment(
             regime=best_regime,
             confidence=confidence,
             metrics=metrics,
             reasons=reasons,
             regime_scores={rt.value: round(s, 3) for rt, s in scores.items()},
+            sub_type=sub_type,
         )
+
+    # ------------------------------------------------------------------
+    # Sub-type classification (Volatility × Momentum 2×2 matrix)
+    # ------------------------------------------------------------------
+
+    def _classify_sub_type(self, m: RegimeMetrics) -> RegimeSubType:
+        """Classify the volatility × momentum sub-type.
+
+        Uses two axes from RegimeMetrics:
+            Volatility:  atr_pct  (high if >= threshold, low otherwise)
+            Momentum:    |total_return| (high if >= threshold, low otherwise)
+
+        Returns one of four sub-types regardless of the primary regime.
+        """
+        high_vol = m.atr_pct >= self._sub_atr_pct_threshold
+        high_mom = abs(m.total_return) >= self._sub_momentum_threshold
+
+        if high_vol and high_mom:
+            return RegimeSubType.EXPLOSIVE_MOVER
+        elif high_vol and not high_mom:
+            return RegimeSubType.VOLATILE_DIRECTIONLESS
+        elif not high_vol and high_mom:
+            return RegimeSubType.STEADY_COMPOUNDER
+        else:
+            return RegimeSubType.STAGNANT
 
     # ------------------------------------------------------------------
     # Metric computation
