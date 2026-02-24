@@ -507,16 +507,16 @@ regime:
       min_score: 3.5                # don't enter when indicators are strongly bearish
       respect_trend_direction: true  # only enter in direction of long-term trend
       # ── Sub-type overrides (merged on top of base strong_trend params) ──
+      # NOTE: Sub-types are most useful for classification/display. Strategy
+      # overrides should be conservative because sub-type can change mid-trade.
+      # Keep trailing stop consistent; only vary entry criteria.
       sub_types:
         explosive_mover:             # high vol + high momentum (TSLA, NVDA)
-          trailing_stop_atr_mult: 8.0  # wide stop — ride volatile waves
-          min_distance: 0.01
+          min_distance: 0.015          # require stronger trend confirmation for entry
         steady_compounder:           # low vol + high momentum (KO, JPM, COST)
-          trailing_stop_atr_mult: 5.0  # tighter stop for low-vol grinders
-          min_distance: 0.005
+          min_distance: 0.005          # enter sooner — low-vol grinders don't pull far from MA
         volatile_directionless:      # high vol + low momentum (RIOT, AMD)
-          reduce_position_size: true
-          position_size_mult: 0.5    # half size for directionless vol
+          min_score: 4.5               # higher score floor — skip marginal setups
         stagnant:                    # low vol + low momentum — hold_only territory
     mean_reverting:
       use_trailing_stop: false

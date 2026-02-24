@@ -1410,58 +1410,41 @@ def _edit_regime_params(data: dict) -> None:
         st_subs = st_adapt.setdefault("sub_types", {})
         _dst_subs = _dst.get("sub_types", {})
 
-        st.caption("Override params per sub-type. These merge on top of base Strong Trend params.")
+        st.caption("Override entry params per sub-type. These merge on top of base Strong Trend params. "
+                   "Trailing stop stays consistent across sub-types to avoid mid-trade disruption.")
 
         # Explosive Mover
         st.markdown("_Explosive Mover_ (high vol + high momentum)")
         em = st_subs.setdefault("explosive_mover", {})
         _dem = _dst_subs.get("explosive_mover", {})
-        em["trailing_stop_atr_mult"] = st.slider(
-            "Trail ATR mult (explosive)", 2.0, 15.0,
-            value=float(em.get("trailing_stop_atr_mult", 8.0)),
-            step=0.5, key="reg_sub_em_trail", format="%.1f",
-        )
-        _default_hint(_dem.get("trailing_stop_atr_mult"), "wide stop for volatile movers")
         em["min_distance"] = st.number_input(
             "Min distance (explosive)", 0.001, 0.10,
-            value=float(em.get("min_distance", 0.01)),
+            value=float(em.get("min_distance", 0.015)),
             step=0.005, key="reg_sub_em_dist", format="%.3f",
         )
-        _default_hint(_dem.get("min_distance"), "price distance from MA for entry")
+        _default_hint(_dem.get("min_distance"), "require stronger trend confirmation for entry")
 
         # Steady Compounder
         st.markdown("_Steady Compounder_ (low vol + high momentum)")
         sc = st_subs.setdefault("steady_compounder", {})
         _dsc = _dst_subs.get("steady_compounder", {})
-        sc["trailing_stop_atr_mult"] = st.slider(
-            "Trail ATR mult (steady)", 2.0, 15.0,
-            value=float(sc.get("trailing_stop_atr_mult", 5.0)),
-            step=0.5, key="reg_sub_sc_trail", format="%.1f",
-        )
-        _default_hint(_dsc.get("trailing_stop_atr_mult"), "tighter stop for low-vol grinders")
         sc["min_distance"] = st.number_input(
             "Min distance (steady)", 0.001, 0.10,
             value=float(sc.get("min_distance", 0.005)),
             step=0.001, key="reg_sub_sc_dist", format="%.3f",
         )
-        _default_hint(_dsc.get("min_distance"), "price distance from MA for entry")
+        _default_hint(_dsc.get("min_distance"), "enter sooner — low-vol grinders don't pull far from MA")
 
         # Volatile Directionless
         st.markdown("_Volatile Directionless_ (high vol + low momentum)")
         vd = st_subs.setdefault("volatile_directionless", {})
         _dvd = _dst_subs.get("volatile_directionless", {})
-        vd["reduce_position_size"] = st.checkbox(
-            "Reduce position size (vol. directionless)",
-            value=bool(vd.get("reduce_position_size", True)),
-            key="reg_sub_vd_reduce",
+        vd["min_score"] = st.slider(
+            "Min score (vol. directionless)", 1.0, 8.0,
+            value=float(vd.get("min_score", 4.5)),
+            step=0.1, key="reg_sub_vd_minscore", format="%.1f",
         )
-        _default_hint(_dvd.get("reduce_position_size"), "halve position for directionless vol")
-        vd["position_size_mult"] = st.slider(
-            "Position size mult (vol. directionless)", 0.1, 1.0,
-            value=float(vd.get("position_size_mult", 0.5)),
-            step=0.05, key="reg_sub_vd_size", format="%.2f",
-        )
-        _default_hint(_dvd.get("position_size_mult"), "fraction of normal position size")
+        _default_hint(_dvd.get("min_score"), "higher floor — skip marginal setups")
 
         # Stagnant — no specific overrides yet
         st.markdown("_Stagnant_ (low vol + low momentum)")

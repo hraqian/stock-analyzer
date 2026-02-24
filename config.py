@@ -384,16 +384,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
                 "sub_types": {
                     "explosive_mover": {
-                        "trailing_stop_atr_mult": 8.0,  # wide stop — ride volatile waves
-                        "min_distance": 0.01,
+                        "min_distance": 0.015,             # require stronger trend confirmation
                     },
                     "steady_compounder": {
-                        "trailing_stop_atr_mult": 5.0,  # tighter stop for low-vol grinders
-                        "min_distance": 0.005,
+                        "min_distance": 0.005,             # enter sooner — low-vol grinders
                     },
                     "volatile_directionless": {
-                        "reduce_position_size": True,
-                        "position_size_mult": 0.5,      # half size for directionless vol
+                        "min_score": 4.5,                  # higher score floor
                     },
                     "stagnant": {
                         # Low vol + low momentum — hold_only territory
