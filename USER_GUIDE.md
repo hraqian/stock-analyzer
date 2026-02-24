@@ -18,6 +18,7 @@ configurable parameter in `config.yaml`.
 9. [Strategy Parameters](#strategy-parameters)
 10. [Backtest Parameters](#backtest-parameters)
 11. [Market Regime Classification](#market-regime-classification)
+    - [Sub-Type Classification](#sub-type-classification)
 12. [Trading Mode Suitability](#trading-mode-suitability)
 13. [Objective Presets](#objective-presets)
 14. [Tips & Troubleshooting](#tips--troubleshooting)
@@ -724,7 +725,7 @@ backtesting.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `strategy_adaptation.strong_trend.use_trailing_stop` | true | Trail stop instead of score-based exits |
-| `strategy_adaptation.strong_trend.trailing_stop_atr_mult` | 4.0 | Trailing stop = N x ATR |
+| `strategy_adaptation.strong_trend.trailing_stop_atr_mult` | 8.0 | Trailing stop = N x ATR |
 | `strategy_adaptation.strong_trend.ignore_score_entries` | true | Don't use score thresholds for entry |
 | `strategy_adaptation.strong_trend.hold_with_trend` | true | Stay in position while trend persists |
 | `strategy_adaptation.strong_trend.min_distance` | 0.01 | Price must be 1%+ from MA for entry |
@@ -756,6 +757,50 @@ backtesting.
 | `strategy_adaptation.breakout_transition.breakout_atr_mult` | 1.5 | Price must move N x ATR from squeeze level |
 | `strategy_adaptation.breakout_transition.require_volume_surge` | true | Require above-avg volume |
 | `strategy_adaptation.breakout_transition.volume_surge_mult` | 1.3 | Volume must be N x average |
+
+### Sub-Type Classification
+
+Section: `regime.sub_type`
+
+Within each regime, stocks are further classified along two axes into a
+**Volatility × Momentum 2×2 matrix**. This provides more granular labels
+for display in both the CLI and dashboard.
+
+|                    | High Momentum (≥ 20%) | Low Momentum (< 20%) |
+|--------------------|----------------------|----------------------|
+| **High Vol (≥ 3.5% ATR)** | **Explosive Mover** (TSLA, NVDA, MARA) | **Volatile Directionless** (AMD, RIOT) |
+| **Low Vol (< 3.5% ATR)** | **Steady Compounder** (KO, JPM, AAPL, XOM) | **Stagnant** (PEP, PG, MSFT) |
+
+The sub-type label and description appear in the regime section of both
+CLI analysis output and backtest results. They help you quickly understand
+a stock's character beyond just the primary regime.
+
+#### Sub-type thresholds
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `regime.sub_type.atr_pct_threshold` | 0.035 | ATR% ≥ this → high volatility |
+| `regime.sub_type.momentum_threshold` | 0.20 | \|total_return\| ≥ this → high momentum |
+
+#### Sub-type strategy overrides
+
+Section: `regime.strategy_adaptation.strong_trend.sub_types`
+
+Override slots exist for each sub-type (`explosive_mover`,
+`steady_compounder`, `volatile_directionless`, `stagnant`). Values merge
+on top of the base regime params via shallow merge.
+
+**Currently all overrides are empty** — the base `strong_trend` params
+(trailing stop at 8× ATR, etc.) already handle all sub-types well.
+Tested entry-only overrides (`min_distance`, `min_score`) but they were
+either no-ops or caused regressions. Override slots remain available for
+future tuning.
+
+> **Design constraint**: Sub-type classification uses trailing-window
+> metrics that can change mid-trade. Overrides should be limited to
+> **entry-time parameters** (like `min_distance`, `min_score`), never
+> ongoing position management params (`trailing_stop_atr_mult`,
+> `reduce_position_size`) — those cause harmful mid-trade disruption.
 
 ---
 
