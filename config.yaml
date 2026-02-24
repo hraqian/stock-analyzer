@@ -441,7 +441,7 @@ regime:
   #   High Volatility | Explosive Mover    | Volatile Directionless
   #   Low Volatility  | Steady Compounder  | Stagnant
   sub_type:
-    atr_pct_threshold: 0.02          # ATR% >= this → high volatility axis
+    atr_pct_threshold: 0.035         # ATR% >= this → high volatility axis
     momentum_threshold: 0.20         # |total_return| >= this → high momentum axis
 
   # ── Regime Scoring Weights ─────────────────────────────────────────────
@@ -513,8 +513,8 @@ regime:
       # Base strong_trend params already handle all sub-types well.
       # Override slots remain for future tuning via optimize.py grid search.
       sub_types:
-        explosive_mover: {}          # high vol + high momentum (TSLA, NVDA)
-        steady_compounder: {}        # low vol + high momentum (KO, JPM, COST)
+        explosive_mover: {}          # high vol + high momentum (TSLA, NVDA, MARA)
+        steady_compounder: {}        # low vol + high momentum (KO, JPM, COST, AAPL, XOM)
         volatile_directionless: {}   # high vol + low momentum (RIOT, AMD)
         stagnant: {}                 # low vol + low momentum
     mean_reverting:

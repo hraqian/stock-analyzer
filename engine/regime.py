@@ -54,9 +54,9 @@ class RegimeSubType(Enum):
         Momentum axis    → |total_return| (high vs low)
 
     This gives a 2×2 matrix:
-        High Vol + High Mom  → EXPLOSIVE_MOVER     (TSLA, NVDA)
+        High Vol + High Mom  → EXPLOSIVE_MOVER     (TSLA, NVDA, MARA)
         High Vol + Low Mom   → VOLATILE_DIRECTIONLESS (RIOT, AMD)
-        Low Vol  + High Mom  → STEADY_COMPOUNDER   (KO, JPM, COST)
+        Low Vol  + High Mom  → STEADY_COMPOUNDER   (KO, JPM, COST, AAPL, XOM)
         Low Vol  + Low Mom   → STAGNANT            (PEP, PG)
     """
     EXPLOSIVE_MOVER = "explosive_mover"

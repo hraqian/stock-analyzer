@@ -314,7 +314,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "runner_up_proximity_ratio": 0.7,    # runner-up score / winner score > this → mention
         # ── Sub-type classification (Volatility × Momentum 2×2 matrix) ──
         "sub_type": {
-            "atr_pct_threshold": 0.02,       # ATR% >= this → high volatility
+            "atr_pct_threshold": 0.035,      # ATR% >= this → high volatility
             "momentum_threshold": 0.20,      # |total_return| >= this → high momentum
         },
         # ── Regime scoring weights ──────────────────────────────────────

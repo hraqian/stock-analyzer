@@ -1416,8 +1416,8 @@ def _edit_regime_params(data: dict) -> None:
                    "You can add custom overrides below; they merge on top of base params.")
 
         for sub_name, sub_desc in [
-            ("explosive_mover", "High vol + high momentum (TSLA, NVDA)"),
-            ("steady_compounder", "Low vol + high momentum (KO, JPM, COST)"),
+            ("explosive_mover", "High vol + high momentum (TSLA, NVDA, MARA)"),
+            ("steady_compounder", "Low vol + high momentum (KO, JPM, COST, AAPL, XOM)"),
             ("volatile_directionless", "High vol + low momentum (RIOT, AMD)"),
             ("stagnant", "Low vol + low momentum"),
         ]:
