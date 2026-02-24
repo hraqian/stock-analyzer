@@ -145,7 +145,7 @@ class ScoreBasedStrategy(Strategy):
         self._regime_adapt: dict[str, dict[str, Any]] = {
             "strong_trend": ra.get("strong_trend", {
                 "use_trailing_stop": True,
-                "trailing_stop_atr_mult": 4.0,
+                "trailing_stop_atr_mult": 8.0,
                 "ignore_score_entries": True,
                 "hold_with_trend": True,
                 "min_distance": 0.01,       # 1% from MA for trend entry

@@ -146,7 +146,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "position_sizing": "percent_equity",
         "fixed_quantity": 100,
-        "percent_equity": 0.80,
+        "percent_equity": 1.00,
         "stop_loss_pct": 0.05,
         "take_profit_pct": 0.30,
         "rebalance_interval": 5,
@@ -202,7 +202,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "initial_cash": 100_000.0,
         "commission_per_trade": 0.0,
         "slippage_pct": 0.001,
-        "warmup_bars": 100,
+        "warmup_bars": 50,
         "max_warmup_ratio": 0.5,       # warmup can't exceed this fraction of total data
         "significant_pattern_min_strength": 0.5,
         "min_warmup_bars": 20,          # absolute floor for proportional warmup
@@ -371,7 +371,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strategy_adaptation": {
             "strong_trend": {
                 "use_trailing_stop": True,       # trail stop instead of score-based exits
-                "trailing_stop_atr_mult": 4.0,   # trailing stop = N × ATR
+                "trailing_stop_atr_mult": 8.0,   # trailing stop = N × ATR
                 "ignore_score_entries": True,     # don't use score thresholds for entry
                 "hold_with_trend": True,          # stay in position while trend persists
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
