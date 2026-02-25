@@ -125,7 +125,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "adx": 0.10,
             "volume": 0.10,
             "fibonacci": 0.10,
-        }
+        },
+        "subgroup_mode": "directional",  # "directional" or "average" (legacy)
+        "indicator_groups": {
+            "trend": ["moving_averages", "macd", "adx", "volume"],
+            "contrarian": ["rsi", "stochastic", "bollinger_bands"],
+            "neutral": ["fibonacci"],
+        },
+        "subgroup_blend": {
+            "dominant_weight": 0.6,
+            "other_weight": 0.25,
+            "neutral_weight": 0.15,
+        },
+        "score_spreading": {
+            "enabled": True,
+            "factor": 2.0,
+        },
     },
     "display": {
         "show_disclaimer": True,
@@ -274,6 +289,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "candlesticks": 0.25,
             "spikes": 0.15,
             "inside_outside": 0.15,
+        },
+        "score_spreading": {
+            "enabled": True,
+            "factor": 2.0,
         },
     },
     # ------------------------------------------------------------------

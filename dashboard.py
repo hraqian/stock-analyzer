@@ -477,6 +477,71 @@ def _edit_indicator_weights(data: dict) -> None:
         st.warning("All weights are zero — equal weighting will be used.")
 
 
+def _edit_composite_scoring(data: dict) -> None:
+    """Editable composite scoring params: subgroup mode and score spreading."""
+    overall = data.setdefault("overall", {})
+    defaults = DEFAULT_CONFIG.get("overall", {})
+
+    # Subgroup mode
+    modes = ["directional", "average"]
+    current_mode = str(overall.get("subgroup_mode", "directional"))
+    idx = modes.index(current_mode) if current_mode in modes else 0
+    new_mode = st.selectbox(
+        "Subgroup mode", modes, index=idx, key="cs_subgroup_mode",
+    )
+    overall["subgroup_mode"] = new_mode
+    _default_hint("directional", "directional = dominant signal wins; average = legacy flat avg")
+
+    if new_mode == "directional":
+        blend = overall.setdefault("subgroup_blend", {})
+        def_blend = defaults.get("subgroup_blend", {})
+
+        dom_w = st.slider(
+            "Dominant weight", 0.0, 1.0,
+            float(blend.get("dominant_weight", 0.6)),
+            step=0.05, key="cs_dom_w", format="%.2f",
+        )
+        blend["dominant_weight"] = dom_w
+        _default_hint(def_blend.get("dominant_weight"), "weight for the stronger subgroup")
+
+        oth_w = st.slider(
+            "Other weight", 0.0, 1.0,
+            float(blend.get("other_weight", 0.25)),
+            step=0.05, key="cs_oth_w", format="%.2f",
+        )
+        blend["other_weight"] = oth_w
+        _default_hint(def_blend.get("other_weight"), "weight for the weaker subgroup")
+
+        neu_w = st.slider(
+            "Neutral weight", 0.0, 1.0,
+            float(blend.get("neutral_weight", 0.15)),
+            step=0.05, key="cs_neu_w", format="%.2f",
+        )
+        blend["neutral_weight"] = neu_w
+        _default_hint(def_blend.get("neutral_weight"), "weight for neutral indicators (fibonacci)")
+
+    # Score spreading
+    spread = overall.setdefault("score_spreading", {})
+    def_spread = defaults.get("score_spreading", {})
+
+    spread_on = st.checkbox(
+        "Enable score spreading",
+        value=bool(spread.get("enabled", True)),
+        key="cs_spread_on",
+    )
+    spread["enabled"] = spread_on
+    _default_hint(True, "rescale scores around 5.0 to expand range")
+
+    if spread_on:
+        factor = st.slider(
+            "Spread factor", 1.0, 4.0,
+            float(spread.get("factor", 2.0)),
+            step=0.1, key="cs_spread_f", format="%.1f",
+        )
+        spread["factor"] = factor
+        _default_hint(def_spread.get("factor"), "2.0 expands ~4-6 range to ~2-8")
+
+
 def _edit_indicator_params(data: dict) -> None:
     """Editable indicator parameter inputs, one expander per indicator."""
     indicator_params = {
@@ -2228,6 +2293,24 @@ def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
     )
     st.markdown(html, unsafe_allow_html=True)
 
+    # Subgroup breakdown (if directional mode is active)
+    trend_s = result.composite.get("trend_score")
+    contrarian_s = result.composite.get("contrarian_score")
+    neutral_s = result.composite.get("neutral_score")
+    dominant = result.composite.get("dominant_group")
+    overall_raw = result.composite.get("overall_raw")
+    if trend_s is not None and contrarian_s is not None:
+        parts = [
+            f"Trend: **{trend_s:.1f}**",
+            f"Contrarian: **{contrarian_s:.1f}**",
+            f"Neutral: **{neutral_s:.1f}**" if neutral_s is not None else None,
+            f"Dominant: **{dominant}**" if dominant and dominant != "none" else None,
+        ]
+        if overall_raw is not None:
+            parts.append(f"Pre-spread: {overall_raw:.1f}")
+        detail = " · ".join(p for p in parts if p)
+        st.caption(f"Subgroup scores: {detail}")
+
 
 def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
     """Render pattern breakdown with color-coded score bars."""
@@ -2561,6 +2644,18 @@ def render_stock_overview(
     with col4:
         st.metric("Pattern Score", f"{overall_pat:.1f} / 10")
 
+    # Subgroup score summary (compact)
+    trend_s = result.composite.get("trend_score")
+    contrarian_s = result.composite.get("contrarian_score")
+    dominant = result.composite.get("dominant_group")
+    if trend_s is not None and contrarian_s is not None:
+        dom_label = dominant.title() if dominant and dominant != "none" else "—"
+        st.caption(
+            f"Subgroups — Trend: {trend_s:.1f} · "
+            f"Contrarian: {contrarian_s:.1f} · "
+            f"Dominant: {dom_label}"
+        )
+
     # ── Regime & Sub-Type (prominent display) ─────────────────────────────
     if result.regime is not None:
         render_regime(result.regime)
@@ -2881,6 +2976,9 @@ def render_custom_backtest_params() -> dict:
     with st.expander("Indicator Weights"):
         _edit_indicator_weights(data)
 
+    with st.expander("Composite Scoring"):
+        _edit_composite_scoring(data)
+
     with st.expander("Indicator Parameters"):
         _edit_indicator_params(data)
 
@@ -3021,8 +3119,9 @@ def _build_scanner_results_html(
         "<th>Signal</th>"
         "<th>Conf</th>"
         "<th>Score</th>"
-        "<th style='width:100px;'>Ind</th>"
-        "<th style='width:100px;'>Pat</th>"
+        "<th style='width:80px;'>Trend</th>"
+        "<th style='width:80px;'>Contr</th>"
+        "<th style='width:80px;'>Pat</th>"
         "<th style='text-align:right;'>Price</th>"
         "<th>Regime</th>"
         "<th>Sub-Type</th>"
@@ -3036,6 +3135,13 @@ def _build_scanner_results_html(
             "high": COLOR_BULLISH, "medium": COLOR_NEUTRAL, "low": "#666",
         }.get(r.confidence, "#666")
 
+        # Dominant group indicator
+        dom = r.dominant_group if hasattr(r, "dominant_group") else "none"
+        trend_label = f"{r.trend_score:.1f}" if hasattr(r, "trend_score") else "—"
+        contr_label = f"{r.contrarian_score:.1f}" if hasattr(r, "contrarian_score") else "—"
+        trend_style = "font-weight:700;" if dom == "trend" else ""
+        contr_style = "font-weight:700;" if dom == "contrarian" else ""
+
         row = (
             f"<tr>"
             f"<td style='color:#888;'>{i}</td>"
@@ -3044,7 +3150,10 @@ def _build_scanner_results_html(
             f"<td style='color:{conf_color};font-size:0.75rem;'>"
             f"{_confidence_dots(r.confidence)}</td>"
             f"<td>{score_bar_html(r.effective_score, width=80)}</td>"
-            f"<td>{score_bar_html(r.indicator_score, width=60)}</td>"
+            f"<td style='{trend_style}'>"
+            f"{score_bar_html(r.trend_score, width=60) if hasattr(r, 'trend_score') else '—'}</td>"
+            f"<td style='{contr_style}'>"
+            f"{score_bar_html(r.contrarian_score, width=60) if hasattr(r, 'contrarian_score') else '—'}</td>"
             f"<td>{score_bar_html(r.pattern_score, width=60)}</td>"
             f"<td style='text-align:right;font-family:monospace;'>"
             f"${r.price:,.2f}</td>"

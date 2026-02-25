@@ -138,6 +138,23 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
         f"[bold {overall_color}]{overall:.{score_dp}f}  {overall_bar}[/bold {overall_color}]",
     )
 
+    # Subgroup breakdown (if directional mode)
+    trend_s = result.composite.get("trend_score")
+    contrarian_s = result.composite.get("contrarian_score")
+    dominant = result.composite.get("dominant_group")
+    if trend_s is not None and contrarian_s is not None:
+        trend_c = _score_color(trend_s, color_thresholds)
+        contr_c = _score_color(contrarian_s, color_thresholds)
+        dom_label = f"  ← dominant" if dominant else ""
+        table.add_row(
+            "[dim]  subgroups[/dim]",
+            "",
+            f"[dim]Trend: [{trend_c}]{trend_s:.1f}[/{trend_c}] | "
+            f"Contrarian: [{contr_c}]{contrarian_s:.1f}[/{contr_c}] | "
+            f"Dominant: {dominant or 'n/a'}[/dim]",
+            "",
+        )
+
     console.print(table)
 
     # ── Pattern Signals Table ────────────────────────────────────────────────

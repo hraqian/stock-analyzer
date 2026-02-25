@@ -140,6 +140,29 @@ overall:
     volume: 0.10
     fibonacci: 0.10
 
+  # Subgroup scoring mode: "directional" (default) or "average" (legacy flat avg)
+  # "directional" groups indicators into trend/contrarian/neutral and weights the
+  # dominant signal higher to prevent cancellation between opposing indicator types.
+  subgroup_mode: "directional"
+
+  # Which indicators belong to each subgroup
+  indicator_groups:
+    trend: [moving_averages, macd, adx, volume]
+    contrarian: [rsi, stochastic, bollinger_bands]
+    neutral: [fibonacci]
+
+  # Blend weights for directional mode — how to combine subgroup scores
+  subgroup_blend:
+    dominant_weight: 0.6       # weight for whichever subgroup deviates more from 5.0
+    other_weight: 0.25         # weight for the other trend/contrarian subgroup
+    neutral_weight: 0.15       # weight for the neutral subgroup
+
+  # Post-composite score spreading to expand the typical narrow range
+  # Formula: spread = 5.0 + (raw - 5.0) * factor, clamped to [0, 10]
+  score_spreading:
+    enabled: true
+    factor: 2.0                # 2.0 expands typical 4.0-6.0 range to ~2.0-8.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Pattern Signal Detectors
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +236,11 @@ overall_patterns:
     candlesticks: 0.25
     spikes: 0.15
     inside_outside: 0.15
+
+  # Post-composite score spreading (same formula as indicator spreading)
+  score_spreading:
+    enabled: true
+    factor: 2.0
 
 display:
   show_disclaimer: true

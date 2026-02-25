@@ -61,6 +61,9 @@ class ScanResult:
     sub_type: str  # e.g. "steady_compounder"
     sub_type_label: str
     strategy_notes: str
+    trend_score: float = 5.0
+    contrarian_score: float = 5.0
+    dominant_group: str = "none"
     error: str = ""  # non-empty if the ticker failed
 
     @property
@@ -324,6 +327,9 @@ class Scanner:
             sub_type=sub_val,
             sub_type_label=sub_label,
             strategy_notes=order.notes or "",
+            trend_score=result.composite.get("trend_score", 5.0),
+            contrarian_score=result.composite.get("contrarian_score", 5.0),
+            dominant_group=result.composite.get("dominant_group", "none"),
         )
 
     # ── Ranking helpers ──────────────────────────────────────────────────
