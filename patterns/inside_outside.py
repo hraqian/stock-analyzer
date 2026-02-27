@@ -44,6 +44,14 @@ class InsideOutsidePattern(BasePattern):
         # Minimum range expansion for outside bar (curr_range / prev_range)
         outside_range_min = float(self.config.get("outside_range_min", 1.2))
 
+        # Strength values: (with_trend, against_trend)
+        _sv = self.config.get("strength_values", {})
+        s_inside_breakout_with = float(_sv.get("inside_breakout_with_trend", 1.0))
+        s_inside_breakout_against = float(_sv.get("inside_breakout_against_trend", 0.6))
+        s_inside_pending = float(_sv.get("inside_pending", 0.3))
+        s_outside_reversal = float(_sv.get("outside_reversal", 1.0))
+        s_outside_continuation = float(_sv.get("outside_continuation", 0.7))
+
         if len(df) < trend_period + 2:
             return {
                 "patterns": [], "recent_patterns": [],
@@ -90,7 +98,7 @@ class InsideOutsidePattern(BasePattern):
                         break
 
                 if breakout_dir == "up":
-                    strength = 1.0 if in_uptrend else 0.6
+                    strength = s_inside_breakout_with if in_uptrend else s_inside_breakout_against
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],
@@ -99,7 +107,7 @@ class InsideOutsidePattern(BasePattern):
                         "strength": strength,
                     })
                 elif breakout_dir == "down":
-                    strength = 1.0 if in_downtrend else 0.6
+                    strength = s_inside_breakout_with if in_downtrend else s_inside_breakout_against
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],
@@ -114,7 +122,7 @@ class InsideOutsidePattern(BasePattern):
                         "date": str(df.index[i])[:10],
                         "pattern": "inside_bar_pending",
                         "signal": "neutral",
-                        "strength": 0.3,
+                        "strength": s_inside_pending,
                     })
 
             # --- Outside Bar ---
@@ -124,7 +132,7 @@ class InsideOutsidePattern(BasePattern):
                 is_bearish_close = c < o
 
                 if is_bullish_close:
-                    strength = 1.0 if in_downtrend else 0.7  # reversal is stronger
+                    strength = s_outside_reversal if in_downtrend else s_outside_continuation
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],
@@ -133,7 +141,7 @@ class InsideOutsidePattern(BasePattern):
                         "strength": strength,
                     })
                 elif is_bearish_close:
-                    strength = 1.0 if in_uptrend else 0.7  # reversal is stronger
+                    strength = s_outside_reversal if in_uptrend else s_outside_continuation
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],

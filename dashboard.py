@@ -1873,9 +1873,10 @@ def compute_score_timeseries(
     )
 
     warmup = int(cfg.section("backtest").get("warmup_bars", 200))
+    warmup_min = int(cfg.section("backtest").get("warmup_min_bars", 20))
     warmup = min(warmup, len(df) - 10)  # ensure we have some data after warmup
-    if warmup < 20:
-        warmup = 20
+    if warmup < warmup_min:
+        warmup = warmup_min
 
     dates = []
     ind_scores = []
@@ -2032,8 +2033,8 @@ def create_price_chart(
             thresholds = cfg.section("strategy").get("score_thresholds", {})
         else:
             thresholds = {}
-        short_below = float(thresholds.get("short_below", 4.5))
-        hold_below = float(thresholds.get("hold_below", 5.5))
+        short_below = float(thresholds.get("short_below", 3.5))
+        hold_below = float(thresholds.get("hold_below", 6.0))
 
         fig.add_hline(
             y=hold_below, line_dash="dot", line_color=COLOR_BULLISH,
@@ -2205,8 +2206,8 @@ def create_score_histogram(score_df: pd.DataFrame, cfg: Config | None = None) ->
         thresholds = cfg.section("strategy").get("score_thresholds", {})
     else:
         thresholds = {}
-    short_below = float(thresholds.get("short_below", 4.5))
-    hold_below = float(thresholds.get("hold_below", 5.5))
+    short_below = float(thresholds.get("short_below", 3.5))
+    hold_below = float(thresholds.get("hold_below", 6.0))
 
     fig.add_vline(x=short_below, line_dash="dash", line_color=COLOR_BEARISH,
                   annotation_text=f"SHORT < {short_below}", annotation_font_size=10)
@@ -2827,18 +2828,24 @@ def compute_recommendation(
             effective_score = overall_score
 
     # Confidence: how far the effective score is from the nearest threshold
+    conf_cfg = strat_cfg.get("confidence_thresholds", {})
+    conf_high = float(conf_cfg.get("high", 1.5))
+    conf_med = float(conf_cfg.get("medium", 0.5))
+    hold_conf_high = float(conf_cfg.get("hold_high", 1.0))
+    hold_conf_med = float(conf_cfg.get("hold_medium", 0.3))
+
     if signal == "BUY":
         distance = effective_score - hold_below
-        confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+        confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
     elif signal == "SELL":
         distance = short_below - effective_score
-        confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+        confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
     else:
         # HOLD — confidence reflects how firmly neutral
         dist_to_buy = hold_below - effective_score
         dist_to_sell = effective_score - short_below
         min_dist = min(dist_to_buy, dist_to_sell)
-        confidence = "high" if min_dist >= 1.0 else ("medium" if min_dist >= 0.3 else "low")
+        confidence = "high" if min_dist >= hold_conf_high else ("medium" if min_dist >= hold_conf_med else "low")
 
     # ── Build reasons list ───────────────────────────────────────────────
     reasons: list[str] = []

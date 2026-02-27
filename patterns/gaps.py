@@ -106,6 +106,7 @@ class GapPattern(BasePattern):
         type_weights = self.config.get("type_weights", {
             "common": 0.3, "runaway": 0.7, "breakaway": 1.0, "exhaustion": 0.5,
         })
+        gap_pct_scale = float(self.config.get("gap_pct_scale", 100))
 
         for g in recent_gaps:
             w = float(type_weights.get(g["gap_type"], 0.5))
@@ -116,15 +117,15 @@ class GapPattern(BasePattern):
             if g["direction"] == "up":
                 if g["gap_type"] == "exhaustion":
                     # Exhaustion gap up = potential reversal DOWN (bearish)
-                    net_score -= w * recency * g["gap_pct"] * 100
+                    net_score -= w * recency * g["gap_pct"] * gap_pct_scale
                 else:
-                    net_score += w * recency * g["gap_pct"] * 100
+                    net_score += w * recency * g["gap_pct"] * gap_pct_scale
             else:
                 if g["gap_type"] == "exhaustion":
                     # Exhaustion gap down = potential reversal UP (bullish)
-                    net_score += w * recency * g["gap_pct"] * 100
+                    net_score += w * recency * g["gap_pct"] * gap_pct_scale
                 else:
-                    net_score -= w * recency * g["gap_pct"] * 100
+                    net_score -= w * recency * g["gap_pct"] * gap_pct_scale
 
         return {
             "gaps": gaps,

@@ -39,6 +39,8 @@ class SpikePattern(BasePattern):
         confirm_bars = int(self.config.get("confirm_bars", 3))
         confirm_pct = float(self.config.get("confirm_pct", 0.5))
         lookback = int(self.config.get("lookback", 20))
+        z_magnitude_cap = float(self.config.get("z_magnitude_cap", 2.0))
+        unconfirmed_weight = float(self.config.get("unconfirmed_weight", 0.3))
 
         if len(df) < period + confirm_bars + 2:
             return {
@@ -96,7 +98,7 @@ class SpikePattern(BasePattern):
         for s in recent_spikes:
             bars_ago = len(df) - 1 - s["bar_index"]
             recency = max(0.1, 1.0 - (bars_ago / lookback))
-            z_magnitude = min(abs(s["z_score"]) / spike_std, 2.0)  # cap at 2x
+            z_magnitude = min(abs(s["z_score"]) / spike_std, z_magnitude_cap)
 
             if s["confirmed"] is True:
                 # Confirmed spike = directional signal
@@ -114,9 +116,9 @@ class SpikePattern(BasePattern):
             # confirmed is None: too recent, count as mild directional
             else:
                 if s["direction"] == "up":
-                    net_signal += z_magnitude * recency * 0.3
+                    net_signal += z_magnitude * recency * unconfirmed_weight
                 else:
-                    net_signal -= z_magnitude * recency * 0.3
+                    net_signal -= z_magnitude * recency * unconfirmed_weight
 
         return {
             "spikes": spikes,

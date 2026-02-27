@@ -306,17 +306,23 @@ class Scanner:
         short_below = float(thresholds.get("short_below", 3.5))
         hold_below = float(thresholds.get("hold_below", 6.5))
 
+        conf_cfg = strat_cfg.get("confidence_thresholds", {})
+        conf_high = float(conf_cfg.get("high", 1.5))
+        conf_med = float(conf_cfg.get("medium", 0.5))
+        hold_conf_high = float(conf_cfg.get("hold_high", 1.0))
+        hold_conf_med = float(conf_cfg.get("hold_medium", 0.3))
+
         if signal == "BUY":
             distance = effective_score - hold_below
-            confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
         elif signal == "SELL":
             distance = short_below - effective_score
-            confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
         else:
             dist_to_buy = hold_below - effective_score
             dist_to_sell = effective_score - short_below
             min_dist = min(dist_to_buy, dist_to_sell)
-            confidence = "high" if min_dist >= 1.0 else ("medium" if min_dist >= 0.3 else "low")
+            confidence = "high" if min_dist >= hold_conf_high else ("medium" if min_dist >= hold_conf_med else "low")
 
         # Labels
         regime_val = regime_type.value if regime_type else ""

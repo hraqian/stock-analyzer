@@ -212,6 +212,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Boost mode: patterns amplify indicator score when active
         "boost_strength": 0.5,           # multiplier for pattern deviation from 5.0
         "boost_dead_zone": 0.3,          # pattern score within 5.0 ± this → no boost
+        # Confidence distance thresholds (used in scanner + dashboard signal labeling)
+        "confidence_thresholds": {
+            "high": 1.5,         # score distance from threshold for HIGH confidence
+            "medium": 0.5,       # score distance from threshold for MEDIUM confidence
+            "hold_high": 1.0,    # distance inside hold zone for HIGH confidence
+            "hold_medium": 0.3,  # distance inside hold zone for MEDIUM confidence
+        },
     },
     "backtest": {
         "initial_cash": 100_000.0,
@@ -226,6 +233,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "trading_day_minutes": 390,     # US market: 6.5 hours = 390 minutes
         "default_score": 5.0,           # neutral starting score before first rebalance
         "close_on_end_of_data": True,   # whether to force-close position at end of data
+        "warmup_min_bars": 20,          # absolute floor for proportional warmup
+        # Strength thresholds per detector — empty dict = use built-in defaults
+        "strength_thresholds": {},
+        "gap_strength_cap": 2.0,        # cap on gap detector strength contribution
+        "spike_z_divisor": 2.5,         # z-score divisor for spike strength normalization
+        "spike_strength_cap": 2.0,      # cap on spike detector strength contribution
     },
     # ------------------------------------------------------------------
     # Pattern Signal Detectors
@@ -242,6 +255,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "exhaustion": 0.5,
         },
         "max_signal_strength": 3.0,
+        "gap_pct_scale": 100,           # multiplier to convert gap_pct into strength units
     },
     "volume_range": {
         "period": 20,
@@ -254,6 +268,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "contraction": 5.0,
             "divergence": 5.0,
         },
+        "expansion_bias_multiplier": 1.5,  # multiplier for expansion directional bias
     },
     "candlesticks": {
         "doji_threshold": 0.05,
@@ -262,6 +277,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lookback": 10,
         "trend_period": 10,
         "max_signal_strength": 3.0,
+        "hammer_body_max": 0.35,        # max body ratio for hammer/shooting star detection
+        "star_body_min": 0.5,           # min body ratio for morning/evening star center candle
+        # Per-pattern strength values — empty dict = use built-in defaults.
+        # Keys: dragonfly_doji, gravestone_doji, doji_directional, doji_neutral,
+        #        hammer, shooting_star, marubozu, engulfing, harami, tweezer,
+        #        star, soldiers_crows.  Each maps to {with_trend: float, against_trend: float}.
+        "strength_values": {},
     },
     "spikes": {
         "period": 20,
@@ -271,6 +293,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lookback": 20,
         "trap_weight": 0.7,
         "max_signal_strength": 3.0,
+        "z_magnitude_cap": 2.0,         # cap on z-score magnitude for strength calculation
+        "unconfirmed_weight": 0.3,      # weight multiplier for unconfirmed spikes
     },
     "inside_outside": {
         "lookback": 20,
@@ -278,6 +302,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "breakout_bars": 3,
         "outside_range_min": 1.2,
         "max_signal_strength": 3.0,
+        # Per-pattern strength values — empty dict = use built-in defaults.
+        # Keys: inside_breakout_with_trend, inside_breakout_against_trend,
+        #        inside_pending, outside_reversal, outside_continuation.
+        "strength_values": {},
     },
     # ------------------------------------------------------------------
     # Pattern composite scoring
@@ -293,6 +321,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "score_spreading": {
             "enabled": True,
             "factor": 2.0,
+        },
+    },
+    # ------------------------------------------------------------------
+    # Multi-timeframe analysis
+    # ------------------------------------------------------------------
+    "multi_timeframe": {
+        "timeframes": ["1d", "1wk", "1mo"],
+        "weights": {"1d": 0.5, "1wk": 0.3, "1mo": 0.2},
+        "periods": {"1d": "2y", "1wk": "5y", "1mo": "max"},
+        "agreement_multipliers": {
+            "aligned": 1.0,
+            "mixed": 0.7,
+            "conflicting": 0.4,
         },
     },
     # ------------------------------------------------------------------

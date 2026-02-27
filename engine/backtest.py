@@ -58,7 +58,7 @@ def _format_pattern_name(raw: str) -> str:
 
 # Detector-aware strength → human-readable confidence label.
 # Each detector uses a different strength scale, so the thresholds differ.
-_STRENGTH_THRESHOLDS: dict[str, list[tuple[float, str]]] = {
+_DEFAULT_STRENGTH_THRESHOLDS: dict[str, list[tuple[float, str]]] = {
     "Candlesticks":    [(0.4, "Weak"), (0.7, "Moderate"), (1.0, "Strong")],
     "Inside/Outside":  [(0.4, "Weak"), (0.6, "Moderate"), (0.8, "Strong")],
     "Gaps":            [(0.5, "Weak"), (1.0, "Moderate"), (1.5, "Strong")],
@@ -66,14 +66,23 @@ _STRENGTH_THRESHOLDS: dict[str, list[tuple[float, str]]] = {
 }
 
 
-def _strength_label(strength: float, detector: str) -> str:
+def _strength_label(
+    strength: float,
+    detector: str,
+    custom_thresholds: dict[str, list[tuple[float, str]]] | None = None,
+) -> str:
     """Return a human-readable confidence label for a pattern strength value.
 
     Uses detector-aware thresholds because the raw strength scales differ
     between detectors (e.g. candlesticks 0.3–1.3 vs gaps 0–2.0).
     Falls back to the Candlesticks thresholds for unknown detectors.
+
+    *custom_thresholds* overrides the built-in defaults when provided (from
+    config).
     """
-    thresholds = _STRENGTH_THRESHOLDS.get(detector, _STRENGTH_THRESHOLDS["Candlesticks"])
+    table = custom_thresholds if custom_thresholds else _DEFAULT_STRENGTH_THRESHOLDS
+    fallback = table.get("Candlesticks", _DEFAULT_STRENGTH_THRESHOLDS["Candlesticks"])
+    thresholds = table.get(detector, fallback)
     for upper, label in thresholds:
         if strength <= upper:
             return label
@@ -1003,6 +1012,16 @@ class BacktestEngine:
         bt_cfg = self._cfg.section("backtest")
         min_strength = float(bt_cfg.get("significant_pattern_min_strength", 0.5))
 
+        # Build custom strength thresholds from config if provided
+        raw_st = bt_cfg.get("strength_thresholds", {})
+        custom_st: dict[str, list[tuple[float, str]]] | None = None
+        if raw_st:
+            custom_st = {}
+            for detector_name, levels in raw_st.items():
+                custom_st[detector_name] = [
+                    (float(entry[0]), str(entry[1])) for entry in levels
+                ]
+
         pat_registry = PatternRegistry(self._cfg)
         pat_results = pat_registry.run_all(df)
 
@@ -1027,12 +1046,13 @@ class BacktestEngine:
                         pattern=_format_pattern_name(p["pattern"]),
                         signal=p["signal"],
                         strength=strength,
-                        confidence=_strength_label(strength, pr.name),
+                        confidence=_strength_label(strength, pr.name, custom_st),
                     ))
 
             # ── Gaps ────────────────────────────────────────────────────
             # values["gaps"]: list of {bar_index, date, direction, gap_pct, gap_type, volume_surge}
             if "gaps" in pr.values:
+                gap_strength_cap = float(bt_cfg.get("gap_strength_cap", 2.0))
                 for g in pr.values["gaps"]:
                     direction = g["direction"]
                     gap_type = g["gap_type"]
@@ -1046,7 +1066,7 @@ class BacktestEngine:
                         signal = "bullish" if direction == "up" else "bearish"
 
                     # Use gap_pct as a proxy for strength (typical gaps are 0.5%-3%)
-                    strength = min(gap_pct * 100, 2.0)  # cap at 2.0
+                    strength = min(gap_pct * 100, gap_strength_cap)
                     if strength < min_strength:
                         continue
 
@@ -1057,13 +1077,15 @@ class BacktestEngine:
                         pattern=f"{gap_type.capitalize()} Gap {direction.upper()}",
                         signal=signal,
                         strength=strength,
-                        confidence=_strength_label(strength, pr.name),
+                        confidence=_strength_label(strength, pr.name, custom_st),
                         detail=f"{gap_pct:.1%}{vol_tag}",
                     ))
 
             # ── Spikes ──────────────────────────────────────────────────
             # values["spikes"]: list of {bar_index, date, direction, z_score, spike_level, confirmed}
             if "spikes" in pr.values:
+                spike_z_divisor = float(bt_cfg.get("spike_z_divisor", 2.5))
+                spike_strength_cap = float(bt_cfg.get("spike_strength_cap", 2.0))
                 for s in pr.values["spikes"]:
                     direction = s["direction"]
                     confirmed = s["confirmed"]
@@ -1080,7 +1102,7 @@ class BacktestEngine:
                         signal = "bullish" if direction == "up" else "bearish"
                         status = "Pending"
 
-                    strength = min(z_score / 2.5, 2.0)  # normalise z-score
+                    strength = min(z_score / spike_z_divisor, spike_strength_cap)  # normalise z-score
                     if strength < min_strength:
                         continue
 
@@ -1090,7 +1112,7 @@ class BacktestEngine:
                         pattern=f"Spike {direction.upper()}",
                         signal=signal,
                         strength=strength,
-                        confidence=_strength_label(strength, pr.name),
+                        confidence=_strength_label(strength, pr.name, custom_st),
                         detail=f"z={s['z_score']:.1f} {status}",
                     ))
 

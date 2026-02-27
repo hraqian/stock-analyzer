@@ -41,9 +41,10 @@ def compute_score_timeseries(
     )
 
     warmup = int(cfg.section("backtest").get("warmup_bars", 200))
+    warmup_min = int(cfg.section("backtest").get("warmup_min_bars", 20))
     warmup = min(warmup, len(df) - 10) if len(df) > 10 else warmup
-    if warmup < 20:
-        warmup = 20
+    if warmup < warmup_min:
+        warmup = warmup_min
 
     dates: list[pd.Timestamp] = []
     ind_scores: list[float] = []

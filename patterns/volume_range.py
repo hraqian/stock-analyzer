@@ -134,10 +134,11 @@ class VolumeRangePattern(BasePattern):
             base = 5.0
 
         # Adjust based on recent expansion bias
+        exp_bias_multiplier = float(self.config.get("expansion_bias_multiplier", 1.5))
         if bull_exp + bear_exp > 0:
             exp_bias = (bull_exp - bear_exp) / (bull_exp + bear_exp)
             # exp_bias in [-1, 1]; shift score toward that direction
-            base += exp_bias * 1.5
+            base += exp_bias * exp_bias_multiplier
 
         return self._clamp(base)
 
