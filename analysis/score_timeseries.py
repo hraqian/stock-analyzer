@@ -42,7 +42,13 @@ def compute_score_timeseries(
 
     warmup = int(cfg.section("backtest").get("warmup_bars", 50))
     warmup_min = int(cfg.section("backtest").get("min_warmup_bars", 20))
-    warmup = min(warmup, len(df) - 10) if len(df) > 10 else warmup
+    max_warmup_ratio = float(cfg.section("backtest").get("max_warmup_ratio", 0.5))
+
+    # Proportional cap — same logic as BacktestEngine so warmup boundaries
+    # are consistent between the score timeseries and actual backtests.
+    max_warmup = int(len(df) * max_warmup_ratio)
+    if warmup > max_warmup:
+        warmup = max(warmup_min, max_warmup)
     if warmup < warmup_min:
         warmup = warmup_min
 

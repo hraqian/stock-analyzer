@@ -977,13 +977,67 @@ class Config:
                 f"strategy.trend_confirm_period must be a positive integer, got {trend_period!r}"
             )
 
+        # Indicator / pattern weights must be non-negative
+        ind_weight = strat.get("indicator_weight", 0.7)
+        pat_weight = strat.get("pattern_weight", 0.3)
+        if isinstance(ind_weight, (int, float)) and ind_weight < 0:
+            errors.append(
+                f"strategy.indicator_weight must be non-negative, got {ind_weight!r}"
+            )
+        if isinstance(pat_weight, (int, float)) and pat_weight < 0:
+            errors.append(
+                f"strategy.pattern_weight must be non-negative, got {pat_weight!r}"
+            )
+
+        # Gate thresholds: SHORT threshold must be below LONG threshold
+        gate_ind_min = strat.get("gate_indicator_min", 5.5)
+        gate_ind_max = strat.get("gate_indicator_max", 4.5)
+        gate_pat_min = strat.get("gate_pattern_min", 5.5)
+        gate_pat_max = strat.get("gate_pattern_max", 4.5)
+        if (
+            isinstance(gate_ind_min, (int, float))
+            and isinstance(gate_ind_max, (int, float))
+            and gate_ind_max >= gate_ind_min
+        ):
+            errors.append(
+                "strategy.gate_indicator_max (SHORT) must be less than "
+                f"gate_indicator_min (LONG), got max={gate_ind_max!r} min={gate_ind_min!r}"
+            )
+        if (
+            isinstance(gate_pat_min, (int, float))
+            and isinstance(gate_pat_max, (int, float))
+            and gate_pat_max >= gate_pat_min
+        ):
+            errors.append(
+                "strategy.gate_pattern_max (SHORT) must be less than "
+                f"gate_pattern_min (LONG), got max={gate_pat_max!r} min={gate_pat_min!r}"
+            )
+
+        # Confidence thresholds: high > medium > 0
+        conf = strat.get("confidence_thresholds", {})
+        conf_high = conf.get("high", 1.5)
+        conf_medium = conf.get("medium", 0.5)
+        if (
+            isinstance(conf_high, (int, float))
+            and isinstance(conf_medium, (int, float))
+        ):
+            if conf_medium <= 0:
+                errors.append(
+                    f"strategy.confidence_thresholds.medium must be positive, got {conf_medium!r}"
+                )
+            if conf_high <= conf_medium:
+                errors.append(
+                    "strategy.confidence_thresholds.high must be greater than medium, "
+                    f"got high={conf_high!r} medium={conf_medium!r}"
+                )
+
         # Backtest parameters
         bt = self._data.get("backtest", {})
         cash = bt.get("initial_cash", 100_000)
         if not isinstance(cash, (int, float)) or cash <= 0:
             errors.append(f"backtest.initial_cash must be positive, got {cash!r}")
 
-        warmup = bt.get("warmup_bars", 200)
+        warmup = bt.get("warmup_bars", 50)
         if not isinstance(warmup, int) or warmup < 1:
             errors.append(f"backtest.warmup_bars must be a positive integer, got {warmup!r}")
 

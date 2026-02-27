@@ -36,6 +36,7 @@ Respects the trading mode set by suitability analysis:
 
 from __future__ import annotations
 
+import copy
 import math
 from collections import deque
 from typing import Any
@@ -259,22 +260,23 @@ class ScoreBasedStrategy(Strategy):
 
         Looks up the base regime params from ``self._regime_adapt``, then
         if a sub-type is provided, merges any matching sub-type overrides
-        on top (shallow merge -- sub-type values win).
+        on top (sub-type values win).
 
-        This means e.g. an ``explosive_mover`` sub-type can override
-        ``trailing_stop_atr_mult`` while inheriting all other
-        ``strong_trend`` base params.
+        Uses ``copy.deepcopy`` so callers can never accidentally mutate
+        the canonical config dict.  The ``sub_types`` key is stripped from
+        the returned dict since it's internal bookkeeping only.
         """
         if regime is None:
             return {}
-        base = dict(self._regime_adapt.get(regime.value, {}))
+        base = copy.deepcopy(self._regime_adapt.get(regime.value, {}))
 
         if sub_type is not None:
-            sub_types = base.get("sub_types", {})
+            sub_types = base.pop("sub_types", {})
             overrides = sub_types.get(sub_type.value, {})
             if overrides:
-                # Shallow merge: sub-type values override base
                 base.update(overrides)
+        else:
+            base.pop("sub_types", None)
 
         return base
 
@@ -505,15 +507,8 @@ class ScoreBasedStrategy(Strategy):
         else:
             effective_bias = trend_direction
 
-        # Compute effective score for logging (and keep percentile window current)
-        w_total = self._indicator_weight + self._pattern_weight
-        if w_total > 0:
-            effective_score = (
-                self._indicator_weight * ind_score
-                + self._pattern_weight * pat_score
-            ) / w_total
-        else:
-            effective_score = ind_score
+        # Compute effective score respecting combination_mode
+        effective_score = self._effective_score(ind_score, pat_score)
 
         # Always update the rolling window so percentile mode stays calibrated
         # even while the strong-trend path bypasses normal score-to-signal logic.
@@ -615,15 +610,8 @@ class ScoreBasedStrategy(Strategy):
 
         distance_pct = (close - trend_ma) / trend_ma
 
-        # Compute effective score for decision + logging
-        w_total = self._indicator_weight + self._pattern_weight
-        if w_total > 0:
-            effective_score = (
-                self._indicator_weight * ind_score
-                + self._pattern_weight * pat_score
-            ) / w_total
-        else:
-            effective_score = ind_score
+        # Compute effective score respecting combination_mode
+        effective_score = self._effective_score(ind_score, pat_score)
 
         # Always update the rolling window so percentile mode stays calibrated
         # even while the strong-trend path bypasses normal score-to-signal logic.
@@ -786,6 +774,33 @@ class ScoreBasedStrategy(Strategy):
             return Signal.SELL
 
         return Signal.HOLD
+
+    def _effective_score(self, ind_score: float, pat_score: float) -> float:
+        """Compute effective score respecting the configured combination_mode.
+
+        Returns a single numeric score regardless of mode:
+        - **weighted**: blended indicator/pattern score
+        - **boost**: indicator boosted by pattern deviation
+        - **gate**: indicator score (gate logic is handled elsewhere via
+          ``_gate_signal``; this returns the indicator score for logging
+          and percentile-window tracking)
+
+        Does NOT append to ``self._score_window`` — callers should do
+        that explicitly after calling this.
+        """
+        if self._combination_mode == "boost":
+            return self._boost_score(ind_score, pat_score)
+        elif self._combination_mode == "gate":
+            return ind_score
+        else:
+            # Weighted blend (default)
+            w_total = self._indicator_weight + self._pattern_weight
+            if w_total > 0:
+                return (
+                    self._indicator_weight * ind_score
+                    + self._pattern_weight * pat_score
+                ) / w_total
+            return ind_score
 
     def _boost_score(self, ind_score: float, pat_score: float) -> float:
         """Boost mode: indicator is the base, patterns amplify when active.

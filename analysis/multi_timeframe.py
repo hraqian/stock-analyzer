@@ -168,6 +168,11 @@ class MultiTimeframeAnalyzer:
                         interval=tf,
                         lookback_bars=lookback_bars,
                         step=max(1, int(strat_cfg.get("percentile_step", 5))),
+                        combination_mode=combination_mode,
+                        ind_weight=ind_weight,
+                        pat_weight=pat_weight,
+                        boost_strength=boost_strength,
+                        boost_dead_zone=boost_dead_zone,
                     )
                     score_windows[tf] = window
                 signal = _derive_signal_with_mode(
@@ -390,8 +395,18 @@ def _build_percentile_window(
     interval: str,
     lookback_bars: int,
     step: int,
+    combination_mode: str = "weighted",
+    ind_weight: float = 0.7,
+    pat_weight: float = 0.3,
+    boost_strength: float = 0.5,
+    boost_dead_zone: float = 0.3,
 ) -> list[float]:
-    """Build a rolling effective-score window for percentile signals."""
+    """Build a rolling effective-score window for percentile signals.
+
+    Combination-mode params are accepted explicitly so the caller can
+    pass the same values it already read from config, avoiding a second
+    independent config read that could diverge if overrides are in play.
+    """
     df_scores = compute_score_timeseries(
         cfg,
         provider,
@@ -406,18 +421,12 @@ def _build_percentile_window(
         return []
     ind_scores = df_scores["indicator_score"].tolist()
     pat_scores = df_scores["pattern_score"].tolist()
-    strat_cfg = cfg.section("strategy")
-    combination_mode = str(strat_cfg.get("combination_mode", "weighted"))
-    ind_weight = float(strat_cfg.get("indicator_weight", 0.7))
-    pat_weight = float(strat_cfg.get("pattern_weight", 0.3))
-    boost_strength = float(strat_cfg.get("boost_strength", 0.5))
-    boost_dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
 
     eff_scores: list[float] = []
-    for ind_score, pat_score in zip(ind_scores, pat_scores):
+    for ind_s, pat_s in zip(ind_scores, pat_scores):
         eff = _compute_effective_score(
-            float(ind_score),
-            float(pat_score),
+            float(ind_s),
+            float(pat_s),
             combination_mode,
             ind_weight,
             pat_weight,

@@ -106,6 +106,7 @@ class BacktestTrade:
     pnl_pct: float         # percentage P&L
     exit_reason: str = ""  # "signal", "stop_loss", "take_profit"
     entry_reason: str = "" # strategy notes at entry (e.g. "ind=6.80 pat=5.20 eff=6.32")
+    bars_held: int = 0     # number of bars position was held
 
 
 @dataclass
@@ -744,6 +745,12 @@ class BacktestEngine:
             cash += self._trade_proceeds(trade, position)
             _record_trade(trade)
             position = None
+            # Update last equity curve entry to reflect the post-close cash
+            # (the entry recorded in the loop included the position's
+            # unrealized value, which may differ from realised proceeds
+            # due to commission/slippage applied during close).
+            if equity_curve:
+                equity_curve[-1]["equity"] = cash
 
         final_equity = cash
         # If position still open (close_on_end_of_data=False), include unrealized value
@@ -869,6 +876,7 @@ class BacktestEngine:
             pnl_pct=pnl_pct,
             exit_reason=reason,
             entry_reason=position.entry_reason,
+            bars_held=position.bars_held,
         )
 
     def _trade_proceeds(self, trade: BacktestTrade, position: _Position) -> float:
@@ -1257,6 +1265,9 @@ class BacktestEngine:
             result.best_trade_pnl_pct = max(t.pnl_pct for t in trades) * 100
             result.worst_trade_pnl_pct = min(t.pnl_pct for t in trades) * 100
 
+            # Average bars held
+            result.avg_bars_held = sum(t.bars_held for t in trades) / len(trades)
+
         # Sharpe ratio — use post-warmup equity curve and sample std dev
         if len(trading_curve) >= 2:
             equities = [pt["equity"] for pt in trading_curve]
@@ -1264,6 +1275,10 @@ class BacktestEngine:
             for j in range(1, len(equities)):
                 if equities[j - 1] > 0:
                     bar_returns.append(equities[j] / equities[j - 1] - 1)
+                else:
+                    # Non-positive equity: treat as -100% return rather than
+                    # silently dropping the bar (which would inflate Sharpe).
+                    bar_returns.append(-1.0)
             if len(bar_returns) >= 2:
                 mean_r = sum(bar_returns) / len(bar_returns)
                 var_r = sum((r - mean_r) ** 2 for r in bar_returns) / (len(bar_returns) - 1)
