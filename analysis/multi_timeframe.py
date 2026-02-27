@@ -243,17 +243,13 @@ class MultiTimeframeAnalyzer:
             agg_ind, agg_pat, combination_mode,
             ind_weight, pat_weight, boost_strength, boost_dead_zone,
         )
-        agg_signal_window: list[float] = []
-        if threshold_mode == "percentile":
-            agg_signal_window = _build_percentile_window(
-                self._cfg,
-                self._provider,
-                ticker=ticker,
-                period=periods.get(timeframes[0], "2y"),
-                interval=timeframes[0],
-                lookback_bars=lookback_bars,
-                step=max(1, int(strat_cfg.get("percentile_step", 5))),
-            )
+        # For the aggregated signal, always use fixed thresholds.
+        # Building a percentile window from a single TF's distribution is
+        # wrong — the aggregated score (weighted average of TFs) has a
+        # different distribution than any individual TF.  The per-TF
+        # signals already use percentile mode correctly; the aggregated
+        # signal serves as a consensus override and fixed thresholds are
+        # appropriate here.
         agg_signal = _derive_signal_with_mode(
             agg_eff,
             agg_ind,
@@ -261,8 +257,8 @@ class MultiTimeframeAnalyzer:
             combination_mode,
             short_below,
             hold_below,
-            threshold_mode,
-            agg_signal_window,
+            "fixed",  # always fixed for aggregated signal
+            [],       # no percentile window needed
             short_pct,
             long_pct,
             lookback_bars,
@@ -363,15 +359,19 @@ def _derive_signal_with_mode(
 
     # Percentile mode uses rolling ranks of effective scores
     if threshold_mode == "percentile":
-        score_window.append(effective_score)
-        if len(score_window) > lookback_bars:
-            score_window[:] = score_window[-lookback_bars:]
+        # Don't append the current score — the window is pre-built from
+        # historical bars.  Appending would double-count the latest value.
+        # Use a local slice to avoid mutating the caller's list.
+        window = score_window[-lookback_bars:] if len(score_window) > lookback_bars else score_window
         min_samples = max(10, int(lookback_bars * min_fill_ratio))
-        if len(score_window) < min_samples:
+        if len(window) < min_samples:
             return _derive_signal(effective_score, short_below, hold_below)
-        sorted_scores = sorted(score_window)
-        lt = sum(1 for s in sorted_scores if s < effective_score)
-        rank = lt / len(sorted_scores) * 100
+        # Use mean percentile rank (count_below + count_equal/2) / n
+        # to avoid identical scores all ranking at 0 (false SELL).
+        n = len(window)
+        count_below = sum(1 for s in window if s < effective_score)
+        count_equal = sum(1 for s in window if s == effective_score)
+        rank = ((count_below + count_equal / 2) / n) * 100
         if rank <= short_pct:
             return "SELL"
         if rank >= long_pct:

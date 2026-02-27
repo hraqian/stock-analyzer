@@ -152,7 +152,7 @@ class TestDeriveSignalWithMode:
         assert sig == "SELL"
 
     def test_percentile_rank_strict_less(self):
-        # All scores equal -> strict-less rank = 0
+        # All scores equal -> mean rank = 50 (neutral), not 0 (false SELL)
         window = [2.0] * 60
         sig = _derive_signal_with_mode(
             effective_score=2.0,
@@ -172,7 +172,7 @@ class TestDeriveSignalWithMode:
             gate_pattern_min=5.5,
             gate_pattern_max=4.5,
         )
-        assert sig == "SELL"
+        assert sig == "HOLD"
 
 
 # ===========================================================================
