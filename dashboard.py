@@ -3375,8 +3375,10 @@ def render_scanner() -> None:
         if show_mt:
             # When MT is enabled, group by MT aggregated signal and rank by
             # a combination of MT score and agreement.
-            # Agreement multiplier: aligned=1.0, mixed=0.7, conflicting=0.4
-            _agreement_mult = {"aligned": 1.0, "mixed": 0.7, "conflicting": 0.4}
+            mt_cfg = _get_config().section("multi_timeframe")
+            _agreement_mult = mt_cfg.get("agreement_multipliers", {
+                "aligned": 1.0, "mixed": 0.7, "conflicting": 0.4,
+            })
 
             def _mt_sort_key(r: ScanResult) -> float:
                 base = r.mt_aggregated_score if r.mt_aggregated_score > 0 else r.effective_score
