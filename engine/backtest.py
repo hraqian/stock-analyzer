@@ -675,15 +675,18 @@ class BacktestEngine:
             elif not can_trade:
                 pass  # hold_only: do nothing
             elif order.signal == Signal.BUY and position is None:
-                position, cost = self._open_position(
-                    "long", close, order.quantity, date_str, order.notes, current_atr
-                )
-                cash -= cost
+                qty = self._cap_quantity_to_cash(order.quantity, close, cash)
+                if qty > 0:
+                    position, cost = self._open_position(
+                        "long", close, qty, date_str, order.notes, current_atr
+                    )
+                    cash -= cost
             elif order.signal == Signal.SELL and position is None and can_short:
-                position, cost = self._open_position(
-                    "short", close, order.quantity, date_str, order.notes, current_atr
-                )
-                cash -= cost  # cost = commission only for short opens
+                if order.quantity > 0:
+                    position, cost = self._open_position(
+                        "short", close, order.quantity, date_str, order.notes, current_atr
+                    )
+                    cash -= cost  # cost = commission only for short opens
             elif order.signal == Signal.BUY and position is not None and position.side == "short":
                 # Close short
                 trade = self._close_position(position, close, date_str, signal_reason)
@@ -691,10 +694,14 @@ class BacktestEngine:
                 _record_trade(trade)
                 # Open long only if immediate reversal is allowed
                 if self._allow_immediate_reversal:
-                    position, cost = self._open_position(
-                        "long", close, order.quantity, date_str, order.notes, current_atr
-                    )
-                    cash -= cost
+                    qty = self._cap_quantity_to_cash(order.quantity, close, cash)
+                    if qty > 0:
+                        position, cost = self._open_position(
+                            "long", close, qty, date_str, order.notes, current_atr
+                        )
+                        cash -= cost
+                    else:
+                        position = None
                 else:
                     position = None
             elif order.signal == Signal.SELL and position is not None and position.side == "long":
@@ -705,10 +712,11 @@ class BacktestEngine:
                 position = None
                 # Open short only if trading mode allows and immediate reversal is allowed
                 if can_short and self._allow_immediate_reversal:
-                    position, cost = self._open_position(
-                        "short", close, order.quantity, date_str, order.notes, current_atr
-                    )
-                    cash -= cost
+                    if order.quantity > 0:
+                        position, cost = self._open_position(
+                            "short", close, order.quantity, date_str, order.notes, current_atr
+                        )
+                        cash -= cost
 
             # -- EOD flattening: force-close any remaining position at end of day --
             if eod_bar and position is not None:
@@ -777,6 +785,24 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     # Position management
     # ------------------------------------------------------------------
+
+    def _cap_quantity_to_cash(
+        self, desired_qty: float, price: float, available_cash: float
+    ) -> float:
+        """Cap *desired_qty* so the long position cost doesn't exceed cash.
+
+        Returns 0 if the desired quantity is zero/negative or cash is
+        insufficient for even a single share.  For shorts, the cash
+        constraint doesn't apply the same way (short proceeds add cash),
+        so callers should only use this for long entries.
+        """
+        if desired_qty <= 0 or price <= 0:
+            return 0.0
+        max_cost = available_cash - self._commission
+        if max_cost <= 0:
+            return 0.0
+        max_qty = int(max_cost / price)
+        return min(desired_qty, max_qty)
 
     def _open_position(
         self,
