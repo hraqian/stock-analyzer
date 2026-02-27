@@ -2804,6 +2804,19 @@ def compute_recommendation(
     short_below = float(thresholds.get("short_below", 3.5))
     hold_below = float(thresholds.get("hold_below", 6.0))
 
+    # Regime adaptation: mean-reverting tightens thresholds
+    if regime == RegimeType.MEAN_REVERTING:
+        regime_adapt_cfg = cfg.section("regime").get("strategy_adaptation", {})
+        mr_cfg = regime_adapt_cfg.get("mean_reverting", {})
+        if mr_cfg.get("tighten_thresholds", True):
+            adj = float(mr_cfg.get("threshold_adjustment", 0.3))
+            short_below += adj
+            hold_below -= adj
+            if short_below >= hold_below:
+                mid = (float(thresholds.get("short_below", 3.5)) + float(thresholds.get("hold_below", 6.0))) / 2
+                short_below = mid - 0.1
+                hold_below = mid + 0.1
+
     # Compute the effective blended score (same as strategy internals)
     combination_mode = str(strat_cfg.get("combination_mode", "weighted"))
     ind_weight = float(strat_cfg.get("indicator_weight", 0.7))
@@ -2834,23 +2847,52 @@ def compute_recommendation(
     hold_conf_high = float(conf_cfg.get("hold_high", 1.0))
     hold_conf_med = float(conf_cfg.get("hold_medium", 0.3))
 
-    if signal == "BUY":
-        distance = effective_score - hold_below
-        confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
-    elif signal == "SELL":
-        distance = short_below - effective_score
-        confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
+    if combination_mode == "gate":
+        # Gate mode: confidence is based on both scores' distances from
+        # their respective gate thresholds, using the weakest link.
+        g_ind_min = float(strat_cfg.get("gate_indicator_min", 5.5))
+        g_ind_max = float(strat_cfg.get("gate_indicator_max", 4.5))
+        g_pat_min = float(strat_cfg.get("gate_pattern_min", 5.5))
+        g_pat_max = float(strat_cfg.get("gate_pattern_max", 4.5))
+
+        if signal == "BUY":
+            # Both had to pass their min thresholds — weakest margin
+            distance = min(overall_score - g_ind_min, pattern_score - g_pat_min)
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
+        elif signal == "SELL":
+            # Both had to pass below their max thresholds — weakest margin
+            distance = min(g_ind_max - overall_score, g_pat_max - pattern_score)
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
+        else:
+            # HOLD — how close is the nearest score to flipping a gate?
+            dist_to_buy = min(g_ind_min - overall_score, g_pat_min - pattern_score)
+            dist_to_sell = min(overall_score - g_ind_max, pattern_score - g_pat_max)
+            min_dist = min(dist_to_buy, dist_to_sell)
+            confidence = "high" if min_dist >= hold_conf_high else ("medium" if min_dist >= hold_conf_med else "low")
     else:
-        # HOLD — confidence reflects how firmly neutral
-        dist_to_buy = hold_below - effective_score
-        dist_to_sell = effective_score - short_below
-        min_dist = min(dist_to_buy, dist_to_sell)
-        confidence = "high" if min_dist >= hold_conf_high else ("medium" if min_dist >= hold_conf_med else "low")
+        # Weighted / boost: use effective score distance from thresholds
+        if signal == "BUY":
+            distance = effective_score - hold_below
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
+        elif signal == "SELL":
+            distance = short_below - effective_score
+            confidence = "high" if distance >= conf_high else ("medium" if distance >= conf_med else "low")
+        else:
+            # HOLD — confidence reflects how firmly neutral
+            dist_to_buy = hold_below - effective_score
+            dist_to_sell = effective_score - short_below
+            min_dist = min(dist_to_buy, dist_to_sell)
+            confidence = "high" if min_dist >= hold_conf_high else ("medium" if min_dist >= hold_conf_med else "low")
 
     # ── Build reasons list ───────────────────────────────────────────────
     reasons: list[str] = []
     reasons.append(f"Effective score: {effective_score:.1f}/10 (indicator: {overall_score:.1f}, pattern: {pattern_score:.1f})")
-    reasons.append(f"Thresholds: BUY > {hold_below}, SELL <= {short_below}")
+    if combination_mode == "gate":
+        g_ind_min = float(strat_cfg.get("gate_indicator_min", 5.5))
+        g_ind_max = float(strat_cfg.get("gate_indicator_max", 4.5))
+        reasons.append(f"Gate thresholds: BUY ind>{g_ind_min}, SELL ind<{g_ind_max}")
+    else:
+        reasons.append(f"Thresholds: BUY > {hold_below:.1f}, SELL <= {short_below:.1f}")
 
     if regime is not None:
         regime_label = REGIME_LABELS.get(regime, regime.value)
