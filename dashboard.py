@@ -1874,9 +1874,13 @@ def compute_score_timeseries(
 
     warmup = int(cfg.section("backtest").get("warmup_bars", 50))
     warmup_min = int(cfg.section("backtest").get("min_warmup_bars", 20))
+    if len(df) <= warmup_min:
+        # Not enough data to compute meaningful scores
+        return pd.DataFrame(columns=["indicator_score", "pattern_score"])
     warmup = min(warmup, len(df) - 10)  # ensure we have some data after warmup
-    if warmup < warmup_min:
-        warmup = warmup_min
+    warmup = max(warmup, warmup_min)
+
+    step = max(1, step)  # ensure step is at least 1
 
     dates = []
     ind_scores = []
@@ -1898,8 +1902,8 @@ def compute_score_timeseries(
         pat_composite = pat_scorer.score(pat_results)
 
         dates.append(df.index[i])
-        ind_scores.append(ind_composite["overall"])
-        pat_scores.append(pat_composite["overall"])
+        ind_scores.append(float(ind_composite["overall"]))
+        pat_scores.append(float(pat_composite["overall"]))
 
     score_df = pd.DataFrame({
         "indicator_score": ind_scores,
@@ -2029,25 +2033,33 @@ def create_price_chart(
         )
 
         # Threshold lines on score chart
+        # In percentile mode, the actual buy/sell boundaries are dynamic
+        # (based on rolling rank), so fixed threshold lines would be
+        # misleading.  Only show them in fixed (or gate) mode.
         if cfg is not None:
-            thresholds = cfg.section("strategy").get("score_thresholds", {})
+            strat_cfg_chart = cfg.section("strategy")
+            thresholds = strat_cfg_chart.get("score_thresholds", {})
+            threshold_mode = str(strat_cfg_chart.get("threshold_mode", "fixed"))
         else:
             thresholds = {}
-        short_below = float(thresholds.get("short_below", 3.5))
-        hold_below = float(thresholds.get("hold_below", 6.0))
+            threshold_mode = "fixed"
 
-        fig.add_hline(
-            y=hold_below, line_dash="dot", line_color=COLOR_BULLISH,
-            line_width=1, opacity=0.6, row=3, col=1,
-            annotation_text=f"LONG > {hold_below}",
-            annotation_font_size=9,
-        )
-        fig.add_hline(
-            y=short_below, line_dash="dot", line_color=COLOR_BEARISH,
-            line_width=1, opacity=0.6, row=3, col=1,
-            annotation_text=f"SHORT < {short_below}",
-            annotation_font_size=9,
-        )
+        if threshold_mode != "percentile":
+            short_below = float(thresholds.get("short_below", 3.5))
+            hold_below = float(thresholds.get("hold_below", 6.0))
+
+            fig.add_hline(
+                y=hold_below, line_dash="dot", line_color=COLOR_BULLISH,
+                line_width=1, opacity=0.6, row=3, col=1,
+                annotation_text=f"LONG > {hold_below}",
+                annotation_font_size=9,
+            )
+            fig.add_hline(
+                y=short_below, line_dash="dot", line_color=COLOR_BEARISH,
+                line_width=1, opacity=0.6, row=3, col=1,
+                annotation_text=f"SHORT < {short_below}",
+                annotation_font_size=9,
+            )
         fig.update_yaxes(range=[0, 10], row=3, col=1, title_text="Score (0-10)")
 
     # Layout
@@ -2093,9 +2105,11 @@ def create_equity_chart(
         line=dict(color=COLOR_EQUITY, width=2),
     ))
 
-    # Buy-and-hold benchmark
-    if len(df) >= len(curve):
-        initial_price = float(df["close"].iloc[0])
+    # Buy-and-hold benchmark — start from the same bar as trading begins
+    # (after warmup) so the benchmark doesn't get a head start.
+    warmup_bars = getattr(bt_result, "warmup_bars", 0) or 0
+    if len(df) >= len(curve) and warmup_bars < len(df):
+        initial_price = float(df["close"].iloc[warmup_bars])
         initial_cash = bt_result.initial_cash
         bh_values = [
             initial_cash * float(df["close"].iloc[i]) / initial_price
@@ -2201,18 +2215,22 @@ def create_score_histogram(score_df: pd.DataFrame, cfg: Config | None = None) ->
         opacity=0.5,
     ))
 
-    # Threshold lines
+    # Threshold lines (only shown in fixed/gate mode — percentile thresholds are dynamic)
     if cfg is not None:
         thresholds = cfg.section("strategy").get("score_thresholds", {})
+        threshold_mode = str(cfg.section("strategy").get("threshold_mode", "fixed"))
     else:
         thresholds = {}
-    short_below = float(thresholds.get("short_below", 3.5))
-    hold_below = float(thresholds.get("hold_below", 6.0))
+        threshold_mode = "fixed"
 
-    fig.add_vline(x=short_below, line_dash="dash", line_color=COLOR_BEARISH,
-                  annotation_text=f"SHORT < {short_below}", annotation_font_size=10)
-    fig.add_vline(x=hold_below, line_dash="dash", line_color=COLOR_BULLISH,
-                  annotation_text=f"LONG > {hold_below}", annotation_font_size=10)
+    if threshold_mode != "percentile":
+        short_below = float(thresholds.get("short_below", 3.5))
+        hold_below = float(thresholds.get("hold_below", 6.0))
+
+        fig.add_vline(x=short_below, line_dash="dash", line_color=COLOR_BEARISH,
+                      annotation_text=f"SHORT < {short_below}", annotation_font_size=10)
+        fig.add_vline(x=hold_below, line_dash="dash", line_color=COLOR_BULLISH,
+                      annotation_text=f"LONG > {hold_below}", annotation_font_size=10)
 
     fig.update_layout(
         template="plotly_dark",
