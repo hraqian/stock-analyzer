@@ -352,6 +352,24 @@ class Scanner:
                 mt_daily_signal = tf_signals.get("1d", "")
                 mt_weekly_signal = tf_signals.get("1wk", "")
                 mt_monthly_signal = tf_signals.get("1mo", "")
+
+                # Override signal and effective score with MT-weighted values
+                # so scanner ranking reflects cross-timeframe confirmation
+                signal = mt_aggregated_signal
+                effective_score = mt_aggregated_score
+
+                # Re-derive confidence from MT score
+                if signal == "BUY":
+                    distance = effective_score - hold_below
+                    confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+                elif signal == "SELL":
+                    distance = short_below - effective_score
+                    confidence = "high" if distance >= 1.5 else ("medium" if distance >= 0.5 else "low")
+                else:
+                    dist_to_buy = hold_below - effective_score
+                    dist_to_sell = effective_score - short_below
+                    min_dist = min(dist_to_buy, dist_to_sell)
+                    confidence = "high" if min_dist >= 1.0 else ("medium" if min_dist >= 0.3 else "low")
             except Exception:
                 pass  # graceful degradation — leave fields empty
 

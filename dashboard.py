@@ -3115,6 +3115,7 @@ def _build_scanner_results_html(
     mt_headers = ""
     if show_mt:
         mt_headers = (
+            "<th style='width:80px;'>MT Score</th>"
             "<th>Daily</th>"
             "<th>Weekly</th>"
             "<th>Monthly</th>"
@@ -3166,7 +3167,13 @@ def _build_scanner_results_html(
                 c = _signal_color(sig)
                 return f"<td style='color:{c};font-weight:700;'>{sig}</td>"
 
+            mt_score_html = (
+                score_bar_html(r.mt_aggregated_score, width=60)
+                if r.mt_aggregated_score > 0 else "—"
+            )
+
             mt_cells = (
+                f"<td>{mt_score_html}</td>"
                 f"{_mt_signal_cell(r.mt_daily_signal)}"
                 f"{_mt_signal_cell(r.mt_weekly_signal)}"
                 f"{_mt_signal_cell(r.mt_monthly_signal)}"
