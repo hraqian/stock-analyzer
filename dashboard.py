@@ -3180,10 +3180,11 @@ def _build_scanner_results_html(
         f"margin:12px 0 4px 0;'>"
         f"<span style='color:{title_color};font-weight:700;font-size:1rem;'>"
         f"{title}</span></div>"
+        f"<div style='overflow-x:auto;'>"
         f'<table class="scanner-table">'
         f"<thead>{header}</thead>"
         f"<tbody>{''.join(rows_html)}</tbody>"
-        f"</table>"
+        f"</table></div>"
     )
 
 
@@ -3296,7 +3297,6 @@ def render_scanner() -> None:
         st.session_state["scanner_results"] = scanner.results
         st.session_state["scanner_summary"] = scanner.summary()
         st.session_state["scanner_elapsed"] = elapsed
-        st.session_state["scanner_top_n"] = int(top_n)
 
     # ── Display results (from session state) ──────────────────────────────
     if "scanner_results" in st.session_state:
@@ -3329,22 +3329,19 @@ def render_scanner() -> None:
             key=lambda r: r.effective_score,
         )[:display_n]
 
-        # Render tables
-        col_buy, col_sell = st.columns(2)
-        with col_buy:
-            st.markdown(
-                _build_scanner_results_html(
-                    buys, f"Top {len(buys)} BUY Signals", "BUY"
-                ),
-                unsafe_allow_html=True,
-            )
-        with col_sell:
-            st.markdown(
-                _build_scanner_results_html(
-                    sells, f"Top {len(sells)} SELL Signals", "SELL"
-                ),
-                unsafe_allow_html=True,
-            )
+        # Render tables (stacked vertically – too many columns for side-by-side)
+        st.markdown(
+            _build_scanner_results_html(
+                buys, f"Top {len(buys)} BUY Signals", "BUY"
+            ),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            _build_scanner_results_html(
+                sells, f"Top {len(sells)} SELL Signals", "SELL"
+            ),
+            unsafe_allow_html=True,
+        )
 
         # Expandable: all HOLD signals
         holds = sorted(
