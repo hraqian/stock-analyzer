@@ -103,7 +103,7 @@ class ScoreBasedStrategy(Strategy):
         # Fixed thresholds
         thresholds = self.params.get("score_thresholds", {})
         self._short_below: float = float(thresholds.get("short_below", 3.5))
-        self._hold_below: float = float(thresholds.get("hold_below", 6.5))
+        self._hold_below: float = float(thresholds.get("hold_below", 6.0))
 
         # Percentile thresholds
         pct_cfg = self.params.get("percentile_thresholds", {})

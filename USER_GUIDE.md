@@ -429,7 +429,7 @@ The strategy maps composite scores to trading decisions (LONG, SHORT, HOLD).
 | Key | Default | Description |
 |-----|---------|-------------|
 | `strategy.score_thresholds.short_below` | 3.5 | Score <= this = SHORT signal |
-| `strategy.score_thresholds.hold_below` | 6.5 | Score <= this = HOLD; above = LONG |
+| `strategy.score_thresholds.hold_below` | 6.0 | Score <= this = HOLD; above = LONG |
 
 #### Percentile thresholds (when `threshold_mode: "percentile"`)
 

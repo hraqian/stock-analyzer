@@ -73,32 +73,32 @@ def _make_analysis_result(
 
 class TestDeriveSignal:
     def test_buy_signal(self):
-        assert _derive_signal(7.0, short_below=3.5, hold_below=6.5) == "BUY"
+        assert _derive_signal(7.0, short_below=3.5, hold_below=6.0) == "BUY"
 
     def test_sell_signal(self):
-        assert _derive_signal(3.0, short_below=3.5, hold_below=6.5) == "SELL"
+        assert _derive_signal(3.0, short_below=3.5, hold_below=6.0) == "SELL"
 
     def test_hold_signal_middle(self):
-        assert _derive_signal(5.0, short_below=3.5, hold_below=6.5) == "HOLD"
+        assert _derive_signal(5.0, short_below=3.5, hold_below=6.0) == "HOLD"
 
     def test_exactly_at_short_threshold(self):
-        assert _derive_signal(3.5, short_below=3.5, hold_below=6.5) == "SELL"
+        assert _derive_signal(3.5, short_below=3.5, hold_below=6.0) == "SELL"
 
     def test_exactly_at_hold_threshold(self):
-        # hold_below=6.5 means BUY when > 6.5, so exactly 6.5 is HOLD
-        assert _derive_signal(6.5, short_below=3.5, hold_below=6.5) == "HOLD"
+        # hold_below=6.0 means BUY when > 6.0, so exactly 6.0 is HOLD
+        assert _derive_signal(6.0, short_below=3.5, hold_below=6.0) == "HOLD"
 
     def test_just_above_hold(self):
-        assert _derive_signal(6.51, short_below=3.5, hold_below=6.5) == "BUY"
+        assert _derive_signal(6.01, short_below=3.5, hold_below=6.0) == "BUY"
 
     def test_just_below_short(self):
-        assert _derive_signal(3.49, short_below=3.5, hold_below=6.5) == "SELL"
+        assert _derive_signal(3.49, short_below=3.5, hold_below=6.0) == "SELL"
 
     def test_extreme_buy(self):
-        assert _derive_signal(10.0, short_below=3.5, hold_below=6.5) == "BUY"
+        assert _derive_signal(10.0, short_below=3.5, hold_below=6.0) == "BUY"
 
     def test_extreme_sell(self):
-        assert _derive_signal(0.0, short_below=3.5, hold_below=6.5) == "SELL"
+        assert _derive_signal(0.0, short_below=3.5, hold_below=6.0) == "SELL"
 
 
 # ==========================================================================

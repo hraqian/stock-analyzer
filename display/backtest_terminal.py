@@ -324,11 +324,11 @@ def render_backtest(
         config_rows.append(("LONG when percentile >=", f"{pct_cfg.get('long_percentile', 75)}%"))
         config_rows.append(("Lookback Window", f"{pct_cfg.get('lookback_bars', 60)} bars"))
         config_rows.append(("(Fallback) SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"))
-        config_rows.append(("(Fallback) LONG when score >", f"{thresholds.get('hold_below', 6.5)}"))
+        config_rows.append(("(Fallback) LONG when score >", f"{thresholds.get('hold_below', 6.0)}"))
     else:
         config_rows.append(("Signal: SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"))
-        config_rows.append(("Signal: HOLD when score <=", f"{thresholds.get('hold_below', 6.5)}"))
-        config_rows.append(("Signal: LONG when score >", f"{thresholds.get('hold_below', 6.5)}"))
+        config_rows.append(("Signal: HOLD when score <=", f"{thresholds.get('hold_below', 6.0)}"))
+        config_rows.append(("Signal: LONG when score >", f"{thresholds.get('hold_below', 6.0)}"))
 
     # ── Pattern-Indicator Combination ───────────────────────────────────
     combo_mode = strat_cfg.get("combination_mode", "weighted")

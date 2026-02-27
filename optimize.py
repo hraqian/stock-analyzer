@@ -432,7 +432,7 @@ def grid_search_regime(
     valid_combos = []
     for c in combos:
         sb = c.get("strategy.score_thresholds.short_below", 3.5)
-        hb = c.get("strategy.score_thresholds.hold_below", 6.5)
+        hb = c.get("strategy.score_thresholds.hold_below", 6.0)
         if sb < hb:
             valid_combos.append(c)
     combos = valid_combos
