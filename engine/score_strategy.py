@@ -36,6 +36,7 @@ Respects the trading mode set by suitability analysis:
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from typing import Any
 
@@ -303,6 +304,14 @@ class ScoreBasedStrategy(Strategy):
         pat_score = ctx.pattern_score
         regime = ctx.regime
 
+        # ── NaN guard: treat missing scores as neutral ──────────────────
+        # NaN comparisons silently pass all threshold checks, producing
+        # false BUY (fixed mode) or false SELL (percentile mode).
+        if math.isnan(ind_score):
+            ind_score = 5.0
+        if math.isnan(pat_score):
+            pat_score = 5.0
+
         # Track bars since last exit for re-entry grace period
         self._bars_since_exit += 1
 
@@ -322,7 +331,7 @@ class ScoreBasedStrategy(Strategy):
 
         # ── Compute effective score ─────────────────────────────────────
         if self._combination_mode == "gate":
-            signal = self._gate_signal(ind_score, pat_score)
+            signal = self._gate_signal(ind_score, pat_score, regime)
             effective_score = ind_score  # for notes
         elif self._combination_mode == "boost":
             effective_score = self._boost_score(ind_score, pat_score)
@@ -487,7 +496,7 @@ class ScoreBasedStrategy(Strategy):
         else:
             effective_bias = trend_direction
 
-        # Compute effective score for logging
+        # Compute effective score for logging (and keep percentile window current)
         w_total = self._indicator_weight + self._pattern_weight
         if w_total > 0:
             effective_score = (
@@ -496,6 +505,10 @@ class ScoreBasedStrategy(Strategy):
             ) / w_total
         else:
             effective_score = ind_score
+
+        # Always update the rolling window so percentile mode stays calibrated
+        # even while the strong-trend path bypasses normal score-to-signal logic.
+        self._score_window.append(effective_score)
 
         # Safety: exit if holding against the trend direction
         if adapt.get("respect_trend_direction", True):
@@ -602,6 +615,10 @@ class ScoreBasedStrategy(Strategy):
             ) / w_total
         else:
             effective_score = ind_score
+
+        # Always update the rolling window so percentile mode stays calibrated
+        # even while the strong-trend path bypasses normal score-to-signal logic.
+        self._score_window.append(effective_score)
 
         # Minimum score gate: don't enter when indicators are strongly against us
         if effective_score < min_score:
@@ -713,24 +730,50 @@ class ScoreBasedStrategy(Strategy):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _gate_signal(self, ind_score: float, pat_score: float) -> Signal:
+    def _gate_signal(
+        self,
+        ind_score: float,
+        pat_score: float,
+        regime: RegimeType | None = None,
+    ) -> Signal:
         """Gate mode: both scores must independently agree for a trade signal.
 
         LONG  requires: ind_score > gate_indicator_min AND pat_score > gate_pattern_min
         SHORT requires: ind_score < gate_indicator_max AND pat_score < gate_pattern_max
         Otherwise: HOLD
 
+        In mean-reverting regime, the gate thresholds are tightened by the
+        same adjustment amount as the score thresholds (making it easier
+        to generate signals near support/resistance).
+
         The rolling window is updated with the indicator score (since gate
         mode doesn't produce a single blended number).
         """
         self._score_window.append(ind_score)
 
+        # Start with base gate thresholds
+        g_ind_min = self._gate_indicator_min
+        g_ind_max = self._gate_indicator_max
+        g_pat_min = self._gate_pattern_min
+        g_pat_max = self._gate_pattern_max
+
+        # Regime adaptation: tighten gate thresholds in mean-reverting regime
+        if regime == RegimeType.MEAN_REVERTING:
+            adapt = self._get_regime_adapt(regime)
+            if adapt.get("tighten_thresholds", True):
+                adj = float(adapt.get("threshold_adjustment", 0.3))
+                # Lower the LONG gates (easier to BUY) and raise the SHORT gates (easier to SELL)
+                g_ind_min -= adj
+                g_pat_min -= adj
+                g_ind_max += adj
+                g_pat_max += adj
+
         # Check LONG gate
-        if ind_score > self._gate_indicator_min and pat_score > self._gate_pattern_min:
+        if ind_score > g_ind_min and pat_score > g_pat_min:
             return Signal.BUY
 
         # Check SHORT gate
-        if ind_score < self._gate_indicator_max and pat_score < self._gate_pattern_max:
+        if ind_score < g_ind_max and pat_score < g_pat_max:
             return Signal.SELL
 
         return Signal.HOLD
@@ -814,14 +857,19 @@ class ScoreBasedStrategy(Strategy):
     def _percentile_rank(self, score: float) -> float:
         """Compute the percentile rank (0-100) of *score* within the window.
 
-        Uses the 'weak' definition: % of values strictly less than score.
-        Returns 0.0 if score is the minimum, 100.0 if strictly above all.
+        Uses the 'mean' definition: ``(count_below + count_equal / 2) / n``.
+        This avoids the pathological case where identical scores all get
+        rank 0 (the 'weak'/'strict-less-than' formula), which would
+        produce false SHORT signals when the window is flat.
+
+        Returns 50.0 for an empty window (neutral).
         """
         n = len(self._score_window)
         if n == 0:
             return 50.0
         count_below = sum(1 for s in self._score_window if s < score)
-        return (count_below / n) * 100.0
+        count_equal = sum(1 for s in self._score_window if s == score)
+        return ((count_below + count_equal / 2) / n) * 100.0
 
     def _constrain_signal(self, signal: Signal, position: float) -> Signal:
         """Apply trading mode constraints to the raw signal.
