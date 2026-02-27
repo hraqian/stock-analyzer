@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -35,6 +36,9 @@ from analysis.pattern_scorer import PatternCompositeScorer
 from engine.strategy import Signal, StrategyContext, TradeOrder
 from engine.suitability import TradingMode
 from engine.regime import RegimeClassifier, RegimeAssessment, RegimeType, RegimeSubType
+from analysis.support_resistance import calculate_levels as calc_sr_levels
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +225,17 @@ class BacktestEngine:
         self._atr_stop_period: int = int(strat_cfg.get("atr_stop_period", 14))
         self._atr_stop_enabled: bool = bool(strat_cfg.get("atr_stop_enabled", True))
 
+        # Chandelier Exit stop
+        self._chandelier_enabled: bool = bool(strat_cfg.get("chandelier_enabled", False))
+        self._chandelier_atr_mult: float = float(strat_cfg.get("chandelier_atr_mult", 3.0))
+        self._chandelier_lookback: int = int(strat_cfg.get("chandelier_lookback", 22))
+
+        # Support/resistance-based stop
+        self._support_stop_enabled: bool = bool(strat_cfg.get("support_stop_enabled", False))
+        self._support_stop_buffer_pct: float = float(strat_cfg.get("support_stop_buffer_pct", 0.01))
+        self._support_levels: list[float] = []   # populated at start of run()
+        self._resistance_levels: list[float] = []  # populated at start of run()
+
         # Trend confirmation filter
         self._trend_confirm_enabled: bool = bool(strat_cfg.get("trend_confirm_enabled", True))
         self._trend_confirm_period: int = int(strat_cfg.get("trend_confirm_period", 20))
@@ -245,6 +260,67 @@ class BacktestEngine:
         # Trailing stop high-water mark (reset when position opens/closes)
         self._trailing_high: float = 0.0
 
+        # Strategy profiles (regime-aware auto-selection)
+        profiles_cfg = cfg.section("strategy_profiles")
+        self._profiles_enabled: bool = bool(profiles_cfg.get("enabled", False))
+        self._profile_regime_mapping: dict[str, str] = dict(
+            profiles_cfg.get("regime_mapping", {})
+        )
+        self._profiles: dict[str, dict] = dict(profiles_cfg.get("profiles", {}))
+        self._active_profile_name: str | None = None
+
+    # ------------------------------------------------------------------
+    # Strategy profiles
+    # ------------------------------------------------------------------
+
+    def _select_profile(self, regime: RegimeType | None) -> str | None:
+        """Select a strategy profile name based on the detected regime.
+
+        Returns the profile name if one is mapped, otherwise None.
+        """
+        if not self._profiles_enabled or regime is None:
+            return None
+        profile_name = self._profile_regime_mapping.get(regime.value)
+        if profile_name and profile_name in self._profiles:
+            return profile_name
+        return None
+
+    def _apply_profile(self, profile_name: str) -> None:
+        """Apply a strategy profile's param overrides to the engine.
+
+        Overrides engine-level stop/take-profit/sizing settings and notifies
+        the strategy to reinitialize with the new params.
+        """
+        profile = self._profiles.get(profile_name, {})
+        if not profile:
+            return
+
+        self._active_profile_name = profile_name
+        logger.info("Applying strategy profile '%s': %s", profile_name,
+                     profile.get("description", ""))
+
+        # Override engine-level params
+        if "stop_loss_pct" in profile:
+            self._stop_loss_pct = float(profile["stop_loss_pct"])
+        if "take_profit_pct" in profile:
+            self._take_profit_pct = float(profile["take_profit_pct"])
+        if "rebalance_interval" in profile:
+            self._rebalance_interval = int(profile["rebalance_interval"])
+        if "atr_stop_multiplier" in profile:
+            self._atr_stop_multiplier = float(profile["atr_stop_multiplier"])
+
+        # Forward params to the strategy (score thresholds, sizing, etc.)
+        # Build a partial params dict from the profile
+        strategy_overrides: dict = {}
+        for key in ("score_thresholds", "percent_equity", "position_sizing",
+                     "trend_confirm_period", "indicator_weight", "pattern_weight",
+                     "combination_mode", "boost_strength", "boost_dead_zone"):
+            if key in profile:
+                strategy_overrides[key] = profile[key]
+
+        if strategy_overrides and hasattr(self._strategy, "apply_overrides"):
+            self._strategy.apply_overrides(strategy_overrides)
+
     # ------------------------------------------------------------------
     # Interval helpers
     # ------------------------------------------------------------------
@@ -264,7 +340,7 @@ class BacktestEngine:
         minutes = _interval_minutes.get(interval)
         if minutes is None:
             return 1  # daily, weekly, monthly
-        return max(1, trading_day_minutes // minutes)
+        return max(1, math.ceil(trading_day_minutes / minutes))
 
     @staticmethod
     def _is_intraday(interval: str) -> bool:
@@ -341,6 +417,30 @@ class BacktestEngine:
             ], axis=1).max(axis=1)
             atr_series = tr.rolling(window=self._atr_stop_period, min_periods=1).mean()
 
+        # 1e. Pre-compute support/resistance levels for support-based stop
+        if self._support_stop_enabled:
+            try:
+                sr_cfg = self._cfg.section("support_resistance")
+                current_price = float(df["close"].iloc[-1])
+                sr_levels = calc_sr_levels(df, sr_cfg, current_price)
+                self._support_levels = [lvl.price for lvl in sr_levels.get("support", [])]
+                self._resistance_levels = [lvl.price for lvl in sr_levels.get("resistance", [])]
+            except Exception:
+                logger.warning("S/R level computation failed; support-based stop disabled", exc_info=True)
+                self._support_levels = []
+                self._resistance_levels = []
+
+        # 1e2. Pre-compute rolling high/low series for Chandelier Exit
+        chandelier_high_series: pd.Series | None = None
+        chandelier_low_series: pd.Series | None = None
+        if self._chandelier_enabled:
+            chandelier_high_series = df["high"].rolling(
+                window=self._chandelier_lookback, min_periods=1
+            ).max()
+            chandelier_low_series = df["low"].rolling(
+                window=self._chandelier_lookback, min_periods=1
+            ).min()
+
         # 2. State initialization
         cash: float = self._initial_cash
         position: _Position | None = None
@@ -364,11 +464,20 @@ class BacktestEngine:
         # over the analysis period, not a dynamic state.  Letting them shift
         # every rebalance makes sub-type overrides unreliable (e.g. QQQ
         # oscillates between steady_compounder/stagnant mid-trade).
+        initial_regime_type: RegimeType | None = None
+        initial_assessment: RegimeAssessment | None = None
         try:
             initial_assessment = regime_classifier.classify(df)
             current_regime_sub_type = initial_assessment.sub_type
+            initial_regime_type = initial_assessment.regime
         except Exception:
-            pass  # leave as None if classification fails
+            logger.warning("Initial regime classification failed; sub_type left as None", exc_info=True)
+
+        # 1f. Apply strategy profile based on initial regime classification
+        if self._profiles_enabled and initial_regime_type is not None:
+            profile_name = self._select_profile(initial_regime_type)
+            if profile_name:
+                self._apply_profile(profile_name)
 
         # Notify strategy of start
         self._strategy.on_start({"ticker": ticker, "period": period})
@@ -401,13 +510,33 @@ class BacktestEngine:
 
             # -- Skip warmup period --
             if i < effective_warmup:
-                equity = cash + (position.unrealized_pnl(close) if position else 0.0)
+                if position is None:
+                    equity = cash
+                elif position.side == "long":
+                    equity = cash + position.quantity * close
+                else:
+                    equity = cash - position.quantity * close
                 equity_curve.append({"date": date_str, "equity": equity})
                 continue
 
             # -- Check stop-loss / take-profit on every bar --
             if position is not None:
-                exit_reason = self._check_exit_triggers(position, close, current_regime, current_regime_sub_type)
+                # Gather Chandelier and ATR data for this bar
+                bar_atr = float(atr_series.iloc[i]) if atr_series is not None else 0.0
+                bar_chandelier_high = (
+                    float(chandelier_high_series.iloc[i])
+                    if chandelier_high_series is not None else 0.0
+                )
+                bar_chandelier_low = (
+                    float(chandelier_low_series.iloc[i])
+                    if chandelier_low_series is not None else 0.0
+                )
+                exit_reason = self._check_exit_triggers(
+                    position, close, current_regime, current_regime_sub_type,
+                    bar_atr=bar_atr,
+                    chandelier_high=bar_chandelier_high,
+                    chandelier_low=bar_chandelier_low,
+                )
                 if exit_reason:
                     trade = self._close_position(
                         position, close, date_str, exit_reason
@@ -445,16 +574,18 @@ class BacktestEngine:
                     current_regime_total_return = regime_assessment.metrics.total_return
                     # current_regime_sub_type is NOT updated here — locked at start
                 except Exception:
-                    pass  # keep previous regime if classification fails
+                    logger.warning(
+                        "Regime re-evaluation failed at bar %d; using stale regime",
+                        i, exc_info=True,
+                    )
 
             # Build context and ask strategy for order
             portfolio_value = cash
             if position is not None:
-                portfolio_value += position.unrealized_pnl(close) + (
-                    position.entry_price * position.quantity
-                    if position.side == "long"
-                    else 0.0
-                )
+                if position.side == "long":
+                    portfolio_value += position.quantity * close
+                else:
+                    portfolio_value -= position.quantity * close
 
             # Trend MA for confirmation filter
             current_trend_ma = 0.0
@@ -560,9 +691,7 @@ class BacktestEngine:
                 if position.side == "long":
                     equity += position.quantity * close
                 else:
-                    # For short: cash already includes proceeds from short sale;
-                    # we need to subtract cost to cover
-                    equity += position.unrealized_pnl(close)
+                    equity -= position.quantity * close
             equity_curve.append({"date": date_str, "equity": equity})
 
         # 4. Close any remaining position at last bar (if configured)
@@ -581,7 +710,7 @@ class BacktestEngine:
             if position.side == "long":
                 final_equity += position.quantity * last_close
             else:
-                final_equity += position.unrealized_pnl(last_close)
+                final_equity -= position.quantity * last_close
 
         # 5. Extract significant patterns from the full post-warmup data
         post_warmup_df = df.iloc[effective_warmup:].copy()
@@ -592,7 +721,7 @@ class BacktestEngine:
         try:
             final_regime = regime_classifier.classify(df)
         except Exception:
-            pass
+            logger.warning("Final regime classification failed", exc_info=True)
 
         # 6. Build result
         result = BacktestResult(
@@ -626,7 +755,8 @@ class BacktestEngine:
         """Open a new position. Returns (position, cash_cost).
 
         For long:  cash_cost = quantity * fill_price + commission
-        For short: cash_cost = commission only (proceeds credited on close)
+        For short: cash_cost = -(proceeds - commission) so cash increases by
+                  proceeds minus commission when we do ``cash -= cash_cost``.
         """
         fill_price = self._apply_slippage(price, side, opening=True)
         # Reset trailing stop high-water mark for the new position
@@ -642,8 +772,8 @@ class BacktestEngine:
         if side == "long":
             cost = fill_price * quantity + self._commission
         else:
-            # Short: we receive proceeds on close; just pay commission now
-            cost = self._commission
+            proceeds = fill_price * quantity
+            cost = -(proceeds - self._commission)
         return pos, cost
 
     def _close_position(
@@ -661,7 +791,8 @@ class BacktestEngine:
         else:
             pnl = (position.entry_price - fill_price) * position.quantity
 
-        pnl -= self._commission  # commission on close
+        # Commissions on both entry and exit
+        pnl -= (2 * self._commission)
 
         entry_cost = position.entry_price * position.quantity
         pnl_pct = pnl / entry_cost if entry_cost != 0 else 0.0
@@ -683,14 +814,12 @@ class BacktestEngine:
         """Cash returned when closing a position.
 
         Long close:  quantity * exit_price - commission (already in pnl)
-        Short close: entry_price*qty - exit_price*qty + entry_price*qty
-                   = pnl + entry_cost
+        Short close: -(quantity * exit_price + commission)
         """
         if trade.side == "long":
             return trade.exit_price * trade.quantity - self._commission
         else:
-            # Short: on close we return proceeds minus cost-to-cover
-            return trade.pnl + self._commission  # net pnl (commission already deducted in trade)
+            return -(trade.exit_price * trade.quantity + self._commission)
 
     def _apply_slippage(self, price: float, side: str, opening: bool) -> float:
         """Adjust fill price for slippage.
@@ -708,27 +837,24 @@ class BacktestEngine:
         current_price: float,
         regime: RegimeType | None = None,
         regime_sub_type: RegimeSubType | None = None,
+        *,
+        bar_atr: float = 0.0,
+        chandelier_high: float = 0.0,
+        chandelier_low: float = 0.0,
     ) -> str:
-        """Check stop-loss, trailing stop, and take-profit.
+        """Check stop-loss, trailing stop, Chandelier, support-based, and take-profit.
 
         Returns exit reason or empty string.
 
-        Stop-loss logic:
-          When ATR-adaptive stop is enabled and the position has a valid entry_atr,
-          the stop is ``max(stop_loss_pct, atr_stop_multiplier * entry_atr / entry_price)``
-          — the ATR stop widens the floor, and the fixed % is a minimum safety net.
+        Stop hierarchy (first triggered wins):
+          1. Trailing stop (strong_trend regime)
+          2. Chandelier Exit (ATR from recent high/low)
+          3. Support/resistance-based stop
+          4. Fixed / ATR stop-loss
+          5. Take-profit
 
-        Trailing stop:
-          In strong_trend regime (or when trailing stop is explicitly enabled),
-          the stop trails the highest price seen since entry. The trailing distance
-          is ``trailing_stop_atr_mult * entry_atr / entry_price``.
-
-        Take-profit:
-          Disabled in strong_trend regime to let winners run. In other regimes,
-          the take-profit cap applies normally.
-
-        In volatile/choppy regime, the stop loss is widened by the configured
-        ``stop_loss_mult`` to avoid premature exits from noisy price action.
+        The strategy picks the **tightest protective stop** among options 2-4
+        per regime. In strong_trend, the trailing stop (option 1) takes priority.
         """
         pnl_pct = position.unrealized_pnl_pct(current_price)
 
@@ -763,6 +889,43 @@ class BacktestEngine:
                     in_profit = not self._trailing_stop_require_profit or self._trailing_high < position.entry_price
                     if current_price >= trail_stop_price and in_profit:
                         return "trailing_stop"
+
+        # ── Chandelier Exit ─────────────────────────────────────────────
+        # Stop at highest_high - N*ATR (long) or lowest_low + N*ATR (short)
+        if self._chandelier_enabled and bar_atr > 0:
+            if position.side == "long" and chandelier_high > 0:
+                chandelier_stop = chandelier_high - self._chandelier_atr_mult * bar_atr
+                if current_price <= chandelier_stop:
+                    return "chandelier_stop"
+            elif position.side == "short" and chandelier_low > 0:
+                chandelier_stop = chandelier_low + self._chandelier_atr_mult * bar_atr
+                if current_price >= chandelier_stop:
+                    return "chandelier_stop"
+
+        # ── Support/resistance-based stop ───────────────────────────────
+        # For longs: stop just below the nearest support level
+        # For shorts: stop just above the nearest resistance level
+        if self._support_stop_enabled:
+            if position.side == "long" and self._support_levels:
+                # Find the nearest support below entry price — this is the
+                # level we expect to hold.  If current price drops through
+                # that level (minus a small buffer), exit.
+                supports_below = [s for s in self._support_levels if s < position.entry_price]
+                if supports_below:
+                    nearest_support = max(supports_below)
+                    support_stop = nearest_support * (1 - self._support_stop_buffer_pct)
+                    if current_price <= support_stop:
+                        return "support_stop"
+            elif position.side == "short" and self._resistance_levels:
+                # Find the nearest resistance above entry price — this is the
+                # level we expect to hold.  If current price rises through
+                # that level (plus a small buffer), exit.
+                resistances_above = [r for r in self._resistance_levels if r > position.entry_price]
+                if resistances_above:
+                    nearest_resistance = min(resistances_above)
+                    resistance_stop = nearest_resistance * (1 + self._support_stop_buffer_pct)
+                    if current_price >= resistance_stop:
+                        return "resistance_stop"
 
         # ── Fixed / ATR stop-loss ───────────────────────────────────────
         # ATR stop is a floor (uses max), not a cap — allows wider breathing room
