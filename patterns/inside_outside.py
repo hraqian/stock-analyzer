@@ -4,10 +4,15 @@ patterns/inside_outside.py — Inside Bar and Outside Bar detection.
 Inside Bar:
   Current bar's range is fully contained within the prior bar's range
   (high <= prev high AND low >= prev low). Indicates consolidation and
-  a potential breakout setup. The breakout direction determines the signal:
-    - Price breaks above the inside bar high → bullish
-    - Price breaks below the inside bar low → bearish
-    - No breakout yet → neutral (score = 5.0)
+  a potential breakout setup. When detected, the inside bar is recorded
+  as "pending" and we wait up to ``breakout_bars`` for a breakout:
+    - Subsequent bar breaks above the mother bar's high → bullish
+      (signal attributed to the breakout bar, not the inside bar)
+    - Subsequent bar breaks below the mother bar's low → bearish
+    - No breakout within the window → neutral (score = 5.0)
+
+  This avoids look-ahead bias: the breakout direction is only known
+  when the breakout actually occurs.
 
 Outside Bar (a.k.a. engulfing range):
   Current bar's range completely engulfs the prior bar's range
@@ -64,6 +69,12 @@ class InsideOutsidePattern(BasePattern):
 
         patterns: list[dict[str, Any]] = []
 
+        # Track pending inside bar for breakout detection (no look-ahead).
+        # When an inside bar is found, we record the mother bar's levels
+        # and wait for a subsequent bar to break out.
+        pending_inside: dict[str, Any] | None = None
+        pending_bars_remaining: int = 0
+
         for i in range(1, len(df)):
             h = float(df["high"].iloc[i])
             l = float(df["low"].iloc[i])
@@ -76,29 +87,29 @@ class InsideOutsidePattern(BasePattern):
             prev_range = prev_h - prev_l
 
             if bar_range == 0 or prev_range == 0:
+                # Still count down pending inside bar even if this bar is skipped
+                if pending_inside is not None:
+                    pending_bars_remaining -= 1
+                    if pending_bars_remaining <= 0:
+                        # Expired without breakout — record as pending/neutral
+                        patterns.append(pending_inside)
+                        pending_inside = None
                 continue
 
             slope = float(ema_slope.iloc[i]) if not np.isnan(ema_slope.iloc[i]) else 0.0
             in_uptrend = slope > 0
             in_downtrend = slope < 0
 
-            # --- Inside Bar ---
-            # Current range fully contained within prior range
-            if h <= prev_h and l >= prev_l:
-                # Check for breakout on subsequent bars
-                breakout_dir = None
-                for j in range(i + 1, min(i + 1 + breakout_bars, len(df))):
-                    future_h = float(df["high"].iloc[j])
-                    future_l = float(df["low"].iloc[j])
-                    if future_h > prev_h:
-                        breakout_dir = "up"
-                        break
-                    elif future_l < prev_l:
-                        breakout_dir = "down"
-                        break
+            # --- Check for breakout of pending inside bar ---
+            if pending_inside is not None:
+                mother_h = pending_inside["_mother_h"]
+                mother_l = pending_inside["_mother_l"]
+                ib_uptrend = pending_inside["_in_uptrend"]
+                ib_downtrend = pending_inside["_in_downtrend"]
 
-                if breakout_dir == "up":
-                    strength = s_inside_breakout_with if in_uptrend else s_inside_breakout_against
+                if h > mother_h:
+                    # Bullish breakout — emit signal on THIS bar (breakout bar)
+                    strength = s_inside_breakout_with if ib_uptrend else s_inside_breakout_against
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],
@@ -106,8 +117,10 @@ class InsideOutsidePattern(BasePattern):
                         "signal": "bullish",
                         "strength": strength,
                     })
-                elif breakout_dir == "down":
-                    strength = s_inside_breakout_with if in_downtrend else s_inside_breakout_against
+                    pending_inside = None
+                elif l < mother_l:
+                    # Bearish breakout — emit signal on THIS bar (breakout bar)
+                    strength = s_inside_breakout_with if ib_downtrend else s_inside_breakout_against
                     patterns.append({
                         "bar_index": i,
                         "date": str(df.index[i])[:10],
@@ -115,15 +128,36 @@ class InsideOutsidePattern(BasePattern):
                         "signal": "bearish",
                         "strength": strength,
                     })
+                    pending_inside = None
                 else:
-                    # No breakout yet — record as neutral setup
-                    patterns.append({
-                        "bar_index": i,
-                        "date": str(df.index[i])[:10],
-                        "pattern": "inside_bar_pending",
-                        "signal": "neutral",
-                        "strength": s_inside_pending,
-                    })
+                    pending_bars_remaining -= 1
+                    if pending_bars_remaining <= 0:
+                        # Expired without breakout — record as neutral
+                        patterns.append(pending_inside)
+                        pending_inside = None
+
+            # --- Inside Bar ---
+            # Current range fully contained within prior range.
+            # Record as pending and wait for breakout (no look-ahead).
+            if h <= prev_h and l >= prev_l:
+                # If there's already a pending inside bar that hasn't
+                # broken out, finalize it as neutral before tracking the new one.
+                if pending_inside is not None:
+                    patterns.append(pending_inside)
+
+                pending_inside = {
+                    "bar_index": i,
+                    "date": str(df.index[i])[:10],
+                    "pattern": "inside_bar_pending",
+                    "signal": "neutral",
+                    "strength": s_inside_pending,
+                    # Internal fields (stripped before returning)
+                    "_mother_h": prev_h,
+                    "_mother_l": prev_l,
+                    "_in_uptrend": in_uptrend,
+                    "_in_downtrend": in_downtrend,
+                }
+                pending_bars_remaining = breakout_bars
 
             # --- Outside Bar ---
             # Current range engulfs prior range with meaningful expansion
@@ -149,6 +183,18 @@ class InsideOutsidePattern(BasePattern):
                         "signal": "bearish",
                         "strength": strength,
                     })
+
+        # Finalize any still-pending inside bar at end of data
+        if pending_inside is not None:
+            patterns.append(pending_inside)
+            pending_inside = None
+
+        # Strip internal tracking fields from inside bar patterns
+        for p in patterns:
+            p.pop("_mother_h", None)
+            p.pop("_mother_l", None)
+            p.pop("_in_uptrend", None)
+            p.pop("_in_downtrend", None)
 
         # Recent patterns only
         recent_patterns = [p for p in patterns if p["bar_index"] >= len(df) - lookback]
