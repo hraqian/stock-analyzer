@@ -3116,6 +3116,7 @@ def _build_scanner_results_html(
     if show_mt:
         mt_headers = (
             "<th style='width:80px;'>MT Score</th>"
+            "<th>MT Signal</th>"
             "<th>Daily</th>"
             "<th>Weekly</th>"
             "<th>Monthly</th>"
@@ -3174,6 +3175,7 @@ def _build_scanner_results_html(
 
             mt_cells = (
                 f"<td>{mt_score_html}</td>"
+                f"{_mt_signal_cell(r.mt_aggregated_signal)}"
                 f"{_mt_signal_cell(r.mt_daily_signal)}"
                 f"{_mt_signal_cell(r.mt_weekly_signal)}"
                 f"{_mt_signal_cell(r.mt_monthly_signal)}"
