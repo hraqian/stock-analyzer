@@ -431,7 +431,16 @@ class ScoreBasedStrategy(Strategy):
         self._consecutive_losses = 0
 
     def on_trade_close(self, pnl_pct: float, exit_reason: str) -> None:
-        """Track consecutive losses for cooldown logic."""
+        """Track consecutive losses and reset re-entry grace on engine exits.
+
+        Engine-forced exits (stop_loss, trailing_stop, take_profit,
+        eod_flatten) bypass on_bar, so the grace period counter is never
+        reset there.  We reset it here so the strategy can re-enter
+        quickly after a stop-loss instead of waiting for trend confirmation.
+        """
+        # Reset re-entry grace period on any exit
+        self._bars_since_exit = 0
+
         if pnl_pct < 0:
             self._consecutive_losses += 1
         elif pnl_pct == 0 and not self._cooldown_reset_on_breakeven:
