@@ -3370,14 +3370,22 @@ def render_scanner() -> None:
 
         # Build ranked lists
         ok_results = [r for r in results_all if not r.error]
+        if show_mt:
+            # When MT is enabled, group by MT aggregated signal and rank by MT score
+            sort_key = lambda r: r.mt_aggregated_score if r.mt_aggregated_score > 0 else r.effective_score
+            signal_key = lambda r: r.mt_aggregated_signal or r.signal
+        else:
+            sort_key = lambda r: r.effective_score
+            signal_key = lambda r: r.signal
+
         buys = sorted(
-            [r for r in ok_results if r.signal == "BUY"],
-            key=lambda r: r.effective_score,
+            [r for r in ok_results if signal_key(r) == "BUY"],
+            key=sort_key,
             reverse=True,
         )[:display_n]
         sells = sorted(
-            [r for r in ok_results if r.signal == "SELL"],
-            key=lambda r: r.effective_score,
+            [r for r in ok_results if signal_key(r) == "SELL"],
+            key=sort_key,
         )[:display_n]
 
         # Render tables (stacked vertically – too many columns for side-by-side)
@@ -3396,8 +3404,8 @@ def render_scanner() -> None:
 
         # Expandable: all HOLD signals
         holds = sorted(
-            [r for r in ok_results if r.signal == "HOLD"],
-            key=lambda r: r.effective_score,
+            [r for r in ok_results if signal_key(r) == "HOLD"],
+            key=sort_key,
             reverse=True,
         )
         if holds:
