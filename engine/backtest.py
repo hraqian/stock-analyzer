@@ -143,6 +143,9 @@ class BacktestResult:
     # Market regime classification (from the full data at end of backtest)
     regime: RegimeAssessment | None = None
 
+    # Number of warmup bars at the start of equity_curve (no trades occur)
+    warmup_bars: int = 0
+
     # Performance metrics (populated by _compute_metrics)
     total_return_pct: float = 0.0
     annualized_return_pct: float = 0.0
@@ -338,7 +341,15 @@ class BacktestEngine:
     def _bars_per_day(interval: str, trading_day_minutes: int = 390) -> int:
         """Estimate the number of intraday bars in a trading day.
 
-        Returns 1 for daily-or-above intervals (used for annualization).
+        Returns 1 for daily intervals. For weekly/monthly, returns a
+        fractional-equivalent via the convention that the caller
+        multiplies by ``trading_days_per_year`` to get bars-per-year,
+        so we return a value that makes that product correct:
+          weekly  → 52 / trading_days_per_year  (≈ 0.206)
+          monthly → 12 / trading_days_per_year  (≈ 0.048)
+        Since the return type is int and we need precision for
+        annualization, we instead provide a companion method
+        ``_bars_per_year``.
         """
         interval = interval.lower().strip()
         # Map interval string to minutes per bar
@@ -348,8 +359,22 @@ class BacktestEngine:
         }
         minutes = _interval_minutes.get(interval)
         if minutes is None:
-            return 1  # daily, weekly, monthly
+            return 1  # daily (weekly/monthly handled by _bars_per_year)
         return max(1, math.ceil(trading_day_minutes / minutes))
+
+    def _bars_per_year(self, interval: str) -> float:
+        """Return estimated bars per year for the given interval.
+
+        Correctly handles weekly and monthly intervals instead of
+        treating them as daily.
+        """
+        interval_lower = interval.lower().strip()
+        if interval_lower in ("1wk", "1w"):
+            return 52.0
+        if interval_lower in ("1mo", "1m_monthly", "3mo"):
+            return 12.0 if interval_lower != "3mo" else 4.0
+        bpd = self._bars_per_day(interval, self._trading_day_minutes)
+        return float(bpd * self._trading_days_per_year)
 
     @staticmethod
     def _is_intraday(interval: str) -> bool:
@@ -743,6 +768,7 @@ class BacktestEngine:
             equity_curve=equity_curve,
             significant_patterns=significant_patterns,
             regime=final_regime,
+            warmup_bars=effective_warmup,
         )
         self._compute_metrics(result, interval)
         self._strategy.on_end({"total_trades": len(trades)})
@@ -1131,18 +1157,18 @@ class BacktestEngine:
     def _compute_metrics(self, result: BacktestResult, interval: str = "1d") -> None:
         """Populate performance metrics on *result* in-place.
 
-        For intraday intervals, annualization uses
-        bars_per_day * trading_days_per_year instead of just
-        trading_days_per_year to correctly scale to yearly figures.
+        Metrics that depend on time (annualized return, Sharpe ratio)
+        use only the **post-warmup** portion of the equity curve so that
+        the flat warmup period does not dilute the results.  Weekly and
+        monthly intervals are correctly annualized.
         """
         trades = result.trades
         result.total_trades = len(trades)
 
         # Bars per trading year for this interval
-        bpd = self._bars_per_day(interval, self._trading_day_minutes)
-        bars_per_year = bpd * self._trading_days_per_year
+        bars_per_year = self._bars_per_year(interval)
 
-        # Total return
+        # Total return (always based on full initial → final)
         if result.initial_cash > 0:
             result.total_return_pct = (
                 (result.final_equity - result.initial_cash) / result.initial_cash * 100
@@ -1150,21 +1176,34 @@ class BacktestEngine:
         else:
             result.total_return_pct = 0.0
 
-        # Annualized return
+        # Post-warmup equity curve (exclude flat warmup bars)
         curve = result.equity_curve
-        if len(curve) >= 2:
-            n_bars = len(curve)
-            years = n_bars / bars_per_year
-            if years > 0 and result.final_equity > 0 and result.initial_cash > 0:
-                result.annualized_return_pct = (
-                    ((result.final_equity / result.initial_cash) ** (1 / years) - 1) * 100
-                )
+        warmup = result.warmup_bars
+        trading_curve = curve[warmup:] if warmup < len(curve) else curve
 
-        # Max drawdown
-        if curve:
-            peak = curve[0]["equity"]
+        # Annualized return — use only post-warmup trading bars
+        if len(trading_curve) >= 2 and result.initial_cash > 0:
+            n_bars = len(trading_curve)
+            years = n_bars / bars_per_year
+            if years > 0:
+                total_return = result.final_equity / result.initial_cash
+                if total_return > 0:
+                    result.annualized_return_pct = (
+                        (total_return ** (1 / years) - 1) * 100
+                    )
+                else:
+                    # Equity went negative — compute via total return
+                    result.annualized_return_pct = (
+                        ((1 + result.total_return_pct / 100) ** (1 / years) - 1) * 100
+                        if result.total_return_pct > -100
+                        else -100.0
+                    )
+
+        # Max drawdown (use post-warmup curve for consistency)
+        if trading_curve:
+            peak = trading_curve[0]["equity"]
             max_dd = 0.0
-            for pt in curve:
+            for pt in trading_curve:
                 eq = pt["equity"]
                 if eq > peak:
                     peak = eq
@@ -1192,16 +1231,16 @@ class BacktestEngine:
             result.best_trade_pnl_pct = max(t.pnl_pct for t in trades) * 100
             result.worst_trade_pnl_pct = min(t.pnl_pct for t in trades) * 100
 
-        # Sharpe ratio (bar-level returns from equity curve)
-        if len(curve) >= 2:
-            equities = [pt["equity"] for pt in curve]
+        # Sharpe ratio — use post-warmup equity curve and sample std dev
+        if len(trading_curve) >= 2:
+            equities = [pt["equity"] for pt in trading_curve]
             bar_returns = []
             for j in range(1, len(equities)):
                 if equities[j - 1] > 0:
                     bar_returns.append(equities[j] / equities[j - 1] - 1)
-            if bar_returns:
+            if len(bar_returns) >= 2:
                 mean_r = sum(bar_returns) / len(bar_returns)
-                var_r = sum((r - mean_r) ** 2 for r in bar_returns) / len(bar_returns)
+                var_r = sum((r - mean_r) ** 2 for r in bar_returns) / (len(bar_returns) - 1)
                 std_r = math.sqrt(var_r)
                 if std_r > 0:
                     result.sharpe_ratio = (mean_r / std_r) * math.sqrt(bars_per_year)
