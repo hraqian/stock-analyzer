@@ -127,7 +127,8 @@ class CandlestickPattern(BasePattern):
             detected = []
 
             # --- Doji (generic, dragonfly, gravestone) ---
-            if body_pct <= doji_threshold:
+            is_doji = body_pct <= doji_threshold
+            if is_doji:
                 # Dragonfly doji: long lower shadow, tiny upper shadow
                 # Inherently bullish (buyers pushed price back up)
                 if lower_shadow >= bar_range * dragonfly_shadow_min and upper_shadow <= bar_range * doji_tiny_shadow_max:
@@ -148,7 +149,9 @@ class CandlestickPattern(BasePattern):
 
             # --- Hammer / Hanging Man ---
             # Small body at top, long lower shadow
-            if body_pct < hammer_body_max and lower_shadow >= body * shadow_ratio and upper_shadow < body:
+            # Skip if already classified as doji (near-zero body bars should
+            # not double-trigger as both doji and hammer).
+            if not is_doji and body_pct < hammer_body_max and lower_shadow >= body * shadow_ratio and upper_shadow < body:
                 if in_downtrend:
                     # Hammer = bullish reversal signal
                     detected.append(("hammer", "bullish", s_hammer[0]))
@@ -158,7 +161,8 @@ class CandlestickPattern(BasePattern):
 
             # --- Shooting Star / Inverted Hammer ---
             # Small body at bottom, long upper shadow
-            if body_pct < hammer_body_max and upper_shadow >= body * shadow_ratio and lower_shadow < body:
+            # Skip if already classified as doji.
+            if not is_doji and body_pct < hammer_body_max and upper_shadow >= body * shadow_ratio and lower_shadow < body:
                 if in_uptrend:
                     # Shooting star = bearish reversal signal
                     detected.append(("shooting_star", "bearish", s_shooting_star[0]))
