@@ -3371,8 +3371,17 @@ def render_scanner() -> None:
         # Build ranked lists
         ok_results = [r for r in results_all if not r.error]
         if show_mt:
-            # When MT is enabled, group by MT aggregated signal and rank by MT score
-            sort_key = lambda r: r.mt_aggregated_score if r.mt_aggregated_score > 0 else r.effective_score
+            # When MT is enabled, group by MT aggregated signal and rank by
+            # a combination of MT score and agreement.
+            # Agreement multiplier: aligned=1.0, mixed=0.7, conflicting=0.4
+            _agreement_mult = {"aligned": 1.0, "mixed": 0.7, "conflicting": 0.4}
+
+            def _mt_sort_key(r: ScanResult) -> float:
+                base = r.mt_aggregated_score if r.mt_aggregated_score > 0 else r.effective_score
+                mult = _agreement_mult.get(r.mt_agreement, 0.7)
+                return base * mult
+
+            sort_key = _mt_sort_key
             signal_key = lambda r: r.mt_aggregated_signal or r.signal
         else:
             sort_key = lambda r: r.effective_score
