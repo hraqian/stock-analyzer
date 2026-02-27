@@ -183,6 +183,7 @@ gaps:
     breakaway: 1.0
     exhaustion: 0.5           # exhaustion gaps get inverse signal (reversal)
   max_signal_strength: 3.0    # net signal beyond this = full score (0.5 or 9.5)
+  gap_pct_scale: 100           # multiplier to convert gap_pct into strength units
 
 volume_range:
   period: 20                  # rolling average period for range and volume
@@ -194,6 +195,7 @@ volume_range:
     expansion_bear: 2.0       # bearish expansion base score
     contraction: 5.0          # contraction = neutral
     divergence: 5.0           # range/volume divergence = neutral
+  expansion_bias_multiplier: 1.5  # multiplier for expansion directional bias
 
 candlesticks:
   doji_threshold: 0.05        # body/range <= this = doji
@@ -211,6 +213,14 @@ candlesticks:
   lookback: 10                # recent bars to scan for patterns
   trend_period: 10            # EMA period for trend context
   max_signal_strength: 3.0    # net signal beyond this = full score
+  hammer_body_max: 0.35        # max body ratio for hammer/shooting star detection
+  star_body_min: 0.5           # min body ratio for morning/evening star center candle
+  # Per-pattern strength values — empty dict = use built-in defaults.
+  # Override individual patterns (each maps to {with_trend, against_trend}):
+  #   strength_values:
+  #     hammer: {with_trend: 0.8, against_trend: 0.4}
+  #     engulfing: {with_trend: 1.0, against_trend: 0.6}
+  strength_values: {}
 
 spikes:
   period: 20                  # rolling mean/std period
@@ -220,6 +230,8 @@ spikes:
   lookback: 20                # recent bars to consider for scoring
   trap_weight: 0.7            # weight of trap (failed breakout) inverse signal
   max_signal_strength: 3.0    # net signal beyond this = full score
+  z_magnitude_cap: 2.0         # cap on z-score magnitude for strength calculation
+  unconfirmed_weight: 0.3      # weight multiplier for unconfirmed spikes
 
 inside_outside:
   lookback: 20                # recent bars to consider for scoring
@@ -227,6 +239,15 @@ inside_outside:
   breakout_bars: 3            # bars after inside bar to check for breakout direction
   outside_range_min: 1.2      # current range / prev range must >= this for outside bar
   max_signal_strength: 3.0    # net signal beyond this = full score
+  # Per-pattern strength values — empty dict = use built-in defaults.
+  # Override individual patterns:
+  #   strength_values:
+  #     inside_breakout_with_trend: 1.0
+  #     inside_breakout_against_trend: 0.6
+  #     inside_pending: 0.3
+  #     outside_reversal: 1.0
+  #     outside_continuation: 0.7
+  strength_values: {}
 
 overall_patterns:
   # Weights for pattern composite score — normalized if they don't sum to 1.0
@@ -241,6 +262,30 @@ overall_patterns:
   score_spreading:
     enabled: true
     factor: 2.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-Timeframe Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs the full analysis on multiple timeframes (daily, weekly, monthly) and
+# aggregates scores via weighted average.  Used by the scanner when MT mode
+# is enabled.
+
+multi_timeframe:
+  timeframes: ["1d", "1wk", "1mo"]
+  weights:
+    "1d": 0.5
+    "1wk": 0.3
+    "1mo": 0.2
+  periods:
+    "1d": "2y"
+    "1wk": "5y"
+    "1mo": "max"
+  # Agreement multipliers for scanner ranking — how much to discount the
+  # MT score when timeframes disagree.
+  agreement_multipliers:
+    aligned: 1.0               # all timeframes agree → full weight
+    mixed: 0.7                 # partial agreement → reduced weight
+    conflicting: 0.4           # timeframes disagree → heavily discounted
 
 display:
   show_disclaimer: true
@@ -391,6 +436,15 @@ strategy:
   boost_strength: 0.5         # multiplier for pattern deviation from 5.0
   boost_dead_zone: 0.3        # pattern score within 5.0 ± this → no boost
 
+  # Confidence distance thresholds — how far the score must be from the
+  # short/hold thresholds to assign HIGH vs MEDIUM vs LOW confidence labels
+  # in the scanner and dashboard signal display.
+  confidence_thresholds:
+    high: 1.5                 # score distance from threshold for HIGH confidence
+    medium: 0.5               # score distance for MEDIUM confidence
+    hold_high: 1.0            # distance inside hold zone for HIGH confidence
+    hold_medium: 0.3          # distance inside hold zone for MEDIUM confidence
+
 backtest:
   initial_cash: 100000.0    # starting portfolio cash
   commission_per_trade: 0.0 # flat commission per trade (set 0 to ignore)
@@ -415,6 +469,21 @@ backtest:
   trading_day_minutes: 390        # US market: 6.5 hours (for intraday bar count)
   default_score: 5.0              # neutral starting score before first rebalance
   close_on_end_of_data: true      # force-close any open position at end of data
+
+  # Warmup floor — absolute minimum warmup even after proportional reduction
+  warmup_min_bars: 20
+
+  # Strength thresholds per detector for pattern ↔ backtest interaction.
+  # Empty dict = use built-in defaults.  Override individual detectors:
+  #   strength_thresholds:
+  #     candlestick: [0.3, 0.6, 0.9, 1.2]
+  #     inside_outside: [0.2, 0.4, 0.6, 0.8]
+  strength_thresholds: {}
+
+  # Caps and normalization for gap/spike strength in backtest engine
+  gap_strength_cap: 2.0            # max gap detector strength contribution
+  spike_z_divisor: 2.5             # z-score divisor for spike strength normalization
+  spike_strength_cap: 2.0          # max spike detector strength contribution
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Market Regime Classification
