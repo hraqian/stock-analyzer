@@ -304,7 +304,7 @@ class Scanner:
         # Confidence
         thresholds = strat_cfg.get("score_thresholds", {})
         short_below = float(thresholds.get("short_below", 3.5))
-        hold_below = float(thresholds.get("hold_below", 6.5))
+        hold_below = float(thresholds.get("hold_below", 6.0))
 
         conf_cfg = strat_cfg.get("confidence_thresholds", {})
         conf_high = float(conf_cfg.get("high", 1.5))

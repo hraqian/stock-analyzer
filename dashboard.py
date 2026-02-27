@@ -747,13 +747,13 @@ def _edit_scoring_thresholds(data: dict) -> None:
         thresholds = strat.setdefault("score_thresholds", {})
         short_below = st.slider(
             "SHORT when score <=",
-            0.0, 10.0, float(thresholds.get("short_below", 4.5)),
+            0.0, 10.0, float(thresholds.get("short_below", 3.5)),
             step=0.1, key="fix_short", format="%.1f",
         )
         _default_hint(_ds_thr.get("short_below"), PARAM_DESCRIPTIONS.get("strategy.score_thresholds.short_below"))
         hold_below = st.slider(
             "LONG when score >",
-            0.0, 10.0, float(thresholds.get("hold_below", 5.5)),
+            0.0, 10.0, float(thresholds.get("hold_below", 6.0)),
             step=0.1, key="fix_long", format="%.1f",
         )
         _default_hint(_ds_thr.get("hold_below"), PARAM_DESCRIPTIONS.get("strategy.score_thresholds.hold_below"))
@@ -1872,8 +1872,8 @@ def compute_score_timeseries(
         end=end,
     )
 
-    warmup = int(cfg.section("backtest").get("warmup_bars", 200))
-    warmup_min = int(cfg.section("backtest").get("warmup_min_bars", 20))
+    warmup = int(cfg.section("backtest").get("warmup_bars", 50))
+    warmup_min = int(cfg.section("backtest").get("min_warmup_bars", 20))
     warmup = min(warmup, len(df) - 10)  # ensure we have some data after warmup
     if warmup < warmup_min:
         warmup = warmup_min
@@ -2541,8 +2541,8 @@ def render_strategy_config(cfg: Config) -> None:
         rows.append(("LONG percentile >=", f"{pct_cfg.get('long_percentile', 75)}%"))
         rows.append(("Lookback", f"{pct_cfg.get('lookback_bars', 60)} bars"))
     else:
-        rows.append(("SHORT when score <=", f"{thresholds.get('short_below', 4.5)}"))
-        rows.append(("LONG when score >", f"{thresholds.get('hold_below', 5.5)}"))
+        rows.append(("SHORT when score <=", f"{thresholds.get('short_below', 3.5)}"))
+        rows.append(("LONG when score >", f"{thresholds.get('hold_below', 6.0)}"))
 
     combo_mode = strat_cfg.get("combination_mode", "weighted")
     rows.append(("Combination Mode", combo_mode))
@@ -2802,7 +2802,7 @@ def compute_recommendation(
     # ── Derive confidence from score distance to thresholds ──────────────
     thresholds = strat_cfg.get("score_thresholds", {})
     short_below = float(thresholds.get("short_below", 3.5))
-    hold_below = float(thresholds.get("hold_below", 6.5))
+    hold_below = float(thresholds.get("hold_below", 6.0))
 
     # Compute the effective blended score (same as strategy internals)
     combination_mode = str(strat_cfg.get("combination_mode", "weighted"))

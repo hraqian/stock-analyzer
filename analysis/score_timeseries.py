@@ -40,8 +40,8 @@ def compute_score_timeseries(
         end=end,
     )
 
-    warmup = int(cfg.section("backtest").get("warmup_bars", 200))
-    warmup_min = int(cfg.section("backtest").get("warmup_min_bars", 20))
+    warmup = int(cfg.section("backtest").get("warmup_bars", 50))
+    warmup_min = int(cfg.section("backtest").get("min_warmup_bars", 20))
     warmup = min(warmup, len(df) - 10) if len(df) > 10 else warmup
     if warmup < warmup_min:
         warmup = warmup_min

@@ -233,7 +233,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "trading_day_minutes": 390,     # US market: 6.5 hours = 390 minutes
         "default_score": 5.0,           # neutral starting score before first rebalance
         "close_on_end_of_data": True,   # whether to force-close position at end of data
-        "warmup_min_bars": 20,          # absolute floor for proportional warmup
         # Strength thresholds per detector — empty dict = use built-in defaults
         "strength_thresholds": {},
         "gap_strength_cap": 2.0,        # cap on gap detector strength contribution

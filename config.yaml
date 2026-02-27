@@ -470,9 +470,6 @@ backtest:
   default_score: 5.0              # neutral starting score before first rebalance
   close_on_end_of_data: true      # force-close any open position at end of data
 
-  # Warmup floor — absolute minimum warmup even after proportional reduction
-  warmup_min_bars: 20
-
   # Strength thresholds per detector for pattern ↔ backtest interaction.
   # Empty dict = use built-in defaults.  Override individual detectors:
   #   strength_thresholds:
