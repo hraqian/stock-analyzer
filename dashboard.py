@@ -39,6 +39,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from analysis.analyzer import Analyzer, AnalysisResult
+from analysis.multi_timeframe import MultiTimeframeAnalyzer, MultiTimeframeResult
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
 from config import Config, DEFAULT_CONFIG
@@ -3083,6 +3084,140 @@ SCANNER_UNIVERSE_LABELS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Multi-timeframe rendering
+# ---------------------------------------------------------------------------
+
+TIMEFRAME_LABELS = {"1d": "Daily", "1wk": "Weekly", "1mo": "Monthly"}
+
+
+def render_multi_timeframe(ticker: str, cfg: Config) -> None:
+    """Render a multi-timeframe confirmation section."""
+    st.markdown("---")
+    st.header("Multi-Timeframe Confirmation")
+    st.markdown(
+        "Runs the full analysis on **daily**, **weekly**, and **monthly** "
+        "timeframes, then aggregates scores via weighted average."
+    )
+
+    cache_key = f"_mt_result_{ticker}"
+
+    run_mt = st.button(
+        "Run Multi-Timeframe Analysis", type="primary", key="run_mt_analysis",
+    )
+
+    if run_mt:
+        with st.spinner("Running multi-timeframe analysis..."):
+            provider = YahooFinanceProvider()
+            mt_analyzer = MultiTimeframeAnalyzer(cfg, provider)
+            mt_result = mt_analyzer.run(ticker)
+            st.session_state[cache_key] = mt_result
+
+    mt_result: MultiTimeframeResult | None = st.session_state.get(cache_key)
+    if mt_result is None:
+        return
+
+    # ── Agreement badge ───────────────────────────────────────────────────
+    agreement = mt_result.agreement
+    agreement_color = {
+        "aligned": COLOR_BULLISH,
+        "mixed": COLOR_NEUTRAL,
+        "conflicting": COLOR_BEARISH,
+    }.get(agreement, "#888")
+    signal_color = _signal_color(mt_result.aggregated_signal)
+
+    # ── Summary metrics ───────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Aggregated Signal", mt_result.aggregated_signal)
+    c2.metric("Indicator Score", f"{mt_result.aggregated_indicator_score:.1f}")
+    c3.metric("Pattern Score", f"{mt_result.aggregated_pattern_score:.1f}")
+    c4.markdown(
+        f"**Agreement**<br>"
+        f"<span style='color:{agreement_color};font-weight:700;"
+        f"font-size:1.4rem;'>{agreement.upper()}</span>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Per-timeframe table ───────────────────────────────────────────────
+    header = (
+        "<tr>"
+        "<th>Timeframe</th>"
+        "<th>Period</th>"
+        "<th>Weight</th>"
+        "<th>Signal</th>"
+        "<th style='width:100px;'>Indicator</th>"
+        "<th style='width:100px;'>Pattern</th>"
+        "<th>Regime</th>"
+        "<th>Status</th>"
+        "</tr>"
+    )
+
+    rows_html = []
+    for tr in mt_result.timeframe_results:
+        tf_label = TIMEFRAME_LABELS.get(tr.timeframe, tr.timeframe)
+        sig_color = _signal_color(tr.signal)
+
+        if tr.error:
+            status = f"<span style='color:{COLOR_BEARISH};'>Error: {tr.error[:60]}</span>"
+        else:
+            status = f"<span style='color:{COLOR_BULLISH};'>OK</span>"
+
+        row = (
+            f"<tr>"
+            f"<td style='font-weight:700;'>{tf_label}</td>"
+            f"<td>{tr.period}</td>"
+            f"<td>{tr.weight:.0%}</td>"
+            f"<td style='color:{sig_color};font-weight:700;'>{tr.signal}</td>"
+            f"<td>{score_bar_html(tr.indicator_score, width=80)}</td>"
+            f"<td>{score_bar_html(tr.pattern_score, width=80)}</td>"
+            f"<td style='color:#aaa;'>{tr.regime_label or '—'}</td>"
+            f"<td>{status}</td>"
+            f"</tr>"
+        )
+        rows_html.append(row)
+
+    style = (
+        "<style>"
+        ".mt-table { width:100%; border-collapse:collapse; font-size:0.85rem; }"
+        ".mt-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
+        "  color:#aaa; font-weight:600; }"
+        ".mt-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
+        "  vertical-align:middle; }"
+        ".mt-table tr:hover td { background:#1a1d2e; }"
+        "</style>"
+    )
+
+    st.markdown(
+        f"{style}"
+        f"<div style='overflow-x:auto;'>"
+        f'<table class="mt-table">'
+        f"<thead>{header}</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        f"</table></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Interpretation note ───────────────────────────────────────────────
+    ok_count = len(mt_result.successful_timeframes)
+    total_count = mt_result.n_timeframes
+    if agreement == "aligned":
+        note = (
+            f"All {ok_count} timeframes agree on **{mt_result.aggregated_signal}**. "
+            f"Strong multi-timeframe confirmation."
+        )
+    elif agreement == "conflicting":
+        note = (
+            "Daily and longer timeframes disagree (BUY vs SELL). "
+            "Exercise caution — signals are conflicting."
+        )
+    else:
+        note = (
+            f"Timeframes show mixed signals ({ok_count}/{total_count} successful). "
+            f"Consider the aggregated signal with reduced conviction."
+        )
+    st.info(note)
+
+
 def _signal_color(signal: str) -> str:
     """Return hex color for a BUY/SELL/HOLD signal."""
     return {
@@ -3414,6 +3549,11 @@ def main() -> None:
             return
 
         render_stock_overview(result, cfg)
+
+        # ══════════════════════════════════════════════════════════════════
+        # Multi-Timeframe Confirmation
+        # ══════════════════════════════════════════════════════════════════
+        render_multi_timeframe(ticker, cfg)
 
         # ══════════════════════════════════════════════════════════════════
         # STEP 2: Choose Backtest Path
