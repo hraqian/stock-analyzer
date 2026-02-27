@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from analysis.analyzer import Analyzer
+from analysis.multi_timeframe import MultiTimeframeAnalyzer
 from config import Config
 from data.provider import DataProvider
 from data.universes import available as available_universes
@@ -65,6 +66,13 @@ class ScanResult:
     contrarian_score: float = 5.0
     dominant_group: str = "none"
     error: str = ""  # non-empty if the ticker failed
+    # Multi-timeframe fields (populated when multi_timeframe=True)
+    mt_agreement: str = ""          # "aligned", "mixed", "conflicting", or ""
+    mt_aggregated_signal: str = ""  # aggregated signal across timeframes
+    mt_aggregated_score: float = 0.0
+    mt_daily_signal: str = ""
+    mt_weekly_signal: str = ""
+    mt_monthly_signal: str = ""
 
     @property
     def sort_key_buy(self) -> float:
@@ -117,11 +125,13 @@ class Scanner:
         max_workers: int = 8,
         cfg: Config | None = None,
         on_progress: Callable[[int, int, str, ScanResult | None], None] | None = None,
+        multi_timeframe: bool = False,
     ) -> None:
         self._period = period
         self._max_workers = max_workers
         self._cfg = cfg or Config.load()
         self._on_progress = on_progress
+        self._multi_timeframe = multi_timeframe
 
         # Resolve tickers
         if isinstance(universe, list):
@@ -314,6 +324,37 @@ class Scanner:
         sub_val = regime_sub.value if regime_sub else ""
         sub_label = result.regime.sub_type_label if result.regime else ""
 
+        # ── Multi-timeframe confirmation ────────────────────────────────────
+        mt_agreement = ""
+        mt_aggregated_signal = ""
+        mt_aggregated_score = 0.0
+        mt_daily_signal = ""
+        mt_weekly_signal = ""
+        mt_monthly_signal = ""
+
+        if self._multi_timeframe:
+            try:
+                mt_provider = YahooFinanceProvider()
+                mt_analyzer = MultiTimeframeAnalyzer(self._cfg, mt_provider)
+                mt_result = mt_analyzer.run(ticker)
+                mt_agreement = mt_result.agreement
+                mt_aggregated_signal = mt_result.aggregated_signal
+                mt_aggregated_score = (
+                    mt_result.aggregated_indicator_score * ind_weight
+                    + mt_result.aggregated_pattern_score * pat_weight
+                ) / max(ind_weight + pat_weight, 0.001)
+
+                tf_signals = {
+                    tr.timeframe: tr.signal
+                    for tr in mt_result.timeframe_results
+                    if tr.error is None
+                }
+                mt_daily_signal = tf_signals.get("1d", "")
+                mt_weekly_signal = tf_signals.get("1wk", "")
+                mt_monthly_signal = tf_signals.get("1mo", "")
+            except Exception:
+                pass  # graceful degradation — leave fields empty
+
         return ScanResult(
             ticker=ticker,
             signal=signal,
@@ -330,6 +371,12 @@ class Scanner:
             trend_score=result.composite.get("trend_score", 5.0),
             contrarian_score=result.composite.get("contrarian_score", 5.0),
             dominant_group=result.composite.get("dominant_group", "none"),
+            mt_agreement=mt_agreement,
+            mt_aggregated_signal=mt_aggregated_signal,
+            mt_aggregated_score=mt_aggregated_score,
+            mt_daily_signal=mt_daily_signal,
+            mt_weekly_signal=mt_weekly_signal,
+            mt_monthly_signal=mt_monthly_signal,
         )
 
     # ── Ranking helpers ──────────────────────────────────────────────────

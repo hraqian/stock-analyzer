@@ -39,7 +39,6 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from analysis.analyzer import Analyzer, AnalysisResult
-from analysis.multi_timeframe import MultiTimeframeAnalyzer, MultiTimeframeResult
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
 from config import Config, DEFAULT_CONFIG
@@ -3083,141 +3082,6 @@ SCANNER_UNIVERSE_LABELS = {
     "sp500": "S&P 500",
 }
 
-
-# ---------------------------------------------------------------------------
-# Multi-timeframe rendering
-# ---------------------------------------------------------------------------
-
-TIMEFRAME_LABELS = {"1d": "Daily", "1wk": "Weekly", "1mo": "Monthly"}
-
-
-def render_multi_timeframe(ticker: str, cfg: Config) -> None:
-    """Render a multi-timeframe confirmation section."""
-    st.markdown("---")
-    st.header("Multi-Timeframe Confirmation")
-    st.markdown(
-        "Runs the full analysis on **daily**, **weekly**, and **monthly** "
-        "timeframes, then aggregates scores via weighted average."
-    )
-
-    cache_key = f"_mt_result_{ticker}"
-
-    run_mt = st.button(
-        "Run Multi-Timeframe Analysis", type="primary", key="run_mt_analysis",
-    )
-
-    if run_mt:
-        with st.spinner("Running multi-timeframe analysis..."):
-            provider = YahooFinanceProvider()
-            mt_analyzer = MultiTimeframeAnalyzer(cfg, provider)
-            mt_result = mt_analyzer.run(ticker)
-            st.session_state[cache_key] = mt_result
-
-    mt_result: MultiTimeframeResult | None = st.session_state.get(cache_key)
-    if mt_result is None:
-        return
-
-    # ── Agreement badge ───────────────────────────────────────────────────
-    agreement = mt_result.agreement
-    agreement_color = {
-        "aligned": COLOR_BULLISH,
-        "mixed": COLOR_NEUTRAL,
-        "conflicting": COLOR_BEARISH,
-    }.get(agreement, "#888")
-    signal_color = _signal_color(mt_result.aggregated_signal)
-
-    # ── Summary metrics ───────────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Aggregated Signal", mt_result.aggregated_signal)
-    c2.metric("Indicator Score", f"{mt_result.aggregated_indicator_score:.1f}")
-    c3.metric("Pattern Score", f"{mt_result.aggregated_pattern_score:.1f}")
-    c4.markdown(
-        f"**Agreement**<br>"
-        f"<span style='color:{agreement_color};font-weight:700;"
-        f"font-size:1.4rem;'>{agreement.upper()}</span>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Per-timeframe table ───────────────────────────────────────────────
-    header = (
-        "<tr>"
-        "<th>Timeframe</th>"
-        "<th>Period</th>"
-        "<th>Weight</th>"
-        "<th>Signal</th>"
-        "<th style='width:100px;'>Indicator</th>"
-        "<th style='width:100px;'>Pattern</th>"
-        "<th>Regime</th>"
-        "<th>Status</th>"
-        "</tr>"
-    )
-
-    rows_html = []
-    for tr in mt_result.timeframe_results:
-        tf_label = TIMEFRAME_LABELS.get(tr.timeframe, tr.timeframe)
-        sig_color = _signal_color(tr.signal)
-
-        if tr.error:
-            status = f"<span style='color:{COLOR_BEARISH};'>Error: {tr.error[:60]}</span>"
-        else:
-            status = f"<span style='color:{COLOR_BULLISH};'>OK</span>"
-
-        row = (
-            f"<tr>"
-            f"<td style='font-weight:700;'>{tf_label}</td>"
-            f"<td>{tr.period}</td>"
-            f"<td>{tr.weight:.0%}</td>"
-            f"<td style='color:{sig_color};font-weight:700;'>{tr.signal}</td>"
-            f"<td>{score_bar_html(tr.indicator_score, width=80)}</td>"
-            f"<td>{score_bar_html(tr.pattern_score, width=80)}</td>"
-            f"<td style='color:#aaa;'>{tr.regime_label or '—'}</td>"
-            f"<td>{status}</td>"
-            f"</tr>"
-        )
-        rows_html.append(row)
-
-    style = (
-        "<style>"
-        ".mt-table { width:100%; border-collapse:collapse; font-size:0.85rem; }"
-        ".mt-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
-        "  color:#aaa; font-weight:600; }"
-        ".mt-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
-        "  vertical-align:middle; }"
-        ".mt-table tr:hover td { background:#1a1d2e; }"
-        "</style>"
-    )
-
-    st.markdown(
-        f"{style}"
-        f"<div style='overflow-x:auto;'>"
-        f'<table class="mt-table">'
-        f"<thead>{header}</thead>"
-        f"<tbody>{''.join(rows_html)}</tbody>"
-        f"</table></div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Interpretation note ───────────────────────────────────────────────
-    ok_count = len(mt_result.successful_timeframes)
-    total_count = mt_result.n_timeframes
-    if agreement == "aligned":
-        note = (
-            f"All {ok_count} timeframes agree on **{mt_result.aggregated_signal}**. "
-            f"Strong multi-timeframe confirmation."
-        )
-    elif agreement == "conflicting":
-        note = (
-            "Daily and longer timeframes disagree (BUY vs SELL). "
-            "Exercise caution — signals are conflicting."
-        )
-    else:
-        note = (
-            f"Timeframes show mixed signals ({ok_count}/{total_count} successful). "
-            f"Consider the aggregated signal with reduced conviction."
-        )
-    st.info(note)
-
-
 def _signal_color(signal: str) -> str:
     """Return hex color for a BUY/SELL/HOLD signal."""
     return {
@@ -3240,12 +3104,22 @@ def _build_scanner_results_html(
     results: list[ScanResult],
     title: str,
     signal_type: str,
+    show_mt: bool = False,
 ) -> str:
     """Build an HTML table for scanner results (BUY or SELL group)."""
     if not results:
         return f"<p style='color:#666;padding:8px 0;'>No {signal_type} signals found.</p>"
 
     title_color = _signal_color(signal_type)
+
+    mt_headers = ""
+    if show_mt:
+        mt_headers = (
+            "<th>Daily</th>"
+            "<th>Weekly</th>"
+            "<th>Monthly</th>"
+            "<th>Agreement</th>"
+        )
 
     header = (
         "<tr>"
@@ -3260,6 +3134,7 @@ def _build_scanner_results_html(
         "<th style='text-align:right;'>Price</th>"
         "<th>Regime</th>"
         "<th>Sub-Type</th>"
+        f"{mt_headers}"
         "</tr>"
     )
 
@@ -3276,6 +3151,28 @@ def _build_scanner_results_html(
         contr_label = f"{r.contrarian_score:.1f}" if hasattr(r, "contrarian_score") else "—"
         trend_style = "font-weight:700;" if dom == "trend" else ""
         contr_style = "font-weight:700;" if dom == "contrarian" else ""
+
+        mt_cells = ""
+        if show_mt:
+            agreement_color = {
+                "aligned": COLOR_BULLISH,
+                "mixed": COLOR_NEUTRAL,
+                "conflicting": COLOR_BEARISH,
+            }.get(r.mt_agreement, "#666")
+
+            def _mt_signal_cell(sig: str) -> str:
+                if not sig:
+                    return "<td style='color:#555;'>—</td>"
+                c = _signal_color(sig)
+                return f"<td style='color:{c};font-weight:700;'>{sig}</td>"
+
+            mt_cells = (
+                f"{_mt_signal_cell(r.mt_daily_signal)}"
+                f"{_mt_signal_cell(r.mt_weekly_signal)}"
+                f"{_mt_signal_cell(r.mt_monthly_signal)}"
+                f"<td style='color:{agreement_color};font-weight:600;'>"
+                f"{r.mt_agreement.capitalize() if r.mt_agreement else '—'}</td>"
+            )
 
         row = (
             f"<tr>"
@@ -3294,6 +3191,7 @@ def _build_scanner_results_html(
             f"${r.price:,.2f}</td>"
             f"<td style='color:#aaa;'>{r.regime_label or '—'}</td>"
             f"<td style='color:#aaa;'>{r.sub_type_label or '—'}</td>"
+            f"{mt_cells}"
             f"</tr>"
         )
         rows_html.append(row)
@@ -3378,6 +3276,14 @@ def render_scanner() -> None:
             help="Number of parallel threads for fetching data.",
         )
 
+    enable_mt = st.checkbox(
+        "Enable multi-timeframe confirmation (daily + weekly + monthly)",
+        value=False,
+        key="scanner_multi_timeframe",
+        help="Runs analysis on daily, weekly, and monthly timeframes for each ticker. "
+             "Significantly slower but provides cross-timeframe signal confirmation.",
+    )
+
     # ── Run button ────────────────────────────────────────────────────────
     run_scan = st.button("Run Scan", type="primary", key="run_scan_btn")
 
@@ -3416,6 +3322,7 @@ def render_scanner() -> None:
             max_workers=int(workers),
             cfg=cfg,
             on_progress=_on_progress,
+            multi_timeframe=enable_mt,
         )
 
         import time as _time
@@ -3432,6 +3339,7 @@ def render_scanner() -> None:
         st.session_state["scanner_results"] = scanner.results
         st.session_state["scanner_summary"] = scanner.summary()
         st.session_state["scanner_elapsed"] = elapsed
+        st.session_state["scanner_mt_enabled"] = enable_mt
 
     # ── Display results (from session state) ──────────────────────────────
     if "scanner_results" in st.session_state:
@@ -3439,6 +3347,7 @@ def render_scanner() -> None:
         summary = st.session_state["scanner_summary"]
         elapsed = st.session_state["scanner_elapsed"]
         display_n = st.session_state.get("scanner_top_n", 10)
+        show_mt = st.session_state.get("scanner_mt_enabled", False)
 
         # Summary metrics
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -3467,13 +3376,13 @@ def render_scanner() -> None:
         # Render tables (stacked vertically – too many columns for side-by-side)
         st.markdown(
             _build_scanner_results_html(
-                buys, f"Top {len(buys)} BUY Signals", "BUY"
+                buys, f"Top {len(buys)} BUY Signals", "BUY", show_mt=show_mt,
             ),
             unsafe_allow_html=True,
         )
         st.markdown(
             _build_scanner_results_html(
-                sells, f"Top {len(sells)} SELL Signals", "SELL"
+                sells, f"Top {len(sells)} SELL Signals", "SELL", show_mt=show_mt,
             ),
             unsafe_allow_html=True,
         )
@@ -3487,7 +3396,9 @@ def render_scanner() -> None:
         if holds:
             with st.expander(f"All HOLD Signals ({len(holds)})", expanded=False):
                 st.markdown(
-                    _build_scanner_results_html(holds, "HOLD Signals", "HOLD"),
+                    _build_scanner_results_html(
+                        holds, "HOLD Signals", "HOLD", show_mt=show_mt,
+                    ),
                     unsafe_allow_html=True,
                 )
 
@@ -3549,11 +3460,6 @@ def main() -> None:
             return
 
         render_stock_overview(result, cfg)
-
-        # ══════════════════════════════════════════════════════════════════
-        # Multi-Timeframe Confirmation
-        # ══════════════════════════════════════════════════════════════════
-        render_multi_timeframe(ticker, cfg)
 
         # ══════════════════════════════════════════════════════════════════
         # STEP 2: Choose Backtest Path
