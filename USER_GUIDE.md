@@ -21,7 +21,8 @@ configurable parameter in `config.yaml`.
     - [Sub-Type Classification](#sub-type-classification)
 12. [Trading Mode Suitability](#trading-mode-suitability)
 13. [Objective Presets](#objective-presets)
-14. [Tips & Troubleshooting](#tips--troubleshooting)
+14. [Multi-Timeframe Analysis](#multi-timeframe-analysis)
+15. [Tips & Troubleshooting](#tips--troubleshooting)
 
 ---
 
@@ -300,6 +301,7 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `gaps.type_weights.breakaway` | 1.0 | Weight of breakaway gaps |
 | `gaps.type_weights.exhaustion` | 0.5 | Weight of exhaustion gaps (inverse signal) |
 | `gaps.max_signal_strength` | 3.0 | Net signal beyond this = full score (0.5 or 9.5) |
+| `gaps.gap_pct_scale` | 100 | Multiplier to convert gap_pct into strength units |
 
 ### Volume-Range Analysis
 
@@ -313,6 +315,7 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `volume_range.scoring.expansion_bear` | 2.0 | Bearish expansion base score |
 | `volume_range.scoring.contraction` | 5.0 | Contraction = neutral |
 | `volume_range.scoring.divergence` | 5.0 | Range/volume divergence = neutral |
+| `volume_range.expansion_bias_multiplier` | 1.5 | Multiplier for expansion directional bias |
 
 ### Candlestick Patterns
 
@@ -333,6 +336,9 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `candlesticks.lookback` | 10 | Recent bars to scan for patterns |
 | `candlesticks.trend_period` | 10 | EMA period for trend context |
 | `candlesticks.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+| `candlesticks.hammer_body_max` | 0.35 | Max body ratio for hammer/shooting star detection |
+| `candlesticks.star_body_min` | 0.5 | Min body ratio for morning/evening star center candle |
+| `candlesticks.strength_values` | {} | Per-pattern strength overrides (empty = built-in defaults). Keys: `dragonfly_doji`, `gravestone_doji`, `doji_directional`, `doji_neutral`, `hammer`, `shooting_star`, `marubozu`, `engulfing`, `harami`, `tweezer`, `star`, `soldiers_crows`. Each maps to `{with_trend: float, against_trend: float}`. |
 
 ### Spike Detection
 
@@ -345,6 +351,8 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `spikes.lookback` | 20 | Recent bars to consider for scoring |
 | `spikes.trap_weight` | 0.7 | Weight of trap (failed breakout) inverse signal |
 | `spikes.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+| `spikes.z_magnitude_cap` | 2.0 | Cap on z-score magnitude for strength calculation |
+| `spikes.unconfirmed_weight` | 0.3 | Weight multiplier for unconfirmed spikes |
 
 ### Inside/Outside Bars
 
@@ -355,6 +363,7 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `inside_outside.breakout_bars` | 3 | Bars after inside bar to check for breakout |
 | `inside_outside.outside_range_min` | 1.2 | Current range / prev range >= this for outside bar |
 | `inside_outside.max_signal_strength` | 3.0 | Net signal beyond this = full score |
+| `inside_outside.strength_values` | {} | Per-pattern strength overrides (empty = built-in defaults). Keys: `inside_breakout_with_trend`, `inside_breakout_against_trend`, `inside_pending`, `outside_reversal`, `outside_continuation`. Each maps to a float. |
 
 ---
 
@@ -384,6 +393,27 @@ effective composite score stdev is ~0.50, so almost all scores fall in the
 3.5-6.5 range. Set strategy thresholds within that actual range, or use
 `threshold_mode: "percentile"` for self-calibrating thresholds.
 
+### Directional Subgroup Scoring
+
+Section: `overall`
+
+Instead of a simple weighted average, the composite scorer can group
+indicators into **trend**, **contrarian**, and **neutral** buckets. When the
+groups agree, the dominant group gets extra weight; when they conflict, it
+dampens extremes. Score spreading then re-scales the result away from 5.0.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `overall.subgroup_mode` | "directional" | `"directional"` = subgroup blend; `"average"` = plain weighted average (legacy) |
+| `overall.indicator_groups.trend` | ["moving_averages", "macd", "adx", "volume"] | Indicators in the trend-following group |
+| `overall.indicator_groups.contrarian` | ["rsi", "stochastic", "bollinger_bands"] | Indicators in the mean-reversion group |
+| `overall.indicator_groups.neutral` | ["fibonacci"] | Indicators that are direction-agnostic |
+| `overall.subgroup_blend.dominant_weight` | 0.6 | Weight given to the dominant subgroup (trend or contrarian) |
+| `overall.subgroup_blend.other_weight` | 0.25 | Weight given to the non-dominant subgroup |
+| `overall.subgroup_blend.neutral_weight` | 0.15 | Weight given to the neutral subgroup |
+| `overall.score_spreading.enabled` | true | Stretch final composite away from 5.0 for wider signal range |
+| `overall.score_spreading.factor` | 2.0 | Multiplier for deviation from 5.0 (clamped to 0-10) |
+
 ### Pattern Composite Weights
 
 Section: `overall_patterns.weights`
@@ -395,6 +425,8 @@ Section: `overall_patterns.weights`
 | `overall_patterns.weights.candlesticks` | 0.25 | Candlestick weight |
 | `overall_patterns.weights.spikes` | 0.15 | Spike detector weight |
 | `overall_patterns.weights.inside_outside` | 0.15 | Inside/outside bar weight |
+| `overall_patterns.score_spreading.enabled` | true | Stretch pattern composite away from 5.0 |
+| `overall_patterns.score_spreading.factor` | 2.0 | Multiplier for deviation from 5.0 |
 
 ---
 
@@ -438,6 +470,7 @@ The strategy maps composite scores to trading decisions (LONG, SHORT, HOLD).
 | `strategy.percentile_thresholds.short_percentile` | 25 | Score in bottom 25% = SHORT |
 | `strategy.percentile_thresholds.long_percentile` | 75 | Score in top 25% = LONG |
 | `strategy.percentile_thresholds.lookback_bars` | 60 | Rolling window for percentile calculation |
+| `strategy.percentile_thresholds.percentile_step` | 5 | Bar step when building percentile window (auto-retries with step=1 if too few samples) |
 | `strategy.percentile_min_fill_ratio` | 0.8 | Min fraction of window before percentile activates |
 
 ### Position Sizing
@@ -562,6 +595,18 @@ dilute the indicator signal.
 | `strategy.boost_strength` | 0.5 | Multiplier for pattern deviation from 5.0 |
 | `strategy.boost_dead_zone` | 0.3 | Pattern within 5.0 +/- this = no boost |
 
+### Signal Confidence Labeling
+
+Used in scanner and dashboard recommendation to label signal confidence
+(HIGH / MEDIUM / LOW) based on how far the score is from the threshold.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `strategy.confidence_thresholds.high` | 1.5 | Score distance from threshold for HIGH confidence |
+| `strategy.confidence_thresholds.medium` | 0.5 | Score distance from threshold for MEDIUM confidence |
+| `strategy.confidence_thresholds.hold_high` | 1.0 | Distance inside hold zone for HIGH hold confidence |
+| `strategy.confidence_thresholds.hold_medium` | 0.3 | Distance inside hold zone for MEDIUM hold confidence |
+
 ---
 
 ## Backtest Parameters
@@ -584,6 +629,18 @@ Section: `backtest`
 | `backtest.trading_day_minutes` | 390 | US market: 6.5 hours (for intraday bar counts) |
 | `backtest.default_score` | 5.0 | Neutral starting score before first rebalance |
 | `backtest.close_on_end_of_data` | true | Force-close any open position at end of data |
+
+### Pattern Strength Tuning
+
+These control how raw pattern detector outputs are converted into strength
+values for the backtest event timeline.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `backtest.strength_thresholds` | {} | Per-detector strength overrides (empty = use built-in defaults) |
+| `backtest.gap_strength_cap` | 2.0 | Cap on gap detector strength contribution |
+| `backtest.spike_z_divisor` | 2.5 | Z-score divisor for spike strength normalization |
+| `backtest.spike_strength_cap` | 2.0 | Cap on spike detector strength contribution |
 
 **Warmup note:** Effective warmup = `min(warmup_bars, int(len(data) * max_warmup_ratio))`,
 clamped to at least `min_warmup_bars`. Short datasets (e.g. 6mo = ~126 bars)
@@ -759,6 +816,7 @@ backtesting.
 | `strategy_adaptation.breakout_transition.breakout_atr_mult` | 1.5 | Price must move N x ATR from squeeze level |
 | `strategy_adaptation.breakout_transition.require_volume_surge` | true | Require above-avg volume |
 | `strategy_adaptation.breakout_transition.volume_surge_mult` | 1.3 | Volume must be N x average |
+| `strategy_adaptation.breakout_transition.avg_volume_window` | 20 | Rolling window for average volume baseline |
 
 ### Sub-Type Classification
 
@@ -887,6 +945,29 @@ Then use it:
 ```bash
 python main.py AAPL -o my_preset -b
 ```
+
+---
+
+## Multi-Timeframe Analysis
+
+Section: `multi_timeframe`
+
+Analyzes the same ticker across multiple timeframes and combines the
+signals. Each timeframe gets its own independent analysis; the final score
+is a weighted blend adjusted by inter-timeframe agreement.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `multi_timeframe.timeframes` | ["1d", "1wk", "1mo"] | List of timeframes to analyze |
+| `multi_timeframe.weights.1d` | 0.5 | Weight for daily timeframe |
+| `multi_timeframe.weights.1wk` | 0.3 | Weight for weekly timeframe |
+| `multi_timeframe.weights.1mo` | 0.2 | Weight for monthly timeframe |
+| `multi_timeframe.periods.1d` | "2y" | Data period to fetch for daily |
+| `multi_timeframe.periods.1wk` | "5y" | Data period to fetch for weekly |
+| `multi_timeframe.periods.1mo` | "max" | Data period to fetch for monthly |
+| `multi_timeframe.agreement_multipliers.aligned` | 1.0 | Multiplier when all timeframes agree on direction |
+| `multi_timeframe.agreement_multipliers.mixed` | 0.7 | Multiplier when timeframes are mixed |
+| `multi_timeframe.agreement_multipliers.conflicting` | 0.4 | Multiplier when timeframes conflict |
 
 ---
 
