@@ -3278,6 +3278,12 @@ def _render_dca_params(cfg: Config) -> dict:
         format_func=lambda m: _DCA_MODE_LABELS.get(m, m),
         key="dca_mode",
         horizontal=True,
+        help=(
+            "**Pure:** Fixed dollar amount every interval — no timing, serves as baseline. "
+            "**Dip-Weighted:** Buys more when price drops from recent high (mild/strong/extreme tiers). "
+            "**Score-Integrated:** Uses technical score, RSI, and Bollinger Bands to modulate buy amounts, "
+            "with safety gates for breakaway gaps and low volume."
+        ),
     )
     ov["mode"] = mode
 
@@ -3288,6 +3294,11 @@ def _render_dca_params(cfg: Config) -> dict:
             min_value=50, max_value=50_000, step=50,
             value=int(dca.get("base_amount", 500)),
             key="dca_base_amount",
+            help=(
+                "The fixed dollar amount invested each period. In dip-weighted / "
+                "score-integrated modes, this is the baseline — actual amount = "
+                "base × multiplier when dips are detected."
+            ),
         )
     with col2:
         freq = st.selectbox(
@@ -3295,6 +3306,10 @@ def _render_dca_params(cfg: Config) -> dict:
             _DCA_FREQUENCIES,
             index=_DCA_FREQUENCIES.index(dca.get("frequency", "monthly")),
             key="dca_freq",
+            help=(
+                "How often to buy. Weekly ≈ every 5 trading days, biweekly ≈ "
+                "every 10, monthly ≈ every 21 trading days."
+            ),
         )
         ov["frequency"] = freq
 
@@ -3302,6 +3317,11 @@ def _render_dca_params(cfg: Config) -> dict:
         "Reinvest Dividends (DRIP)",
         value=bool(dca.get("drip", True)),
         key="dca_drip",
+        help=(
+            "Dividend Reinvestment Plan. When enabled, dividends are automatically "
+            "reinvested as new shares at the current price on ex-dividend date. "
+            "When off, dividends are not tracked."
+        ),
     )
 
     if mode != "pure":
@@ -3314,19 +3334,23 @@ def _render_dca_params(cfg: Config) -> dict:
             with c1:
                 mild = st.slider("Mild Dip %", 1.0, 15.0,
                                  float(dt.get("mild_drop_pct", 5.0)),
-                                 step=0.5, key="dca_mild_pct")
+                                 step=0.5, key="dca_mild_pct",
+                                 help="How far the price must drop from its recent high (within lookback window) to trigger the mild multiplier tier.")
             with c2:
                 strong = st.slider("Strong Dip %", 5.0, 30.0,
                                    float(dt.get("strong_drop_pct", 10.0)),
-                                   step=0.5, key="dca_strong_pct")
+                                   step=0.5, key="dca_strong_pct",
+                                   help="How far the price must drop from its recent high (within lookback window) to trigger the strong multiplier tier.")
             with c3:
                 extreme = st.slider("Extreme Dip %", 10.0, 50.0,
                                     float(dt.get("extreme_drop_pct", 20.0)),
-                                    step=1.0, key="dca_extreme_pct")
+                                    step=1.0, key="dca_extreme_pct",
+                                    help="How far the price must drop from its recent high (within lookback window) to trigger the extreme multiplier tier.")
 
             lookback = st.slider("Lookback Days", 5, 90,
                                  int(dt.get("lookback_days", 30)),
-                                 step=5, key="dca_lookback")
+                                 step=5, key="dca_lookback",
+                                 help="Rolling window (in trading days) used to determine the 'recent high' for dip detection. 30 days ≈ 1.5 calendar months.")
 
             ov["dip_thresholds"] = {
                 "mild_drop_pct": mild,
@@ -3340,15 +3364,18 @@ def _render_dca_params(cfg: Config) -> dict:
             with c1:
                 m_mild = st.slider("Mild Multiplier", 1.0, 5.0,
                                    float(ml.get("mild_dip", 1.5)),
-                                   step=0.1, key="dca_m_mild")
+                                   step=0.1, key="dca_m_mild",
+                                   help="How much to scale the base amount on a mild dip. E.g., 1.5× on a $500 base = $750 that period.")
             with c2:
                 m_strong = st.slider("Strong Multiplier", 1.0, 5.0,
                                      float(ml.get("strong_dip", 2.0)),
-                                     step=0.1, key="dca_m_strong")
+                                     step=0.1, key="dca_m_strong",
+                                     help="How much to scale the base amount on a strong dip. E.g., 2.0× on a $500 base = $1,000 that period.")
             with c3:
                 m_extreme = st.slider("Extreme Multiplier", 1.0, 5.0,
                                       float(ml.get("extreme_dip", 3.0)),
-                                      step=0.1, key="dca_m_extreme")
+                                      step=0.1, key="dca_m_extreme",
+                                      help="How much to scale the base amount on an extreme dip. E.g., 3.0× on a $500 base = $1,500 that period.")
 
             ov["multipliers"] = {
                 "normal": 1.0,
@@ -3361,21 +3388,25 @@ def _render_dca_params(cfg: Config) -> dict:
             sf = dca.get("safety", {})
             max_mult = st.slider("Max Multiplier Cap", 1.0, 5.0,
                                  float(sf.get("max_multiplier", 3.0)),
-                                 step=0.5, key="dca_max_mult")
+                                 step=0.5, key="dca_max_mult",
+                                 help="Absolute ceiling on any multiplier, regardless of how many signals fire.")
             max_alloc = st.number_input(
                 "Max Period Allocation ($)",
                 min_value=100, max_value=100_000, step=100,
                 value=int(sf.get("max_period_allocation", 1500)),
                 key="dca_max_alloc",
+                help="Hard dollar cap per period — even if multiplier × base exceeds this, allocation is capped here.",
             )
             skip_breakaway = st.checkbox(
                 "Skip overweight on breakaway-down gaps",
                 value=bool(sf.get("skip_breakaway_gaps", True)),
                 key="dca_skip_brkwy",
+                help="When enabled, suppresses overweighting if a breakaway-down gap is detected (likely a trend change, not a temporary dip).",
             )
             min_vol = st.slider("Min Volume Ratio", 0.0, 2.0,
                                 float(sf.get("min_volume_ratio", 0.5)),
-                                step=0.1, key="dca_min_vol")
+                                step=0.1, key="dca_min_vol",
+                                help="If current volume / average volume is below this ratio, the dip is in low-liquidity conditions — overweighting is suppressed.")
             ov["safety"] = {
                 "max_multiplier": max_mult,
                 "max_period_allocation": max_alloc,
@@ -3388,13 +3419,16 @@ def _render_dca_params(cfg: Config) -> dict:
             sc = dca.get("score_thresholds", {})
             buy_zone = st.slider("Buy Zone Below (score)", 0.0, 10.0,
                                  float(sc.get("buy_zone_below", 3.5)),
-                                 step=0.5, key="dca_buy_zone")
+                                 step=0.5, key="dca_buy_zone",
+                                 help="Technical composite score threshold. Scores below this are considered 'buy zone' and boost the multiplier.")
             rsi_os = st.slider("Oversold RSI", 10.0, 50.0,
                                float(sc.get("oversold_rsi", 30.0)),
-                               step=1.0, key="dca_rsi_os")
+                               step=1.0, key="dca_rsi_os",
+                               help="RSI below this value triggers an additional multiplier boost (classic oversold signal).")
             bb_low = st.slider("BB Percentile Low", 1.0, 30.0,
                                float(sc.get("bb_percentile_low", 10.0)),
-                               step=1.0, key="dca_bb_low")
+                               step=1.0, key="dca_bb_low",
+                               help="Bollinger Band percentile below this value triggers an additional boost (price near lower band).")
             ov["score_thresholds"] = {
                 "buy_zone_below": buy_zone,
                 "oversold_rsi": rsi_os,
