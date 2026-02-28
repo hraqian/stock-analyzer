@@ -474,7 +474,7 @@ def render_backtest(
     # ── Score Legend ──────────────────────────────────────────────────────────
     color_thresholds = disp_cfg.get("color_thresholds", {})
     bearish_max = float(color_thresholds.get("bearish_max", 3.5))
-    neutral_max = float(color_thresholds.get("neutral_max", 6.5))
+    neutral_max = float(color_thresholds.get("neutral_max", 6.0))
     legend = (
         f"  Score legend:  "
         f"[red]0 – {bearish_max:.1f} Bearish[/red]  "
