@@ -250,9 +250,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_gap_pct": 0.005,
         "volume_surge_mult": 1.5,
         "trend_period": 20,
-        "consolidation_lookback": 20,       # bars of ATR% history for consolidation detection
-        "consolidation_atr_percentile": 50,  # ATR% rank <= this = consolidation (breakaway eligible)
-        "trend_extension_bars": 10,         # consecutive same-direction slope bars for exhaustion
+        "consolidation_lookback": 20,        # BB width window & rolling high/low window
+        "consolidation_bb_percentile": 50,   # BB width rank <= this = narrow (consolidation)
+        "consolidation_min_bars": 5,         # K of last M bars must be narrow for breakaway
+        "exhaustion_min_return": 0.10,       # total return over trend_period for exhaustion (10%)
+        "exhaustion_min_distance_pct": 0.05, # price must be >= 5% from MA for exhaustion
+        "intraday_min_gap_pct": 0.01,        # min gap size auto-applied on intraday data (1%)
         "type_weights": {
             "common": 0.3,
             "runaway": 0.7,
@@ -610,6 +613,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "gaps": {
                 "lookback": 15,
                 "trend_period": 10,
+                "consolidation_lookback": 15,
+                "consolidation_min_bars": 4,
             },
             "volume_range": {
                 "period": 10,
@@ -705,6 +710,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "lookback": 10,
                 "min_gap_pct": 0.003,
                 "trend_period": 7,
+                "consolidation_lookback": 15,
+                "consolidation_min_bars": 3,
+                "exhaustion_min_return": 0.06,
+                "exhaustion_min_distance_pct": 0.03,
+                "intraday_min_gap_pct": 0.008,
             },
             "volume_range": {
                 "period": 10,
