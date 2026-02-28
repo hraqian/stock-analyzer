@@ -1087,3 +1087,14 @@ dca:
     reserve_method: conservative     # "conservative" or "adaptive"
     # conservative: worst-case, assumes every period could hit max multiplier
     # adaptive: uses historical dip frequency to estimate a realistic reserve
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Watchlist — Live Signal Monitor
+# ─────────────────────────────────────────────────────────────────────────────
+
+watchlist:
+  tickers: []                    # tickers to monitor, e.g. ["AAPL", "MSFT", "SPY"]
+  data_period: "1y"              # how much history to fetch for indicator warmup
+  interval: "1d"                 # data interval
+  trading_mode: "long_only"      # "long_only" or "long_short"
+  state_file: "watchlist_state.json"  # portfolio state persistence file

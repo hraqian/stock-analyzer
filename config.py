@@ -901,6 +901,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
             # adaptive: uses historical dip frequency to estimate reserve
         },
     },
+    # ------------------------------------------------------------------
+    # Watchlist — live signal monitor
+    # ------------------------------------------------------------------
+    "watchlist": {
+        "tickers": [],                      # tickers to monitor, e.g. ["AAPL", "MSFT"]
+        "data_period": "1y",                # history to fetch for indicator warmup
+        "interval": "1d",                   # data interval
+        "trading_mode": "long_only",        # "long_only" or "long_short"
+        "state_file": "watchlist_state.json",  # portfolio state persistence file
+    },
 }
 
 

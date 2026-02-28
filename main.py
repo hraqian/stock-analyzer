@@ -22,6 +22,10 @@ Usage:
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
     python main.py --list-patterns               # list all available pattern detectors
+    python main.py --watchlist                   # scan watchlist for signals
+    python main.py --watchlist AAPL              # scan a single ticker
+    python main.py --watchlist-add AAPL          # add ticker to watchlist
+    python main.py --watchlist-remove AAPL       # remove ticker from watchlist
 
 (Dates above are placeholders — actual examples are computed dynamically at runtime.)
 """
@@ -73,6 +77,10 @@ Examples:
   python main.py --validate-config
   python main.py --list-indicators
   python main.py --list-patterns
+  python main.py --watchlist                      # scan all watchlist tickers
+  python main.py --watchlist AAPL                 # scan single ticker
+  python main.py --watchlist-add TSLA             # add to watchlist
+  python main.py --watchlist-remove MSFT          # remove from watchlist
 
 Streamlit dashboard:
   streamlit run dashboard.py
@@ -227,6 +235,26 @@ Streamlit dashboard:
         help="List all available pattern detector keys and exit",
     )
 
+    # Watchlist signal monitor
+    parser.add_argument(
+        "--watchlist", "-w",
+        action="store_true",
+        help=(
+            "Scan the watchlist and display current trading signals. "
+            "Configure tickers in config.yaml → watchlist.tickers."
+        ),
+    )
+    parser.add_argument(
+        "--watchlist-add",
+        metavar="TICKER",
+        help="Add a ticker to the watchlist and save to config.yaml",
+    )
+    parser.add_argument(
+        "--watchlist-remove",
+        metavar="TICKER",
+        help="Remove a ticker from the watchlist and save to config.yaml",
+    )
+
     return parser
 
 
@@ -344,6 +372,163 @@ def main() -> None:
         console.print("\n[bold cyan]Available pattern detectors:[/bold cyan]")
         for key in registry.pattern_names:
             console.print(f"  [white]{key}[/white]")
+        console.print()
+        return
+
+    # ── --watchlist-add / --watchlist-remove ───────────────────────────────────
+    if args.watchlist_add or args.watchlist_remove:
+        import re as _re
+        wl_tickers = [t.upper() for t in cfg.section("watchlist").get("tickers", [])]
+
+        if args.watchlist_add:
+            t = args.watchlist_add.upper().strip()
+            if t in wl_tickers:
+                console.print(f"[yellow]{t}[/yellow] is already in the watchlist.")
+            else:
+                wl_tickers.append(t)
+                console.print(f"[green]Added {t}[/green] to watchlist.")
+
+        if args.watchlist_remove:
+            t = args.watchlist_remove.upper().strip()
+            if t in wl_tickers:
+                wl_tickers.remove(t)
+                console.print(f"[green]Removed {t}[/green] from watchlist.")
+            else:
+                console.print(f"[yellow]{t}[/yellow] is not in the watchlist.")
+
+        # Persist to config.yaml — targeted line replacement to preserve formatting
+        if cfg.path:
+            try:
+                with open(cfg.path) as fh:
+                    content = fh.read()
+                # Build the new tickers line
+                if wl_tickers:
+                    ticker_list = ", ".join(f'"{t}"' for t in wl_tickers)
+                    new_line = f"  tickers: [{ticker_list}]"
+                else:
+                    new_line = "  tickers: []"
+                # Replace the existing tickers line under the watchlist section
+                content = _re.sub(
+                    r"(^watchlist:\s*\n(?:.*\n)*?)  tickers:.*",
+                    rf"\g<1>{new_line}",
+                    content,
+                    count=1,
+                    flags=_re.MULTILINE,
+                )
+                with open(cfg.path, "w") as fh:
+                    fh.write(content)
+                console.print(f"[dim]Saved to {cfg.path}[/dim]")
+            except Exception as exc:
+                console.print(f"[red]Failed to save config:[/red] {exc}")
+        else:
+            console.print("[yellow]No config.yaml found — changes are not persisted.[/yellow]")
+        console.print(f"[dim]Watchlist: {', '.join(wl_tickers) or '(empty)'}[/dim]")
+        return
+
+    # ── --watchlist ────────────────────────────────────────────────────────────
+    if args.watchlist:
+        from engine.watchlist import WatchlistMonitor
+        from engine.strategy import Signal
+        from rich.table import Table
+
+        wl_tickers = [t.upper() for t in cfg.section("watchlist").get("tickers", [])]
+        # Allow an optional positional ticker to override
+        if args.ticker:
+            wl_tickers = [args.ticker.upper().strip()]
+
+        if not wl_tickers:
+            console.print(
+                "[yellow]Watchlist is empty.[/yellow]\n"
+                "  Add tickers with: [bold]--watchlist-add AAPL[/bold]\n"
+                "  Or edit config.yaml → watchlist.tickers"
+            )
+            return
+
+        console.print(f"\n[dim]Scanning {len(wl_tickers)} ticker(s)...[/dim]")
+        wl_provider = YahooFinanceProvider()
+        monitor = WatchlistMonitor(wl_provider, cfg)
+        signals = monitor.scan(wl_tickers)
+
+        # Signal table
+        table = Table(
+            title="Watchlist Signals",
+            show_header=True,
+            header_style="bold",
+            expand=True,
+        )
+        table.add_column("Ticker", style="bold white", no_wrap=True)
+        table.add_column("Signal", justify="center", no_wrap=True)
+        table.add_column("Action", no_wrap=True)
+        table.add_column("Eff.", justify="right", no_wrap=True)
+        table.add_column("Ind.", justify="right", no_wrap=True)
+        table.add_column("Pat.", justify="right", no_wrap=True)
+        table.add_column("Regime", no_wrap=True)
+        table.add_column("Price", justify="right", no_wrap=True)
+        table.add_column("Position", no_wrap=True)
+
+        for sig in signals:
+            # Color-code signal
+            if sig.signal == Signal.BUY:
+                signal_str = "[bold green]BUY[/bold green]"
+            elif sig.signal == Signal.SELL:
+                signal_str = "[bold red]SELL[/bold red]"
+            else:
+                signal_str = "[dim]HOLD[/dim]"
+
+            # Color-code action
+            action_str = sig.action
+            if "OPEN LONG" in sig.action or "CLOSE SHORT" in sig.action:
+                action_str = f"[green]{sig.action}[/green]"
+            elif "CLOSE LONG" in sig.action or "OPEN SHORT" in sig.action:
+                action_str = f"[red]{sig.action}[/red]"
+
+            # Position info
+            pos_str = "—"
+            if sig.position:
+                pnl = sig.position.unrealized_pnl_pct(sig.current_price)
+                color = "green" if pnl >= 0 else "red"
+                pos_str = (
+                    f"{sig.position.side.upper()} "
+                    f"[{color}]{pnl:+.1f}%[/{color}]"
+                )
+
+            # Error indicator
+            if sig.error:
+                signal_str = f"[red]ERR[/red]"
+                action_str = f"[dim]{sig.error}[/dim]"
+
+            table.add_row(
+                sig.ticker,
+                signal_str,
+                action_str,
+                f"{sig.effective_score:.1f}",
+                f"{sig.indicator_score:.1f}",
+                f"{sig.pattern_score:.1f}",
+                sig.regime.replace("_", " ").title(),
+                f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
+                pos_str,
+            )
+
+        console.print()
+        console.print(table)
+
+        # Show signal notes for actionable signals
+        actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
+        if actionable:
+            console.print(f"\n[bold]Actionable Signals ({len(actionable)}):[/bold]")
+            for sig in actionable:
+                signal_color = "green" if sig.signal == Signal.BUY else "red"
+                console.print(
+                    f"  [{signal_color}]{sig.signal.value}[/{signal_color}] "
+                    f"[bold]{sig.ticker}[/bold] @ ${sig.current_price:,.2f} — "
+                    f"{sig.action}"
+                )
+                if sig.signal_notes:
+                    console.print(f"    [dim]{sig.signal_notes}[/dim]")
+
+        # Save state
+        monitor.save_state()
+        console.print(f"\n[dim]State saved to {monitor._state_path}[/dim]")
         console.print()
         return
 

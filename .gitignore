@@ -28,3 +28,4 @@ Thumbs.db
 # Project-specific
 *.log
 config_slot_*.yaml
+watchlist_state.json

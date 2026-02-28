@@ -49,7 +49,8 @@ from engine.dca import DCABacktester, DCAResult
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LABELS
-from engine.strategy import StrategyContext
+from engine.strategy import Signal, StrategyContext
+from engine.watchlist import WatchlistMonitor, WatchlistSignal, WatchlistState
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 from scanner import Scanner, ScanResult
@@ -1776,6 +1777,53 @@ def render_sidebar() -> dict:
         )
 
     st.session_state["config_data"] = data
+
+    # ------------------------------------------------------------------
+    # Watchlist management
+    # ------------------------------------------------------------------
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### Watchlist")
+
+    wl = data.setdefault("watchlist", {})
+    wl_tickers: list[str] = [t.upper() for t in wl.get("tickers", []) if t.strip()]
+
+    # Display current watchlist
+    if wl_tickers:
+        st.sidebar.caption(f"Monitoring: {', '.join(wl_tickers)}")
+    else:
+        st.sidebar.caption("No tickers in watchlist.")
+
+    # Add ticker
+    col_add, col_btn = st.sidebar.columns([3, 1])
+    with col_add:
+        new_wl_ticker = st.text_input(
+            "Add ticker", value="", key="sidebar_wl_add",
+            label_visibility="collapsed", placeholder="Add ticker...",
+        ).upper().strip()
+    with col_btn:
+        if st.button("+", key="sidebar_wl_add_btn", help="Add ticker to watchlist"):
+            if new_wl_ticker and new_wl_ticker not in wl_tickers:
+                wl_tickers.append(new_wl_ticker)
+                wl["tickers"] = wl_tickers
+                st.session_state["config_data"] = data
+                st.toast(f"Added {new_wl_ticker} to watchlist")
+                st.rerun()
+
+    # Remove ticker buttons
+    if wl_tickers:
+        remove_ticker = st.sidebar.selectbox(
+            "Remove ticker",
+            options=[""] + wl_tickers,
+            key="sidebar_wl_remove",
+            label_visibility="collapsed",
+            format_func=lambda x: "Remove ticker..." if x == "" else f"Remove {x}",
+        )
+        if remove_ticker:
+            wl_tickers.remove(remove_ticker)
+            wl["tickers"] = wl_tickers
+            st.session_state["config_data"] = data
+            st.toast(f"Removed {remove_ticker} from watchlist")
+            st.rerun()
 
     return {
         "ticker": ticker,
@@ -5073,6 +5121,214 @@ All thresholds, multipliers, and safety parameters are configurable via `config.
 
 
 # ---------------------------------------------------------------------------
+# Watchlist tab
+# ---------------------------------------------------------------------------
+
+def render_watchlist() -> None:
+    """Render the Watchlist / Signal Monitor tab."""
+    st.header("Watchlist Signal Monitor")
+    st.caption(
+        "Live trading signals using the same strategy as the backtest engine. "
+        "Manage tickers in the sidebar."
+    )
+
+    cfg = _get_config()
+    data = st.session_state.get("config_data", {})
+    wl_tickers: list[str] = [
+        t.upper() for t in data.get("watchlist", {}).get("tickers", []) if t.strip()
+    ]
+
+    if not wl_tickers:
+        st.info(
+            "Your watchlist is empty. Add tickers using the sidebar Watchlist section, "
+            "or edit `config.yaml` → `watchlist.tickers`."
+        )
+        return
+
+    # ── Settings ──────────────────────────────────────────────────────────
+    col_period, col_mode, col_scan = st.columns([2, 2, 1])
+    with col_period:
+        wl_period = st.selectbox(
+            "Data Period",
+            options=["6mo", "1y", "2y", "5y"],
+            index=1,
+            key="wl_data_period",
+            help="How much historical data to fetch for indicator computation.",
+        )
+    with col_mode:
+        wl_mode = st.selectbox(
+            "Trading Mode",
+            options=["long_only", "long_short"],
+            index=0,
+            key="wl_trading_mode",
+            help="Long Only: buy/sell signals. Long Short: adds short-selling signals.",
+        )
+    with col_scan:
+        st.markdown("<br>", unsafe_allow_html=True)
+        scan_clicked = st.button(
+            "Scan Now",
+            key="wl_scan_btn",
+            type="primary",
+            use_container_width=True,
+        )
+
+    # ── Run scan ──────────────────────────────────────────────────────────
+    if scan_clicked or "wl_signals" not in st.session_state:
+        with st.spinner(f"Scanning {len(wl_tickers)} ticker(s)..."):
+            provider = YahooFinanceProvider()
+
+            # Override config with UI selections
+            data.setdefault("watchlist", {})["data_period"] = wl_period
+            data.setdefault("watchlist", {})["trading_mode"] = wl_mode
+            st.session_state["config_data"] = data
+            cfg = _get_config()
+
+            monitor = WatchlistMonitor(provider, cfg)
+            signals = monitor.scan(wl_tickers)
+            monitor.save_state()
+
+            st.session_state["wl_signals"] = signals
+            st.session_state["wl_state"] = monitor.state
+
+    signals: list[WatchlistSignal] = st.session_state.get("wl_signals", [])
+    if not signals:
+        return
+
+    # ── Signal summary metrics ────────────────────────────────────────────
+    buy_count = sum(1 for s in signals if s.signal == Signal.BUY)
+    sell_count = sum(1 for s in signals if s.signal == Signal.SELL)
+    hold_count = sum(1 for s in signals if s.signal == Signal.HOLD)
+    error_count = sum(1 for s in signals if s.error)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Buy Signals", buy_count)
+    m2.metric("Sell Signals", sell_count)
+    m3.metric("Hold", hold_count)
+    m4.metric("Errors", error_count)
+
+    # ── Signal table ──────────────────────────────────────────────────────
+    st.subheader("Signals")
+
+    # Build DataFrame for display
+    rows = []
+    for sig in signals:
+        pos_str = "—"
+        if sig.position:
+            pnl = sig.position.unrealized_pnl_pct(sig.current_price)
+            pos_str = f"{sig.position.side.upper()} ({pnl:+.1f}%)"
+
+        rows.append({
+            "Ticker": sig.ticker,
+            "Signal": sig.signal.value if not sig.error else "ERROR",
+            "Action": sig.action,
+            "Score": round(sig.effective_score, 1),
+            "Indicator": round(sig.indicator_score, 1),
+            "Pattern": round(sig.pattern_score, 1),
+            "Regime": sig.regime.replace("_", " ").title(),
+            "Price": f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
+            "Position": pos_str,
+            "Notes": sig.signal_notes or (sig.error or ""),
+        })
+
+    import pandas as _pd
+    df_signals = _pd.DataFrame(rows)
+
+    # Color-code with Streamlit column config
+    st.dataframe(
+        df_signals,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Ticker": st.column_config.TextColumn(width="small"),
+            "Signal": st.column_config.TextColumn(width="small"),
+            "Action": st.column_config.TextColumn(width="medium"),
+            "Score": st.column_config.NumberColumn(format="%.1f", width="small"),
+            "Indicator": st.column_config.NumberColumn(format="%.1f", width="small"),
+            "Pattern": st.column_config.NumberColumn(format="%.1f", width="small"),
+            "Regime": st.column_config.TextColumn(width="medium"),
+            "Price": st.column_config.TextColumn(width="small"),
+            "Position": st.column_config.TextColumn(width="small"),
+            "Notes": st.column_config.TextColumn(width="large"),
+        },
+    )
+
+    # ── Actionable signals detail ─────────────────────────────────────────
+    actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
+    if actionable:
+        st.subheader("Actionable Signals")
+        for sig in actionable:
+            signal_icon = "🟢" if sig.signal == Signal.BUY else "🔴"
+            with st.expander(
+                f"{signal_icon} {sig.signal.value} {sig.ticker} "
+                f"@ ${sig.current_price:,.2f} — {sig.action}",
+                expanded=True,
+            ):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Effective Score", f"{sig.effective_score:.1f}")
+                c2.metric("Indicator Score", f"{sig.indicator_score:.1f}")
+                c3.metric("Pattern Score", f"{sig.pattern_score:.1f}")
+                c4.metric(
+                    "Regime",
+                    sig.regime.replace("_", " ").title(),
+                    help=f"Sub-type: {sig.regime_sub_type.replace('_', ' ').title()}"
+                    if sig.regime_sub_type != "none" else None,
+                )
+
+                if sig.signal_notes:
+                    st.caption(f"Strategy notes: {sig.signal_notes}")
+
+                if sig.position:
+                    pnl = sig.position.unrealized_pnl_pct(sig.current_price)
+                    st.info(
+                        f"Current position: {sig.position.side.upper()} "
+                        f"since {sig.position.entry_date} "
+                        f"@ ${sig.position.entry_price:,.2f} "
+                        f"(P&L: {pnl:+.1f}%)"
+                    )
+
+    # ── Position tracking ─────────────────────────────────────────────────
+    wl_state: WatchlistState | None = st.session_state.get("wl_state")
+    if wl_state and wl_state.positions:
+        st.subheader("Open Positions")
+        pos_rows = []
+        for ticker, pos in wl_state.positions.items():
+            # Find matching signal for current price
+            matching = [s for s in signals if s.ticker == ticker]
+            cur_price = matching[0].current_price if matching else 0
+            pnl = pos.unrealized_pnl_pct(cur_price) if cur_price > 0 else 0
+
+            pos_rows.append({
+                "Ticker": ticker,
+                "Side": pos.side.upper(),
+                "Entry Date": pos.entry_date,
+                "Entry Price": f"${pos.entry_price:,.2f}",
+                "Current Price": f"${cur_price:,.2f}" if cur_price > 0 else "—",
+                "Unrealized P&L": f"{pnl:+.1f}%",
+                "Quantity": pos.quantity,
+            })
+
+        df_pos = _pd.DataFrame(pos_rows)
+        st.dataframe(df_pos, use_container_width=True, hide_index=True)
+
+    if wl_state and wl_state.closed_trades:
+        with st.expander(f"Closed Trades ({len(wl_state.closed_trades)})"):
+            ct_rows = []
+            for ct in reversed(wl_state.closed_trades[-20:]):
+                ct_rows.append({
+                    "Ticker": ct.ticker,
+                    "Side": ct.side.upper(),
+                    "Entry": ct.entry_date,
+                    "Exit": ct.exit_date,
+                    "Entry Price": f"${ct.entry_price:,.2f}",
+                    "Exit Price": f"${ct.exit_price:,.2f}",
+                    "P&L": f"{ct.pnl_pct:+.1f}%",
+                    "Reason": ct.exit_reason,
+                })
+            df_ct = _pd.DataFrame(ct_rows)
+            st.dataframe(df_ct, use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
 # Main (new stepped flow)
 # ---------------------------------------------------------------------------
 
@@ -5080,13 +5336,21 @@ def main() -> None:
     params = render_sidebar()
 
     # ── Top-level navigation tabs ─────────────────────────────────────────
-    tab_analyze, tab_scanner, tab_help = st.tabs(["Analyze", "Scanner", "Help"])
+    tab_analyze, tab_scanner, tab_watchlist, tab_help = st.tabs(
+        ["Analyze", "Scanner", "Watchlist", "Help"]
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # SCANNER TAB
     # ══════════════════════════════════════════════════════════════════════
     with tab_scanner:
         render_scanner()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # WATCHLIST TAB
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_watchlist:
+        render_watchlist()
 
     # ══════════════════════════════════════════════════════════════════════
     # HELP TAB
