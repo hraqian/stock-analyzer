@@ -2697,6 +2697,12 @@ def render_stock_overview(
     if result.regime is not None:
         render_regime(result.regime)
 
+    # ── Quick Signal (recommendation without backtest) ────────────────────
+    st.markdown("---")
+    st.subheader("Quick Signal")
+    rec = compute_recommendation(result, bt_result=None, cfg=cfg)
+    render_recommendation(rec, context="overview")
+
     st.markdown("---")
 
     # ── Price chart ───────────────────────────────────────────────────────
@@ -2954,8 +2960,13 @@ def compute_recommendation(
     }
 
 
-def render_recommendation(rec: dict) -> None:
-    """Render the recommendation panel — single BUY/HOLD/SELL signal."""
+def render_recommendation(rec: dict, context: str = "backtest") -> None:
+    """Render the recommendation panel — single BUY/HOLD/SELL signal.
+
+    *context* controls the explanatory caption:
+    - ``"overview"``: shown in the stock overview before any backtest.
+    - ``"backtest"``: shown alongside backtest results.
+    """
     signal = rec["signal"]
     confidence = rec["confidence"]
 
@@ -2980,15 +2991,28 @@ def render_recommendation(rec: dict) -> None:
         unsafe_allow_html=True,
     )
 
-    # Reasons
+    # Reasons + context-appropriate caption
     with st.expander("Recommendation details"):
         for reason in rec["reasons"]:
             st.markdown(f"- {reason}")
-        st.caption(
-            "This recommendation is based on the strategy's full decision logic "
-            "(score thresholds, trend confirmation, regime adaptation, directional bias) "
-            "applied to the latest bar with a flat position. It is not financial advice."
-        )
+        if context == "overview":
+            st.caption(
+                "This is a **quick signal** based on the strategy's decision logic "
+                "(score thresholds, trend confirmation, regime adaptation, directional bias) "
+                "applied to the latest bar. It uses current indicator and pattern scores "
+                "with the detected market regime. "
+                "Run a backtest to see how the strategy actually performs on this stock "
+                "and to get a **backtested recommendation** that accounts for historical "
+                "strategy performance. Not financial advice."
+            )
+        else:
+            st.caption(
+                "This **backtested recommendation** uses the same strategy logic as the "
+                "quick signal above, but sources its regime classification from the backtest "
+                "period. Read it alongside the backtest performance metrics — a BUY signal "
+                "is more meaningful when the strategy is profitable on this stock. "
+                "Not financial advice."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -3115,9 +3139,9 @@ def render_backtest_section(
     """Render the full backtest results section with recommendation."""
 
     # ── Recommendation ────────────────────────────────────────────────────
-    st.subheader("Recommendation")
+    st.subheader("Backtested Recommendation")
     rec = compute_recommendation(result, bt_result, cfg)
-    render_recommendation(rec)
+    render_recommendation(rec, context="backtest")
 
     # ── Suitability ───────────────────────────────────────────────────────
     if assessment_dict is not None:
