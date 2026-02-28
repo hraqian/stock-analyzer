@@ -3,8 +3,8 @@
 Provides helpers to list available universes and load ticker symbols from
 the static ``.txt`` files stored alongside this module.
 
-Each file has one ticker per line.  Lines starting with ``#`` are comments.
-Blank lines are ignored.
+Each file has one ticker per line.  Lines starting with ``#`` are comments,
+and inline ``#`` comments are also stripped.  Blank lines are ignored.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ BUILTIN_UNIVERSES: dict[str, str] = {
     "nasdaq100": "nasdaq100",
     "sp500": "sp500",
     "tsx60": "tsx60",
+    "ca_dividend_etfs": "ca_dividend_etfs",
 }
 
 
@@ -57,6 +58,10 @@ def load(name: str) -> list[str]:
     for raw_line in path.read_text().splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
+            continue
+        # Strip inline comments (e.g. "XDIV.TO  # description")
+        line = line.split("#")[0].strip()
+        if not line:
             continue
         ticker = line.upper()
         if ticker not in seen:

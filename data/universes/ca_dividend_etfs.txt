@@ -1,0 +1,26 @@
+# Canadian Dividend ETFs — popular TSX-listed dividend-focused ETFs
+# Last updated: 2026-02-28
+# Note: yfinance uses .TO suffix for TSX-listed securities
+
+# ── Broad Canadian Dividend ──────────────────────────────────────────────────
+XDIV.TO    # iShares Core MSCI Canadian Quality Dividend Index ETF
+VDY.TO     # Vanguard FTSE Canadian High Dividend Yield Index ETF
+CDZ.TO     # iShares S&P/TSX Canadian Dividend Aristocrats Index ETF
+XEI.TO     # iShares S&P/TSX Composite High Dividend Index ETF
+XDV.TO     # iShares Canadian Select Dividend Index ETF
+PDC.TO     # Invesco Canadian Dividend Index ETF
+ZDV.TO     # BMO Canadian Dividend ETF
+HAL.TO     # Global X Active Canadian Dividend ETF
+
+# ── Sector-Focused Dividend ──────────────────────────────────────────────────
+FIE.TO     # iShares Canadian Financial Monthly Income ETF
+ZEB.TO     # BMO Equal Weight Banks Index ETF
+ZWB.TO     # BMO Covered Call Canadian Banks ETF
+ZUT.TO     # BMO Equal Weight Utilities Index ETF
+ZRE.TO     # BMO Equal Weight REITs Index ETF
+XFN.TO     # iShares S&P/TSX Capped Financials Index ETF
+
+# ── Enhanced Yield / Covered Call ────────────────────────────────────────────
+HDIV.TO    # Hamilton Enhanced Canadian Covered Call ETF
+BANK.TO    # Evolve Canadian Banks and Lifecos Enhanced Yield ETF
+DFN.TO     # Dividend 15 Split Corp

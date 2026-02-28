@@ -3256,12 +3256,13 @@ def render_backtest_section(
 # Scanner tab
 # ---------------------------------------------------------------------------
 
-SCANNER_UNIVERSES = ["dow30", "nasdaq100", "sp500", "tsx60"]
+SCANNER_UNIVERSES = ["dow30", "nasdaq100", "sp500", "tsx60", "ca_dividend_etfs"]
 SCANNER_UNIVERSE_LABELS = {
     "dow30": "Dow 30",
     "nasdaq100": "NASDAQ 100",
     "sp500": "S&P 500",
     "tsx60": "S&P/TSX 60",
+    "ca_dividend_etfs": "Canadian Dividend ETFs",
 }
 
 def _signal_color(signal: str) -> str:
@@ -4329,6 +4330,7 @@ Universes are plain text files in `data/universes/`:
 | **NASDAQ 100** | `nasdaq100.txt` | 100 largest NASDAQ-listed non-financial companies |
 | **S&P 500** | `sp500.txt` | 500 largest US-listed companies |
 | **S&P/TSX 60** | `tsx60.txt` | 60 largest Canadian stocks (Toronto Stock Exchange, `.TO` suffix) |
+| **Canadian Dividend ETFs** | `ca_dividend_etfs.txt` | 17 popular TSX-listed dividend-focused ETFs |
 
 You can add custom universes by placing a `.txt` file (one ticker per line, `#` for comments) in the same directory.
 """)
