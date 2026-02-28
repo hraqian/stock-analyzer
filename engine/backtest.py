@@ -489,15 +489,17 @@ class BacktestEngine:
         current_regime_total_return: float = 0.0
         current_regime_sub_type: RegimeSubType | None = None
 
-        # Lock sub-type using the full dataset — sub-types (Steady Compounder,
-        # Explosive Mover, etc.) are a structural characteristic of the stock
-        # over the analysis period, not a dynamic state.  Letting them shift
-        # every rebalance makes sub-type overrides unreliable (e.g. QQQ
-        # oscillates between steady_compounder/stagnant mid-trade).
+        # Regime sub-type is now recomputed at each rebalance on trailing data
+        # (no lookahead).  The initial classification below uses only the first
+        # portion of data (up to warmup) for profile selection — NOT the full
+        # dataset.  If not enough data for a reliable classification at warmup
+        # time, sub_type starts as None and gets set on the first rebalance.
         initial_regime_type: RegimeType | None = None
         initial_assessment: RegimeAssessment | None = None
         try:
-            initial_assessment = regime_classifier.classify(df)
+            # Use data up to effective_warmup for initial classification
+            warmup_df = df.iloc[: effective_warmup] if effective_warmup > 30 else df.iloc[: min(len(df), 60)]
+            initial_assessment = regime_classifier.classify(warmup_df)
             current_regime_sub_type = initial_assessment.sub_type
             initial_regime_type = initial_assessment.regime
         except Exception:
@@ -594,15 +596,14 @@ class BacktestEngine:
                 last_scores, last_overall, last_pattern_overall = self._compute_scores(trailing_df)
 
                 # Re-evaluate market regime on trailing data
-                # Note: regime type (strong_trend, mean_reverting, etc.) is
-                # dynamic and updates each rebalance.  Sub-type is locked at
-                # the start — see initial_assessment above.
+                # Both regime type and sub-type update each rebalance — no
+                # forward-looking bias.
                 try:
                     regime_assessment = regime_classifier.classify(trailing_df)
                     current_regime = regime_assessment.regime
                     current_regime_trend = regime_assessment.metrics.trend_direction
                     current_regime_total_return = regime_assessment.metrics.total_return
-                    # current_regime_sub_type is NOT updated here — locked at start
+                    current_regime_sub_type = regime_assessment.sub_type
                 except Exception:
                     logger.warning(
                         "Regime re-evaluation failed at bar %d; using stale regime",

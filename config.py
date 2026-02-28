@@ -443,8 +443,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
-                # Sub-type overrides — sub-type is locked at backtest start using
-                # full-period data, so these apply consistently for the entire run.
+                # Sub-type overrides — sub-type is classified from warmup data at
+                # backtest start and re-evaluated at every rebalance, so it can
+                # change mid-run as more data arrives.
                 # Low-vol names (SC) get tighter trail; high-vol (EM) use default.
                 "sub_types": {
                     "explosive_mover": {},

@@ -603,8 +603,8 @@ regime:
       min_score: 3.5                # don't enter when indicators are strongly bearish
       respect_trend_direction: true  # only enter in direction of long-term trend
       # ── Sub-type overrides (merged on top of base strong_trend params) ──
-      # Sub-type is locked at the start of the backtest using the full analysis
-      # period data, so overrides apply consistently for the entire run.
+      # Sub-type is classified from warmup data at backtest start and
+      # re-evaluated at every rebalance, so it can change mid-run.
       # Low-volatility names (Steady Compounders) benefit from a tighter trail
       # that exits losers faster; high-volatility names (Explosive Movers)
       # need the wider default trail to hold through normal pullbacks.
