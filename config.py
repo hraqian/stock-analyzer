@@ -472,6 +472,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "breakout_atr_mult": 1.5,         # price must move N×ATR from squeeze level
                 "require_volume_surge": True,      # require above-avg volume for entry
                 "volume_surge_mult": 1.3,         # volume must be N× the average
+                "avg_volume_window": 20,          # rolling window for average volume baseline
             },
         },
     },

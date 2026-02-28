@@ -471,6 +471,14 @@ class BacktestEngine:
                 window=self._chandelier_lookback, min_periods=1
             ).min()
 
+        # 1f. Pre-compute rolling average volume for breakout volume-surge gate
+        bt_adapt = self._cfg.section("strategy").get("regime_adaptation", {})
+        bt_breakout_cfg = bt_adapt.get("breakout_transition", {})
+        avg_vol_window = int(bt_breakout_cfg.get("avg_volume_window", 20))
+        avg_volume_series: pd.Series = df["volume"].rolling(
+            window=avg_vol_window, min_periods=1
+        ).mean()
+
         # 2. State initialization
         cash: float = self._initial_cash
         position: _Position | None = None
@@ -661,6 +669,7 @@ class BacktestEngine:
                 regime_sub_type=current_regime_sub_type,
                 regime_trend=current_regime_trend,
                 regime_total_return=current_regime_total_return,
+                metadata={"avg_volume": float(avg_volume_series.iloc[i])},
             )
 
             order = self._strategy.on_bar(ctx)

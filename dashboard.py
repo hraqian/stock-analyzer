@@ -2866,6 +2866,15 @@ def compute_recommendation(
         regime_trend = regime_source.metrics.trend_direction
         regime_total_return = regime_source.metrics.total_return
 
+    # Average volume for breakout volume-surge gate
+    ra_cfg = strat_cfg.get("regime_adaptation", {})
+    bk_cfg = ra_cfg.get("breakout_transition", {})
+    avg_vol_win = int(bk_cfg.get("avg_volume_window", 20))
+    avg_volume = float(
+        df["volume"].iloc[-avg_vol_win:].mean() if len(df) >= avg_vol_win
+        else df["volume"].mean()
+    )
+
     ctx = StrategyContext(
         bar=bar_dict,
         indicators={},
@@ -2880,6 +2889,7 @@ def compute_recommendation(
         regime_sub_type=regime_sub_type,
         regime_trend=regime_trend,
         regime_total_return=regime_total_return,
+        metadata={"avg_volume": avg_volume},
     )
 
     # ── Call the strategy ────────────────────────────────────────────────

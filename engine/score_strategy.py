@@ -725,9 +725,6 @@ class ScoreBasedStrategy(Strategy):
         if adapt.get("require_volume_surge", True):
             vol_mult = float(adapt.get("volume_surge_mult", 1.3))
             volume = bar.get("volume", 0.0)
-            # We don't have average volume in ctx directly, but we can use
-            # metadata if available.  For now, skip volume check if we can't
-            # verify — the bar structure check above is the primary filter.
             avg_vol = ctx.metadata.get("avg_volume")
             if avg_vol and avg_vol > 0:
                 if volume < avg_vol * vol_mult:
