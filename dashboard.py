@@ -1788,10 +1788,15 @@ def render_sidebar() -> dict:
     wl_tickers: list[str] = [t.upper() for t in wl.get("tickers", []) if t.strip()]
 
     # Add ticker via form (Enter key submits)
+    # Hide the default "Press Enter to submit form" hint that overlaps placeholder
+    st.sidebar.markdown(
+        "<style>.stForm [data-testid='InputInstructions'] { display: none; }</style>",
+        unsafe_allow_html=True,
+    )
     with st.sidebar.form("wl_add_form", clear_on_submit=True):
         new_wl_ticker = st.text_input(
             "Add ticker", value="", key="sidebar_wl_add",
-            label_visibility="collapsed", placeholder="Type ticker and press Enter",
+            label_visibility="collapsed", placeholder="Add ticker symbol",
         ).upper().strip()
         submitted = st.form_submit_button(
             "Add to Watchlist", use_container_width=True,
