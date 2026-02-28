@@ -454,18 +454,11 @@ class BacktestEngine:
             ], axis=1).max(axis=1)
             atr_series = tr.rolling(window=self._atr_stop_period, min_periods=1).mean()
 
-        # 1e. Pre-compute support/resistance levels for support-based stop
+        # 1e. Support/resistance levels — recomputed per rebalance on trailing data.
+        # (Config is read here; actual computation happens inside the bar loop.)
+        sr_cfg: dict = {}
         if self._support_stop_enabled:
-            try:
-                sr_cfg = self._cfg.section("support_resistance")
-                current_price = float(df["close"].iloc[-1])
-                sr_levels = calc_sr_levels(df, sr_cfg, current_price)
-                self._support_levels = [lvl.price for lvl in sr_levels.get("support", [])]
-                self._resistance_levels = [lvl.price for lvl in sr_levels.get("resistance", [])]
-            except Exception:
-                logger.warning("S/R level computation failed; support-based stop disabled", exc_info=True)
-                self._support_levels = []
-                self._resistance_levels = []
+            sr_cfg = self._cfg.section("support_resistance")
 
         # 1e2. Pre-compute rolling high/low series for Chandelier Exit
         chandelier_high_series: pd.Series | None = None
@@ -615,6 +608,23 @@ class BacktestEngine:
                         "Regime re-evaluation failed at bar %d; using stale regime",
                         i, exc_info=True,
                     )
+
+                # Recompute S/R levels on trailing data (no lookahead)
+                if self._support_stop_enabled:
+                    try:
+                        sr_price = float(trailing_df["close"].iloc[-1])
+                        sr_levels = calc_sr_levels(trailing_df, sr_cfg, sr_price)
+                        self._support_levels = [
+                            lvl.price for lvl in sr_levels.get("support", [])
+                        ]
+                        self._resistance_levels = [
+                            lvl.price for lvl in sr_levels.get("resistance", [])
+                        ]
+                    except Exception:
+                        logger.debug(
+                            "S/R recomputation failed at bar %d; keeping previous levels",
+                            i, exc_info=True,
+                        )
 
             # Build context and ask strategy for order
             portfolio_value = cash
