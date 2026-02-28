@@ -167,7 +167,7 @@ class MultiTimeframeAnalyzer:
                         period=p,
                         interval=tf,
                         lookback_bars=lookback_bars,
-                        step=max(1, int(strat_cfg.get("percentile_step", 5))),
+                        step=max(1, int(pct_cfg.get("percentile_step", 5))),
                         combination_mode=combination_mode,
                         ind_weight=ind_weight,
                         pat_weight=pat_weight,
@@ -406,7 +406,25 @@ def _build_percentile_window(
     Combination-mode params are accepted explicitly so the caller can
     pass the same values it already read from config, avoiding a second
     independent config read that could diverge if overrides are in play.
+
+    The *step* parameter is auto-clamped: if stepping by *step* would
+    produce fewer than *lookback_bars* samples from the available data,
+    the step is reduced so the window has enough resolution for
+    meaningful percentile ranking.
     """
+    # Pre-fetch data to know how many post-warmup bars are available,
+    # then clamp step so we get at least lookback_bars samples.
+    warmup = int(cfg.section("backtest").get("warmup_bars", 50))
+    warmup_min = int(cfg.section("backtest").get("min_warmup_bars", 20))
+    max_warmup_ratio = float(cfg.section("backtest").get("max_warmup_ratio", 0.5))
+
+    # Estimate available bars. We don't have the actual DataFrame length
+    # yet (compute_score_timeseries fetches it), so we use a generous
+    # target: ensure step * lookback_bars <= reasonable data length.
+    # The actual clamping happens after we see the real result length,
+    # but we can also pre-clamp to avoid wasting computation.
+    effective_step = max(1, step)
+
     df_scores = compute_score_timeseries(
         cfg,
         provider,
@@ -415,10 +433,27 @@ def _build_percentile_window(
         interval=interval,
         start=None,
         end=None,
-        step=step,
+        step=effective_step,
     )
     if df_scores.empty:
         return []
+
+    # If we got fewer samples than lookback_bars and step > 1, retry
+    # with step=1 to get the maximum number of samples.
+    if len(df_scores) < lookback_bars and effective_step > 1:
+        df_scores = compute_score_timeseries(
+            cfg,
+            provider,
+            ticker=ticker,
+            period=period,
+            interval=interval,
+            start=None,
+            end=None,
+            step=1,
+        )
+        if df_scores.empty:
+            return []
+
     ind_scores = df_scores["indicator_score"].tolist()
     pat_scores = df_scores["pattern_score"].tolist()
 

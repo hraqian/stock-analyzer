@@ -322,6 +322,7 @@ strategy:
     short_percentile: 25    # score in bottom 25% of recent window → SHORT
     long_percentile: 75     # score in top 25% of recent window → LONG
     lookback_bars: 60       # rolling window size for percentile calculation
+    percentile_step: 5      # bar step when building percentile window (auto-clamped for enough samples)
 
   # Position sizing method: "fixed" or "percent_equity"
   position_sizing: "percent_equity"

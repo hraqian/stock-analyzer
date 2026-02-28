@@ -158,6 +158,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "short_percentile": 25,
             "long_percentile": 75,
             "lookback_bars": 60,
+            "percentile_step": 5,        # bar step for building percentile window (auto-clamped to ensure enough samples)
         },
         "position_sizing": "percent_equity",
         "fixed_quantity": 100,
