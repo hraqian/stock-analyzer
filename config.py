@@ -276,11 +276,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "doji_threshold": 0.05,
         "shadow_ratio": 2.0,
         "harami_body_ratio": 0.5,
+        "dragonfly_shadow_min": 0.6,      # lower shadow >= range * this for dragonfly doji
+        "gravestone_shadow_min": 0.6,     # upper shadow >= range * this for gravestone doji
+        "doji_tiny_shadow_max": 0.1,      # opposite shadow <= range * this for dragonfly/gravestone
+        "marubozu_body_min": 0.90,        # body fills >= this fraction of range for marubozu
+        "marubozu_shadow_max": 0.05,      # each shadow <= this fraction of range for marubozu
+        "tweezer_tolerance": 0.002,       # highs/lows match within this fraction for tweezer
+        "star_middle_body_max": 0.30,     # middle bar body <= this for morning/evening star
+        "soldiers_body_min": 0.60,        # each bar body >= this for 3 soldiers/crows
+        "soldiers_shadow_max": 0.30,      # shadow <= this for 3 soldiers/crows
         "lookback": 10,
         "trend_period": 10,
         "max_signal_strength": 3.0,
-        "hammer_body_max": 0.35,        # max body ratio for hammer/shooting star detection
-        "star_body_min": 0.5,           # min body ratio for morning/evening star center candle
+        "hammer_body_max": 0.35,          # max body ratio for hammer/shooting star detection
+        "star_body_min": 0.5,             # min body ratio for morning/evening star center candle
         # Per-pattern strength values — empty dict = use built-in defaults.
         # Keys: dragonfly_doji, gravestone_doji, doji_directional, doji_neutral,
         #        hammer, shooting_star, marubozu, engulfing, harami, tweezer,
@@ -612,6 +621,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "lookback": 15,
                 "confirm_bars": 2,
             },
+            "inside_outside": {
+                "lookback": 15,
+                "trend_period": 8,
+                "breakout_bars": 2,
+            },
+            "overall_patterns": {
+                "weights": {
+                    "gaps": 0.15,
+                    "volume_range": 0.20,
+                    "candlesticks": 0.25,
+                    "spikes": 0.15,
+                    "inside_outside": 0.25,   # breakout setups very relevant for swing trading
+                },
+            },
             "overall": {
                 "weights": {
                     "rsi": 0.15,
@@ -694,13 +717,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "lookback": 10,
                 "confirm_bars": 2,
             },
+            "inside_outside": {
+                "lookback": 10,
+                "trend_period": 5,
+                "breakout_bars": 2,
+                "outside_range_min": 1.15,   # lower threshold intraday — smaller bars
+            },
             "overall_patterns": {
                 "weights": {
-                    "gaps": 0.15,
+                    "gaps": 0.10,              # gaps less meaningful intraday
                     "volume_range": 0.30,
                     "candlesticks": 0.25,
                     "spikes": 0.15,
-                    "inside_outside": 0.15,
+                    "inside_outside": 0.20,    # breakout setups important intraday
                 },
             },
             "overall": {

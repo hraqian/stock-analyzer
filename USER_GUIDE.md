@@ -408,7 +408,7 @@ Section: `display`
 | `display.score_decimal_places` | 1 | Decimal places for score display |
 | `display.price_decimal_places` | 2 | Decimal places for price display |
 | `display.color_thresholds.bearish_max` | 3.5 | Score <= this = red (bearish) |
-| `display.color_thresholds.neutral_max` | 6.5 | Score <= this = yellow (neutral), above = green (bullish) |
+| `display.color_thresholds.neutral_max` | 6.0 | Score <= this = yellow (neutral), above = green (bullish) |
 
 ---
 
@@ -446,16 +446,16 @@ The strategy maps composite scores to trading decisions (LONG, SHORT, HOLD).
 |-----|---------|-------------|
 | `strategy.position_sizing` | "percent_equity" | "fixed" or "percent_equity" |
 | `strategy.fixed_quantity` | 100 | Shares per trade (when sizing = "fixed") |
-| `strategy.percent_equity` | 0.80 | Fraction of equity per trade (when sizing = "percent_equity") |
+| `strategy.percent_equity` | 1.00 | Fraction of equity per trade (when sizing = "percent_equity") |
 
 ### Risk Management
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `strategy.stop_loss_pct` | 0.05 | Exit if position loses this fraction (5%) |
-| `strategy.take_profit_pct` | 0.50 | Exit if position gains this fraction (50%) |
+| `strategy.take_profit_pct` | 0.30 | Exit if position gains this fraction (30%) |
 | `strategy.atr_stop_enabled` | true | Use ATR-adaptive stop (widens beyond fixed %) |
-| `strategy.atr_stop_multiplier` | 3.0 | Stop = N x ATR at entry |
+| `strategy.atr_stop_multiplier` | 4.0 | Stop = N x ATR at entry |
 | `strategy.atr_stop_period` | 14 | ATR calculation lookback |
 
 The effective stop is `max(fixed_stop, ATR_stop)` — the ATR can only widen,
@@ -575,7 +575,7 @@ Section: `backtest`
 | `backtest.commission_pct` | 0.0 | Percentage commission per trade leg as a fraction (0.001 = 0.1%) |
 | `backtest.commission_mode` | "additive" | How flat + pct fees combine: `"additive"` (sum both) or `"max"` (whichever is greater) |
 | `backtest.slippage_pct` | 0.001 | Simulated slippage as fraction of price (0.1%) |
-| `backtest.warmup_bars` | 100 | Minimum bars before first signal (must be >= longest indicator lookback) |
+| `backtest.warmup_bars` | 50 | Minimum bars before first signal (must be >= longest indicator lookback) |
 | `backtest.max_warmup_ratio` | 0.5 | Maximum fraction of data that warmup can consume |
 | `backtest.significant_pattern_min_strength` | 0.5 | Minimum strength for pattern to appear in timeline |
 | `backtest.min_warmup_bars` | 20 | Absolute floor for proportional warmup |
@@ -792,11 +792,11 @@ Override slots exist for each sub-type (`explosive_mover`,
 `steady_compounder`, `volatile_directionless`, `stagnant`). Values merge
 on top of the base regime params via shallow merge.
 
-**Currently all overrides are empty** — the base `strong_trend` params
-(trailing stop at 8× ATR, etc.) already handle all sub-types well.
-Tested entry-only overrides (`min_distance`, `min_score`) but they were
-either no-ops or caused regressions. Override slots remain available for
-future tuning.
+**Most overrides are empty** — the base `strong_trend` params
+(trailing stop at 8× ATR, etc.) handle most sub-types well. The one
+exception is `steady_compounder`, which uses `trailing_stop_atr_mult: 6.0`
+(a tighter trail suited to low-volatility trending names). Other override
+slots remain available for future tuning.
 
 > **Design constraint**: Sub-type classification uses trailing-window
 > metrics that can change mid-trade. Overrides should be limited to
@@ -901,7 +901,7 @@ variance than individual indicators. Typical effective range is ~3.7-5.9.
 
 ### Warmup eating your data
 
-With default `warmup_bars: 100` on a 6-month dataset (~126 bars), warmup
+With default `warmup_bars: 50` on a 6-month dataset (~126 bars), warmup
 consumes ~50% of your data (capped by `max_warmup_ratio: 0.5`). Solutions:
 - Use a longer period (`--period 2y` or more)
 - Lower `warmup_bars` (but must be >= longest indicator lookback)
