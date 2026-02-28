@@ -45,6 +45,7 @@ from analysis.pattern_scorer import PatternCompositeScorer
 from config import Config, DEFAULT_CONFIG
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
+from engine.dca import DCABacktester, DCAResult
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LABELS
@@ -3253,6 +3254,354 @@ def render_backtest_section(
 
 
 # ---------------------------------------------------------------------------
+# DCA Backtest tab
+# ---------------------------------------------------------------------------
+
+_DCA_MODES = ["pure", "dip_weighted", "score_integrated"]
+_DCA_MODE_LABELS = {
+    "pure": "Pure DCA",
+    "dip_weighted": "Dip-Weighted DCA",
+    "score_integrated": "Score-Integrated DCA",
+}
+_DCA_FREQUENCIES = ["weekly", "biweekly", "monthly"]
+
+
+def _render_dca_params(cfg: Config) -> dict:
+    """Render DCA parameter controls in the sidebar and return overrides dict."""
+    dca = cfg.section("dca")
+    ov: dict = {}
+
+    mode = st.radio(
+        "DCA Mode",
+        _DCA_MODES,
+        index=_DCA_MODES.index(dca.get("mode", "dip_weighted")),
+        format_func=lambda m: _DCA_MODE_LABELS.get(m, m),
+        key="dca_mode",
+        horizontal=True,
+    )
+    ov["mode"] = mode
+
+    col1, col2 = st.columns(2)
+    with col1:
+        ov["base_amount"] = st.number_input(
+            "Base Amount ($)",
+            min_value=50, max_value=50_000, step=50,
+            value=int(dca.get("base_amount", 500)),
+            key="dca_base_amount",
+        )
+    with col2:
+        freq = st.selectbox(
+            "Frequency",
+            _DCA_FREQUENCIES,
+            index=_DCA_FREQUENCIES.index(dca.get("frequency", "monthly")),
+            key="dca_freq",
+        )
+        ov["frequency"] = freq
+
+    ov["drip"] = st.checkbox(
+        "Reinvest Dividends (DRIP)",
+        value=bool(dca.get("drip", True)),
+        key="dca_drip",
+    )
+
+    if mode != "pure":
+        with st.expander("Dip Thresholds & Multipliers"):
+            dt = dca.get("dip_thresholds", {})
+            ml = dca.get("multipliers", {})
+
+            st.markdown("**Dip Detection Thresholds** (% drop from recent high)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                mild = st.slider("Mild Dip %", 1.0, 15.0,
+                                 float(dt.get("mild_drop_pct", 5.0)),
+                                 step=0.5, key="dca_mild_pct")
+            with c2:
+                strong = st.slider("Strong Dip %", 5.0, 30.0,
+                                   float(dt.get("strong_drop_pct", 10.0)),
+                                   step=0.5, key="dca_strong_pct")
+            with c3:
+                extreme = st.slider("Extreme Dip %", 10.0, 50.0,
+                                    float(dt.get("extreme_drop_pct", 20.0)),
+                                    step=1.0, key="dca_extreme_pct")
+
+            lookback = st.slider("Lookback Days", 5, 90,
+                                 int(dt.get("lookback_days", 30)),
+                                 step=5, key="dca_lookback")
+
+            ov["dip_thresholds"] = {
+                "mild_drop_pct": mild,
+                "strong_drop_pct": strong,
+                "extreme_drop_pct": extreme,
+                "lookback_days": lookback,
+            }
+
+            st.markdown("**Multipliers** (how much to scale base amount)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                m_mild = st.slider("Mild Multiplier", 1.0, 5.0,
+                                   float(ml.get("mild_dip", 1.5)),
+                                   step=0.1, key="dca_m_mild")
+            with c2:
+                m_strong = st.slider("Strong Multiplier", 1.0, 5.0,
+                                     float(ml.get("strong_dip", 2.0)),
+                                     step=0.1, key="dca_m_strong")
+            with c3:
+                m_extreme = st.slider("Extreme Multiplier", 1.0, 5.0,
+                                      float(ml.get("extreme_dip", 3.0)),
+                                      step=0.1, key="dca_m_extreme")
+
+            ov["multipliers"] = {
+                "normal": 1.0,
+                "mild_dip": m_mild,
+                "strong_dip": m_strong,
+                "extreme_dip": m_extreme,
+            }
+
+        with st.expander("Safety Gates"):
+            sf = dca.get("safety", {})
+            max_mult = st.slider("Max Multiplier Cap", 1.0, 5.0,
+                                 float(sf.get("max_multiplier", 3.0)),
+                                 step=0.5, key="dca_max_mult")
+            max_alloc = st.number_input(
+                "Max Period Allocation ($)",
+                min_value=100, max_value=100_000, step=100,
+                value=int(sf.get("max_period_allocation", 1500)),
+                key="dca_max_alloc",
+            )
+            skip_breakaway = st.checkbox(
+                "Skip overweight on breakaway-down gaps",
+                value=bool(sf.get("skip_breakaway_gaps", True)),
+                key="dca_skip_brkwy",
+            )
+            min_vol = st.slider("Min Volume Ratio", 0.0, 2.0,
+                                float(sf.get("min_volume_ratio", 0.5)),
+                                step=0.1, key="dca_min_vol")
+            ov["safety"] = {
+                "max_multiplier": max_mult,
+                "max_period_allocation": max_alloc,
+                "skip_breakaway_gaps": skip_breakaway,
+                "min_volume_ratio": min_vol,
+            }
+
+    if mode == "score_integrated":
+        with st.expander("Score Integration Thresholds"):
+            sc = dca.get("score_thresholds", {})
+            buy_zone = st.slider("Buy Zone Below (score)", 0.0, 10.0,
+                                 float(sc.get("buy_zone_below", 3.5)),
+                                 step=0.5, key="dca_buy_zone")
+            rsi_os = st.slider("Oversold RSI", 10.0, 50.0,
+                               float(sc.get("oversold_rsi", 30.0)),
+                               step=1.0, key="dca_rsi_os")
+            bb_low = st.slider("BB Percentile Low", 1.0, 30.0,
+                               float(sc.get("bb_percentile_low", 10.0)),
+                               step=1.0, key="dca_bb_low")
+            ov["score_thresholds"] = {
+                "buy_zone_below": buy_zone,
+                "oversold_rsi": rsi_os,
+                "bb_percentile_low": bb_low,
+            }
+
+    return ov
+
+
+def _create_dca_equity_chart(
+    dca_result: DCAResult,
+    bt_result: BacktestResult | None = None,
+) -> go.Figure:
+    """Build a Plotly equity chart for DCA results, optionally overlaying
+    the active strategy equity curve for comparison."""
+    fig = go.Figure()
+
+    # DCA portfolio value
+    if dca_result.equity_curve:
+        dates = [e["date"] for e in dca_result.equity_curve]
+        values = [e["value"] for e in dca_result.equity_curve]
+        invested = [e["invested"] for e in dca_result.equity_curve]
+
+        fig.add_trace(go.Scatter(
+            x=dates, y=values,
+            name="DCA Portfolio Value",
+            line=dict(color="#2196F3", width=2),
+        ))
+        fig.add_trace(go.Scatter(
+            x=dates, y=invested,
+            name="Total Invested",
+            line=dict(color="#9E9E9E", width=1, dash="dash"),
+        ))
+
+    # Active strategy overlay
+    if bt_result and bt_result.equity_curve:
+        bt_dates = [e["date"] for e in bt_result.equity_curve]
+        bt_values = [e["equity"] for e in bt_result.equity_curve]
+        fig.add_trace(go.Scatter(
+            x=bt_dates, y=bt_values,
+            name="Active Strategy Equity",
+            line=dict(color="#FF9800", width=2, dash="dot"),
+        ))
+
+    # Mark dip purchases
+    dip_buys = [p for p in dca_result.purchases if p.multiplier > 1.0]
+    if dip_buys:
+        fig.add_trace(go.Scatter(
+            x=[p.date for p in dip_buys],
+            y=[p.portfolio_value for p in dip_buys],
+            mode="markers",
+            name="Dip Purchases",
+            marker=dict(
+                color="#4CAF50", size=10, symbol="triangle-up",
+                line=dict(width=1, color="white"),
+            ),
+            text=[f"{p.tier} ({p.multiplier}x, -{p.dip_pct}%)" for p in dip_buys],
+            hoverinfo="text+x+y",
+        ))
+
+    fig.update_layout(
+        title="DCA Equity Curve",
+        xaxis_title="Date",
+        yaxis_title="Value ($)",
+        hovermode="x unified",
+        template="plotly_white",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    return fig
+
+
+def _render_dca_metrics(result: DCAResult) -> None:
+    """Render DCA performance metrics in a 4-column layout."""
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Total Invested", f"${result.total_invested:,.2f}")
+        st.metric("Final Value", f"${result.final_value:,.2f}")
+        st.metric("Net Profit", f"${result.final_value - result.total_invested:,.2f}")
+    with c2:
+        st.metric("Total Return", f"{result.total_return_pct:+.2f}%")
+        st.metric("Annualized Return", f"{result.annualized_return_pct:+.2f}%")
+        st.metric("Max Drawdown", f"-{result.max_drawdown_pct:.2f}%")
+    with c3:
+        st.metric("Avg Cost Basis", f"${result.avg_cost_basis:,.2f}")
+        st.metric("Current Price", f"${result.current_price:,.2f}")
+        basis_vs_price = (
+            (result.current_price - result.avg_cost_basis) / result.avg_cost_basis * 100
+            if result.avg_cost_basis > 0 else 0.0
+        )
+        st.metric("Price vs Basis", f"{basis_vs_price:+.2f}%")
+    with c4:
+        st.metric("Total Purchases", str(result.num_purchases))
+        st.metric("Dip Purchases", str(result.num_dip_purchases))
+        st.metric("Avg Multiplier", f"{result.avg_multiplier:.2f}x")
+
+    if result.drip_shares > 0:
+        c1, c2, c3, _ = st.columns(4)
+        with c1:
+            st.metric("Dividends Reinvested", f"${result.total_dividends:,.2f}")
+        with c2:
+            st.metric("DRIP Shares", f"{result.drip_shares:.4f}")
+        with c3:
+            st.metric("Total Shares", f"{result.total_shares:.4f}")
+
+
+def _render_dca_purchase_log(result: DCAResult) -> None:
+    """Render the DCA purchase log as a dataframe."""
+    import pandas as pd
+    if not result.purchases:
+        st.info("No purchases to display.")
+        return
+
+    rows = []
+    for p in result.purchases:
+        rows.append({
+            "Date": p.date,
+            "Price": f"${p.price:,.2f}",
+            "Dip %": f"{p.dip_pct:.1f}%",
+            "Tier": p.tier.replace("_", " ").title(),
+            "Multiplier": f"{p.multiplier:.1f}x",
+            "Amount": f"${p.amount:,.2f}",
+            "Shares": f"{p.shares:.4f}",
+            "Cumulative Shares": f"{p.cumulative_shares:.4f}",
+            "Cumulative Invested": f"${p.cumulative_invested:,.2f}",
+            "Portfolio Value": f"${p.portfolio_value:,.2f}",
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width="stretch", hide_index=True, height=400)
+
+
+def _render_dca_comparison(dca_result: DCAResult, bt_result: BacktestResult) -> None:
+    """Render a side-by-side comparison table: DCA vs Active Strategy."""
+    import pandas as pd
+
+    dca_profit = dca_result.final_value - dca_result.total_invested
+    active_profit = bt_result.final_equity - bt_result.initial_cash
+
+    rows = [
+        ("Starting Capital", f"${dca_result.total_invested:,.2f} (accumulated)",
+         f"${bt_result.initial_cash:,.2f} (lump sum)"),
+        ("Final Value", f"${dca_result.final_value:,.2f}",
+         f"${bt_result.final_equity:,.2f}"),
+        ("Net Profit", f"${dca_profit:,.2f}", f"${active_profit:,.2f}"),
+        ("Total Return", f"{dca_result.total_return_pct:+.2f}%",
+         f"{bt_result.total_return_pct:+.2f}%"),
+        ("Annualized Return", f"{dca_result.annualized_return_pct:+.2f}%",
+         f"{bt_result.annualized_return_pct:+.2f}%"),
+        ("Max Drawdown", f"-{dca_result.max_drawdown_pct:.2f}%",
+         f"-{bt_result.max_drawdown_pct:.2f}%"),
+        ("Number of Trades", f"{dca_result.num_purchases} purchases",
+         f"{bt_result.total_trades} round-trips"),
+    ]
+    df = pd.DataFrame(rows, columns=["Metric", "DCA Strategy", "Active Strategy"])
+    st.dataframe(df, width="stretch", hide_index=True)
+
+
+def render_dca_section(
+    dca_result: DCAResult,
+    bt_result: BacktestResult | None = None,
+) -> None:
+    """Render the full DCA backtest results section."""
+
+    # ── Performance summary ──────────────────────────────────────────────
+    mode_label = _DCA_MODE_LABELS.get(dca_result.mode, dca_result.mode)
+    st.subheader(f"DCA Results — {mode_label}")
+    st.info(
+        f"**{dca_result.frequency.title()}** purchases of "
+        f"**${dca_result.purchases[0].amount if dca_result.purchases else 0:,.0f}** base "
+        f"over **{dca_result.period}** "
+        f"({dca_result.num_purchases} purchases, "
+        f"{dca_result.num_dip_purchases} dip buys)"
+    )
+
+    _render_dca_metrics(dca_result)
+
+    # ── Equity chart ─────────────────────────────────────────────────────
+    st.subheader("Equity Curve")
+    eq_fig = _create_dca_equity_chart(dca_result, bt_result)
+    st.plotly_chart(eq_fig, width="stretch")
+
+    # ── Comparison vs active strategy ────────────────────────────────────
+    if bt_result is not None:
+        with st.expander("DCA vs Active Strategy Comparison"):
+            _render_dca_comparison(dca_result, bt_result)
+
+    # ── Purchase log ─────────────────────────────────────────────────────
+    with st.expander(f"Purchase Log ({dca_result.num_purchases} purchases)"):
+        _render_dca_purchase_log(dca_result)
+
+    # ── Dividend events ──────────────────────────────────────────────────
+    if dca_result.dividend_events:
+        with st.expander(f"Dividend Events ({len(dca_result.dividend_events)} payments)"):
+            import pandas as pd
+            div_rows = []
+            for d in dca_result.dividend_events:
+                div_rows.append({
+                    "Date": d["date"],
+                    "Per Share": f"${d['per_share']:.4f}",
+                    "Total Amount": f"${d['total_amount']:,.2f}",
+                    "DRIP Shares": f"{d['shares_acquired']:.4f}",
+                })
+            df = pd.DataFrame(div_rows)
+            st.dataframe(df, width="stretch", hide_index=True, height=300)
+
+
+# ---------------------------------------------------------------------------
 # Scanner tab
 # ---------------------------------------------------------------------------
 
@@ -4500,9 +4849,10 @@ def main() -> None:
         st.markdown("---")
         st.header("Backtest")
 
-        tab_auto, tab_custom = st.tabs([
+        tab_auto, tab_custom, tab_dca = st.tabs([
             "Quick Backtest (Recommended)",
             "Custom Backtest",
+            "DCA Backtest",
         ])
 
         # ── Tab 1: Quick Backtest ─────────────────────────────────────────
@@ -4601,6 +4951,55 @@ def main() -> None:
                         bt_result, custom_result, custom_cfg,
                         trading_mode_val, assessment_dict,
                     )
+
+        # ── Tab 3: DCA Backtest ───────────────────────────────────────────
+        with tab_dca:
+            st.markdown(
+                "Simulate **Dollar Cost Averaging** — periodic fixed-amount "
+                "purchases with optional dip-weighted or score-integrated "
+                "multipliers. Compare against the active trading strategy."
+            )
+
+            dca_overrides = _render_dca_params(cfg)
+
+            dca_period_opts = ["1y", "2y", "3y", "5y", "max"]
+            dca_period = st.selectbox(
+                "DCA Period",
+                dca_period_opts,
+                index=dca_period_opts.index("5y"),
+                key="dca_period",
+            )
+
+            run_dca = st.button("Run DCA Backtest", type="primary", key="run_dca_bt")
+
+            if run_dca or st.session_state.get("_dca_bt_ran"):
+                st.session_state["_dca_bt_ran"] = True
+
+                with st.spinner("Running DCA backtest..."):
+                    try:
+                        dca_bt = DCABacktester(cfg=cfg, overrides=dca_overrides)
+                        dca_result = dca_bt.run(ticker, period=dca_period)
+                    except Exception as e:
+                        st.error(f"DCA backtest failed: {e}")
+                        return
+
+                # Try to get active backtest result for comparison
+                active_bt: BacktestResult | None = None
+                try:
+                    active_bt, _, _, _ = load_backtest(
+                        ticker=ticker,
+                        period=dca_period,
+                        interval="1d",
+                        start=None,
+                        end=None,
+                        trading_mode_str="auto",
+                        config_hash=cfg_h,
+                        config_data=cfg_data,
+                    )
+                except Exception:
+                    pass  # comparison is optional
+
+                render_dca_section(dca_result, active_bt)
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.markdown("---")
