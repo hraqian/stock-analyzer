@@ -148,6 +148,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "price_decimal_places": 2,
         "color_thresholds": {"bearish_max": 3.5, "neutral_max": 6.0},
     },
+    "dashboard": {
+        "default_ticker": "SPY",
+    },
     "strategy": {
         "threshold_mode": "fixed",
         "score_thresholds": {

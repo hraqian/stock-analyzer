@@ -1688,7 +1688,10 @@ def render_sidebar() -> dict:
     st.sidebar.title("Stock Analyzer")
     st.sidebar.markdown("---")
 
-    ticker = st.sidebar.text_input("Ticker", value="AAPL").upper().strip()
+    data = st.session_state.get("config_data", {})
+    default_ticker = data.get("dashboard", {}).get("default_ticker", "SPY")
+
+    ticker = st.sidebar.text_input("Ticker", value=default_ticker).upper().strip()
 
     st.sidebar.markdown("#### Analysis Period")
     period_idx = CLASSIFICATION_PERIODS.index(DEFAULT_CLASSIFICATION_PERIOD)

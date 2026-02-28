@@ -304,6 +304,9 @@ display:
     bearish_max: 3.5    # score <= this → red
     neutral_max: 6.0    # score <= this → yellow, above → green (matches hold_below)
 
+dashboard:
+  default_ticker: SPY   # ticker shown on initial page load
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategy & Backtesting Configuration
 # ─────────────────────────────────────────────────────────────────────────────
