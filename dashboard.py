@@ -1030,41 +1030,9 @@ def _edit_strategy_params(data: dict) -> None:
 
 
 def _edit_backtest_params(data: dict) -> None:
-    """Editable backtest engine params."""
+    """Editable backtest engine params (strategy-specific; commissions are in sidebar)."""
     bt = data.setdefault("backtest", {})
     _db = DEFAULT_CONFIG.get("backtest", {})
-
-    bt["initial_cash"] = st.number_input(
-        "Initial capital ($)",
-        1000.0, 10_000_000.0,
-        value=float(bt.get("initial_cash", 100_000)),
-        step=10_000.0, key="init_cash", format="%.0f",
-    )
-    _default_hint(f"${_db.get('initial_cash', 100_000):,.0f}", PARAM_DESCRIPTIONS.get("backtest.initial_cash"))
-
-    bt["commission_per_trade"] = st.number_input(
-        "Commission per trade ($)",
-        0.0, 100.0,
-        value=float(bt.get("commission_per_trade", 0.0)),
-        step=1.0, key="commission", format="%.2f",
-    )
-    _default_hint(_db.get("commission_per_trade"), PARAM_DESCRIPTIONS.get("backtest.commission_per_trade"))
-
-    bt["commission_pct"] = st.number_input(
-        "Commission %",
-        0.0, 5.0,
-        value=float(bt.get("commission_pct", 0.0)) * 100,
-        step=0.01, key="commission_pct", format="%.3f",
-    ) / 100.0
-    _default_hint(f"{_db.get('commission_pct', 0.0) * 100:.3f}%", PARAM_DESCRIPTIONS.get("backtest.commission_pct"))
-
-    bt["commission_mode"] = st.selectbox(
-        "Commission mode",
-        options=["additive", "max"],
-        index=["additive", "max"].index(bt.get("commission_mode", "additive")),
-        key="commission_mode",
-    )
-    _default_hint(_db.get("commission_mode", "additive"), PARAM_DESCRIPTIONS.get("backtest.commission_mode"))
 
     bt["slippage_pct"] = st.number_input(
         "Slippage %",
@@ -1756,6 +1724,55 @@ def render_sidebar() -> dict:
                 _save_loadout(slot)
                 st.toast(f"Saved to config slot #{slot}")
                 st.rerun()
+
+    # ------------------------------------------------------------------
+    # Shared backtest settings (apply to both Active and DCA strategies)
+    # ------------------------------------------------------------------
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### Backtest Settings")
+
+    _init_config_data()
+    data = st.session_state["config_data"]
+    bt = data.setdefault("backtest", {})
+    _db = DEFAULT_CONFIG.get("backtest", {})
+
+    bt["initial_cash"] = st.sidebar.number_input(
+        "Initial Capital ($)",
+        1000.0, 10_000_000.0,
+        value=float(bt.get("initial_cash", 100_000)),
+        step=10_000.0, key="sidebar_init_cash", format="%.0f",
+        help="Starting capital for active strategy backtests.",
+    )
+
+    with st.sidebar.expander("Commission Model"):
+        bt["commission_per_trade"] = st.number_input(
+            "Commission per Trade ($)",
+            0.0, 100.0,
+            value=float(bt.get("commission_per_trade", 10.0)),
+            step=1.0, key="sidebar_commission", format="%.2f",
+            help="Flat dollar fee charged per trade (buy or sell).",
+        )
+
+        bt["commission_pct"] = st.number_input(
+            "Commission %",
+            0.0, 5.0,
+            value=float(bt.get("commission_pct", 0.005)) * 100,
+            step=0.01, key="sidebar_commission_pct", format="%.3f",
+            help="Percentage fee per trade as percent of notional (e.g. 0.500 = 0.5%).",
+        ) / 100.0
+
+        bt["commission_mode"] = st.selectbox(
+            "Commission Mode",
+            options=["max", "additive"],
+            index=["max", "additive"].index(bt.get("commission_mode", "max")),
+            key="sidebar_commission_mode",
+            help=(
+                "**Max:** charge whichever is greater — flat fee or percentage. "
+                "**Additive:** charge flat fee + percentage (both always apply)."
+            ),
+        )
+
+    st.session_state["config_data"] = data
 
     return {
         "ticker": ticker,
@@ -4970,111 +4987,125 @@ def main() -> None:
         st.markdown("---")
         st.header("Backtest")
 
-        tab_auto, tab_custom, tab_dca = st.tabs([
-            "Quick Backtest (Recommended)",
-            "Custom Backtest",
-            "DCA Backtest",
-        ])
+        strategy_type = st.radio(
+            "Strategy Type",
+            ["Active Strategy", "DCA Strategy"],
+            horizontal=True,
+            key="bt_strategy_type",
+            help=(
+                "**Active Strategy:** Score-based trading with entry/exit signals, "
+                "regime adaptation, and position management. "
+                "**DCA Strategy:** Periodic fixed-amount purchases with optional "
+                "dip-weighting and technical score integration."
+            ),
+        )
 
-        # ── Tab 1: Quick Backtest ─────────────────────────────────────────
-        with tab_auto:
-            st.markdown(
-                f"Run a backtest using the **{period}** classification period with "
-                f"**auto-detected** trading mode and **regime-adapted** strategy parameters."
-            )
-            if result.regime:
-                regime_label = result.regime.label
-                sub_label = result.regime.sub_type_label
-                desc = f"Detected: **{regime_label}**"
-                if sub_label:
-                    desc += f" / **{sub_label}**"
-                st.markdown(desc)
+        # ── Active Strategy ───────────────────────────────────────────────
+        if strategy_type == "Active Strategy":
+            tab_auto, tab_custom = st.tabs([
+                "Quick Backtest (Recommended)",
+                "Custom Backtest",
+            ])
 
-            run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
-
-            if run_quick or st.session_state.get("_quick_bt_ran"):
-                st.session_state["_quick_bt_ran"] = True
-                try:
-                    bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
-                        ticker=ticker,
-                        period=period,
-                        interval="1d",
-                        start=None,
-                        end=None,
-                        trading_mode_str="auto",
-                        config_hash=cfg_h,
-                        config_data=cfg_data,
-                    )
-                except Exception as e:
-                    st.error(f"Backtest failed: {e}")
-                    return
-
-                render_backtest_section(
-                    bt_result, result, cfg, trading_mode_val, assessment_dict,
+            # ── Quick Backtest ────────────────────────────────────────────
+            with tab_auto:
+                st.markdown(
+                    f"Run a backtest using the **{period}** classification period with "
+                    f"**auto-detected** trading mode and **regime-adapted** strategy parameters."
                 )
+                if result.regime:
+                    regime_label = result.regime.label
+                    sub_label = result.regime.sub_type_label
+                    desc = f"Detected: **{regime_label}**"
+                    if sub_label:
+                        desc += f" / **{sub_label}**"
+                    st.markdown(desc)
 
-        # ── Tab 2: Custom Backtest ────────────────────────────────────────
-        with tab_custom:
-            st.markdown("Configure custom parameters for the backtest.")
+                run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
 
-            custom_params = render_custom_backtest_params()
-
-            # Validate day_trading + interval
-            if custom_params["objective"] == "day_trading" and not is_intraday(custom_params["interval"]):
-                st.error(
-                    "The **day_trading** objective requires an intraday interval "
-                    "(1m, 5m, 15m, 30m, 1h). Please change the interval."
-                )
-            else:
-                run_custom = st.button(
-                    "Run Custom Backtest", type="primary", key="run_custom_bt",
-                )
-
-                if run_custom or st.session_state.get("_custom_bt_ran"):
-                    st.session_state["_custom_bt_ran"] = True
-
-                    # Re-read config (may have been mutated by param editors)
-                    custom_cfg_data = st.session_state["config_data"]
-                    custom_cfg_h = _config_hash(custom_cfg_data)
-                    custom_cfg = Config.from_dict(custom_cfg_data)
-
+                if run_quick or st.session_state.get("_quick_bt_ran"):
+                    st.session_state["_quick_bt_ran"] = True
                     try:
                         bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
                             ticker=ticker,
-                            period=custom_params["period"],
-                            interval=custom_params["interval"],
-                            start=custom_params["start"],
-                            end=custom_params["end"],
-                            trading_mode_str=custom_params["trading_mode"],
-                            config_hash=custom_cfg_h,
-                            config_data=custom_cfg_data,
+                            period=period,
+                            interval="1d",
+                            start=None,
+                            end=None,
+                            trading_mode_str="auto",
+                            config_hash=cfg_h,
+                            config_data=cfg_data,
                         )
                     except Exception as e:
                         st.error(f"Backtest failed: {e}")
                         return
 
-                    # For custom backtest, run analysis on the custom period/interval
-                    # for the recommendation engine
-                    try:
-                        custom_result, _ = load_analysis(
-                            ticker=ticker,
-                            period=custom_params["period"],
-                            interval=custom_params["interval"],
-                            start=custom_params["start"],
-                            end=custom_params["end"],
-                            config_hash=custom_cfg_h,
-                            config_data=custom_cfg_data,
-                        )
-                    except Exception:
-                        custom_result = result  # fall back to overview analysis
-
                     render_backtest_section(
-                        bt_result, custom_result, custom_cfg,
-                        trading_mode_val, assessment_dict,
+                        bt_result, result, cfg, trading_mode_val, assessment_dict,
                     )
 
-        # ── Tab 3: DCA Backtest ───────────────────────────────────────────
-        with tab_dca:
+            # ── Custom Backtest ───────────────────────────────────────────
+            with tab_custom:
+                st.markdown("Configure custom parameters for the backtest.")
+
+                custom_params = render_custom_backtest_params()
+
+                # Validate day_trading + interval
+                if custom_params["objective"] == "day_trading" and not is_intraday(custom_params["interval"]):
+                    st.error(
+                        "The **day_trading** objective requires an intraday interval "
+                        "(1m, 5m, 15m, 30m, 1h). Please change the interval."
+                    )
+                else:
+                    run_custom = st.button(
+                        "Run Custom Backtest", type="primary", key="run_custom_bt",
+                    )
+
+                    if run_custom or st.session_state.get("_custom_bt_ran"):
+                        st.session_state["_custom_bt_ran"] = True
+
+                        # Re-read config (may have been mutated by param editors)
+                        custom_cfg_data = st.session_state["config_data"]
+                        custom_cfg_h = _config_hash(custom_cfg_data)
+                        custom_cfg = Config.from_dict(custom_cfg_data)
+
+                        try:
+                            bt_result, trading_mode_val, assessment_dict, _ = load_backtest(
+                                ticker=ticker,
+                                period=custom_params["period"],
+                                interval=custom_params["interval"],
+                                start=custom_params["start"],
+                                end=custom_params["end"],
+                                trading_mode_str=custom_params["trading_mode"],
+                                config_hash=custom_cfg_h,
+                                config_data=custom_cfg_data,
+                            )
+                        except Exception as e:
+                            st.error(f"Backtest failed: {e}")
+                            return
+
+                        # For custom backtest, run analysis on the custom period/interval
+                        # for the recommendation engine
+                        try:
+                            custom_result, _ = load_analysis(
+                                ticker=ticker,
+                                period=custom_params["period"],
+                                interval=custom_params["interval"],
+                                start=custom_params["start"],
+                                end=custom_params["end"],
+                                config_hash=custom_cfg_h,
+                                config_data=custom_cfg_data,
+                            )
+                        except Exception:
+                            custom_result = result  # fall back to overview analysis
+
+                        render_backtest_section(
+                            bt_result, custom_result, custom_cfg,
+                            trading_mode_val, assessment_dict,
+                        )
+
+        # ── DCA Strategy ──────────────────────────────────────────────────
+        else:
             st.markdown(
                 "Simulate **Dollar Cost Averaging** — periodic fixed-amount "
                 "purchases with optional dip-weighted or score-integrated "

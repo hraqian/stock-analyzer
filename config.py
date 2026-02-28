@@ -223,9 +223,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "backtest": {
         "initial_cash": 100_000.0,
-        "commission_per_trade": 0.0,
-        "commission_pct": 0.0,             # percentage commission per leg (0.001 = 0.1%)
-        "commission_mode": "additive",     # "additive" (flat + pct) or "max" (whichever is greater)
+        "commission_per_trade": 10.0,
+        "commission_pct": 0.005,            # percentage commission per leg (0.005 = 0.5%)
+        "commission_mode": "max",           # "additive" (flat + pct) or "max" (whichever is greater)
         "slippage_pct": 0.001,
         "warmup_bars": 50,
         "max_warmup_ratio": 0.5,       # warmup can't exceed this fraction of total data
