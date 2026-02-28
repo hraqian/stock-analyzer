@@ -297,10 +297,12 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `gaps.volume_surge_mult` | 1.5 | Volume > avg * this = surge (for gap classification) |
 | `gaps.trend_period` | 20 | EMA period for trend detection and total return window |
 | `gaps.consolidation_lookback` | 20 | BB width window and rolling high/low window for breakaway detection |
+| `gaps.bb_percentile_lookback` | 40 | Longer window for BB width percentile ranking (decoupled from `consolidation_lookback` to avoid self-referential noise) |
 | `gaps.consolidation_bb_percentile` | 50 | BB width rank <= this percentile = narrow range (consolidation) |
 | `gaps.consolidation_min_bars` | 5 | At least this many of the last `consolidation_lookback` bars must have narrow BB width for sustained consolidation |
 | `gaps.exhaustion_min_return` | 0.10 | Total return over `trend_period` bars must exceed this (10%) for exhaustion eligibility |
 | `gaps.exhaustion_min_distance_pct` | 0.05 | Price must be >= this fraction from its EMA (5%) for exhaustion eligibility |
+| `gaps.exhaustion_min_trend_bars` | 40 | Trend maturity check: return over this many bars must also be in the gap direction (prevents fast early trends from triggering exhaustion) |
 | `gaps.intraday_min_gap_pct` | 0.01 | Minimum gap size auto-applied when intraday data is detected (1%) |
 | `gaps.type_weights.common` | 0.3 | Weight of common gaps in net signal |
 | `gaps.type_weights.runaway` | 0.7 | Weight of runaway (continuation) gaps |

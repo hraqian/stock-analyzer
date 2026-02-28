@@ -9,12 +9,14 @@ Detects price gaps between consecutive bars and classifies them:
 
 Classification follows standard TA definitions (Murphy, Bulkowski):
   - Breakaway: requires prior consolidation detected via Bollinger Band width
-    percentile (K of M bars below threshold) PLUS a volume surge PLUS the gap
-    clears the consolidation range (open > rolling high for gap-up, open <
-    rolling low for gap-down).
-  - Exhaustion: requires an extended prior trend (total return over trend window
-    exceeds threshold) PLUS price is extended from its MA (distance > threshold)
-    PLUS a volume surge and a gap *with* that trend.  Reversal warning.
+    percentile (K of M bars below threshold, percentile ranked over a separate
+    longer window to avoid self-referential noise) PLUS a volume surge PLUS
+    the gap clears the consolidation range (open > rolling high for gap-up,
+    open < rolling low for gap-down).
+  - Exhaustion: requires an extended, *mature* prior trend — total return over
+    the trend window exceeds threshold, return over a longer maturity window is
+    also in the same direction, AND price is extended from its MA — PLUS a
+    volume surge and a gap *with* that trend.  Reversal warning.
 
 Scoring:
   Recent bullish gaps → score > 5 (bullish)
@@ -65,17 +67,25 @@ class GapPattern(BasePattern):
 
         # Consolidation params (BB width based)
         consolidation_lookback = int(self.config.get("consolidation_lookback", 20))
+        # Separate, longer window for BB width percentile ranking to avoid
+        # self-referential noise when consolidation_lookback is short.
+        bb_percentile_lookback = int(
+            self.config.get("bb_percentile_lookback", consolidation_lookback * 2)
+        )
         consolidation_bb_percentile = float(
             self.config.get("consolidation_bb_percentile", 50)
         )
         consolidation_min_bars = int(self.config.get("consolidation_min_bars", 5))
 
-        # Exhaustion params (total return + MA distance)
+        # Exhaustion params (total return + MA distance + trend maturity)
         exhaustion_min_return = float(
             self.config.get("exhaustion_min_return", 0.10)
         )
         exhaustion_min_distance_pct = float(
             self.config.get("exhaustion_min_distance_pct", 0.05)
+        )
+        exhaustion_min_trend_bars = int(
+            self.config.get("exhaustion_min_trend_bars", 40)
         )
 
         # Intraday guardrail (#6)
@@ -105,8 +115,9 @@ class GapPattern(BasePattern):
         bb_std = close.rolling(window=consolidation_lookback).std(ddof=0)
         bb_width = (2.0 * bb_std) / bb_ma.where(bb_ma != 0, np.nan)
 
-        # Rolling percentile rank of BB width (low = tight range = consolidation)
-        bb_width_rank = bb_width.rolling(window=consolidation_lookback).apply(
+        # Rolling percentile rank of BB width over a longer window to avoid
+        # self-referential noise (bb_percentile_lookback >= consolidation_lookback).
+        bb_width_rank = bb_width.rolling(window=bb_percentile_lookback).apply(
             lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100
             if len(x) >= 2 else 50.0,
             raw=False,
@@ -128,6 +139,18 @@ class GapPattern(BasePattern):
 
         # Total return over trend_period for exhaustion detection (#2)
         total_return = close.pct_change(periods=trend_period)
+
+        # Trend maturity: return over the longer maturity window AND return
+        # over the first half of that window.  Both must be in the gap
+        # direction.  A fast rip from a flat base fails because the first-half
+        # return is ~0 while all the gains are in the second half.
+        maturity_return = close.pct_change(periods=exhaustion_min_trend_bars)
+        half_maturity = max(1, exhaustion_min_trend_bars // 2)
+        # Return from (maturity_bars ago) to (half_maturity bars ago):
+        #   close[i - half] / close[i - maturity] - 1
+        first_half_return = close.shift(half_maturity).pct_change(
+            periods=exhaustion_min_trend_bars - half_maturity
+        )
 
         # Distance from MA as fraction of price (#5)
         ma_distance_pct = (close - ema).abs() / ema.where(ema != 0, np.nan)
@@ -207,7 +230,7 @@ class GapPattern(BasePattern):
             in_consolidation = sustained_consolidation and clears_range
 
             # -------------------------------------------------------
-            # Exhaustion detection (#2 + #5)
+            # Exhaustion detection (#2 + #5 + maturity)
             # -------------------------------------------------------
             prior_return = (
                 float(total_return.iloc[i - 1])
@@ -228,7 +251,32 @@ class GapPattern(BasePattern):
             )
             extended_from_ma = prior_ma_dist >= exhaustion_min_distance_pct
 
-            extended_trend = extended_by_return and extended_from_ma
+            # Trend maturity: the return over the full maturity window must be
+            # in the gap direction AND the first half of the maturity window
+            # must also show movement in the same direction.  A 20-bar rip
+            # from a flat base fails: full 40-bar return is positive, but
+            # bars 40-ago to 20-ago were flat → first_half ≈ 0.
+            prior_maturity = (
+                float(maturity_return.iloc[i - 1])
+                if i >= 1 and not np.isnan(maturity_return.iloc[i - 1])
+                else 0.0
+            )
+            prior_first_half = (
+                float(first_half_return.iloc[i - 1])
+                if i >= 1 and not np.isnan(first_half_return.iloc[i - 1])
+                else 0.0
+            )
+            # Both halves must agree with gap direction
+            mature_trend = (
+                (direction == "up"
+                 and prior_maturity > 0
+                 and prior_first_half > 0)
+                or (direction == "down"
+                    and prior_maturity < 0
+                    and prior_first_half < 0)
+            )
+
+            extended_trend = extended_by_return and extended_from_ma and mature_trend
 
             # -------------------------------------------------------
             # Classification (textbook-aligned)

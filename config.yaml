@@ -178,10 +178,12 @@ gaps:
   volume_surge_mult: 1.5      # volume > avg * this = surge (for gap classification)
   trend_period: 20            # EMA period for trend detection
   consolidation_lookback: 20  # BB width window & rolling high/low window for breakaway
+  bb_percentile_lookback: 40  # longer window for BB width percentile ranking (avoids self-referential noise)
   consolidation_bb_percentile: 50  # BB width rank <= this = narrow (consolidation)
   consolidation_min_bars: 5   # K of last M bars must be narrow for sustained consolidation
   exhaustion_min_return: 0.10 # total return over trend_period for exhaustion (10%)
   exhaustion_min_distance_pct: 0.05  # price must be >= 5% from MA for exhaustion
+  exhaustion_min_trend_bars: 40  # return over this many bars must also confirm direction (maturity check)
   intraday_min_gap_pct: 0.01  # min gap size auto-applied on intraday data (1%)
   type_weights:               # weight of each gap type in net signal
     common: 0.3
@@ -813,7 +815,9 @@ objectives:
       lookback: 15
       trend_period: 10
       consolidation_lookback: 15
+      bb_percentile_lookback: 30
       consolidation_min_bars: 4
+      exhaustion_min_trend_bars: 30
     volume_range:
       period: 10
       lookback: 8
@@ -920,9 +924,11 @@ objectives:
       min_gap_pct: 0.003        # smaller gaps matter intraday
       trend_period: 7
       consolidation_lookback: 15
+      bb_percentile_lookback: 30
       consolidation_min_bars: 3
       exhaustion_min_return: 0.06
       exhaustion_min_distance_pct: 0.03
+      exhaustion_min_trend_bars: 25
       intraday_min_gap_pct: 0.008
     volume_range:
       period: 10
