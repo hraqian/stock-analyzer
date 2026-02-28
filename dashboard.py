@@ -52,6 +52,7 @@ from engine.strategy import StrategyContext
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 from scanner import Scanner, ScanResult
+from analysis.dividend import DividendScanner, DividendScanResult
 from data.universes import available as available_universes, load as load_universe
 
 # ---------------------------------------------------------------------------
@@ -3255,11 +3256,12 @@ def render_backtest_section(
 # Scanner tab
 # ---------------------------------------------------------------------------
 
-SCANNER_UNIVERSES = ["dow30", "nasdaq100", "sp500"]
+SCANNER_UNIVERSES = ["dow30", "nasdaq100", "sp500", "tsx60"]
 SCANNER_UNIVERSE_LABELS = {
     "dow30": "Dow 30",
     "nasdaq100": "NASDAQ 100",
     "sp500": "S&P 500",
+    "tsx60": "S&P/TSX 60",
 }
 
 def _signal_color(signal: str) -> str:
@@ -3413,6 +3415,373 @@ def _build_scanner_results_html(
 def render_scanner() -> None:
     """Render the stock universe scanner tab."""
     st.header("Stock Universe Scanner")
+
+    # ── Scan mode selector ────────────────────────────────────────────────
+    scan_mode = st.radio(
+        "Scan Mode",
+        ["Technical", "Dividend"],
+        index=0,
+        horizontal=True,
+        key="scan_mode",
+        help="**Technical**: full indicator + pattern analysis with BUY/SELL/HOLD signals. "
+             "**Dividend**: rank stocks by dividend quality (yield, growth, consistency, streak).",
+    )
+
+    if scan_mode == "Dividend":
+        _render_dividend_scanner()
+    else:
+        _render_technical_scanner()
+
+
+def _render_dividend_scanner() -> None:
+    """Render the dividend scanner UI."""
+    st.markdown(
+        "Scan a stock universe for **dividend quality** — ranked by yield, "
+        "growth rate, payout consistency, and increase streak."
+    )
+
+    cfg = _get_config()
+    div_cfg = dict(cfg.section("dividend"))
+
+    # ── Controls row 1: universe, top N, workers ──────────────────────────
+    col_univ, col_top, col_workers = st.columns([2, 1, 1])
+
+    with col_univ:
+        universe_options = SCANNER_UNIVERSES
+        universe_labels = [
+            f"{SCANNER_UNIVERSE_LABELS[u]} ({len(load_universe(u))} tickers)"
+            for u in universe_options
+        ]
+        universe_idx = st.selectbox(
+            "Universe",
+            range(len(universe_options)),
+            format_func=lambda i: universe_labels[i],
+            index=0,
+            key="div_scanner_universe",
+        )
+        universe = universe_options[universe_idx]
+
+    with col_top:
+        top_n = st.number_input(
+            "Top N",
+            min_value=1,
+            max_value=100,
+            value=20,
+            step=1,
+            key="div_scanner_top_n",
+        )
+
+    with col_workers:
+        workers = st.number_input(
+            "Workers",
+            min_value=1,
+            max_value=16,
+            value=int(div_cfg.get("max_workers", 8)),
+            step=1,
+            key="div_scanner_workers",
+        )
+
+    # ── Sidebar-style controls: thresholds & weights ──────────────────────
+    with st.expander("Dividend Thresholds & Weights", expanded=False):
+        tc1, tc2, tc3 = st.columns(3)
+
+        with tc1:
+            st.markdown("**Minimum Thresholds**")
+            min_yield = st.slider(
+                "Minimum Yield (%)",
+                min_value=0.0,
+                max_value=10.0,
+                value=float(div_cfg.get("min_yield", 0.01)) * 100,
+                step=0.25,
+                key="div_min_yield",
+                help="Exclude stocks with yield below this percentage.",
+            ) / 100.0
+
+            max_yield = st.slider(
+                "Maximum Yield (%)",
+                min_value=5.0,
+                max_value=30.0,
+                value=float(div_cfg.get("max_yield", 0.15)) * 100,
+                step=0.5,
+                key="div_max_yield",
+                help="Exclude stocks with yield above this (likely distressed).",
+            ) / 100.0
+
+            min_consistency = st.slider(
+                "Minimum Consistency",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(div_cfg.get("min_consistency", 0.50)),
+                step=0.05,
+                key="div_min_consistency",
+                help="Fraction of years that must have paid a dividend.",
+            )
+
+            min_streak = st.number_input(
+                "Minimum Streak (years)",
+                min_value=0,
+                max_value=50,
+                value=int(div_cfg.get("min_streak", 0)),
+                step=1,
+                key="div_min_streak",
+            )
+
+        with tc2:
+            st.markdown("**Scoring Weights**")
+            w_yield = st.slider(
+                "Yield Weight",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(div_cfg.get("weights", {}).get("yield", 0.30)),
+                step=0.05,
+                key="div_w_yield",
+            )
+            w_growth = st.slider(
+                "Growth Weight",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(div_cfg.get("weights", {}).get("growth", 0.30)),
+                step=0.05,
+                key="div_w_growth",
+            )
+            w_consistency = st.slider(
+                "Consistency Weight",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(div_cfg.get("weights", {}).get("consistency", 0.20)),
+                step=0.05,
+                key="div_w_consistency",
+            )
+            w_streak = st.slider(
+                "Streak Weight",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(div_cfg.get("weights", {}).get("streak", 0.20)),
+                step=0.05,
+                key="div_w_streak",
+            )
+
+        with tc3:
+            st.markdown("**Data Parameters**")
+            cagr_years = st.number_input(
+                "CAGR Years",
+                min_value=2,
+                max_value=20,
+                value=int(div_cfg.get("cagr_years", 5)),
+                step=1,
+                key="div_cagr_years",
+                help="Years of history for dividend growth rate calculation.",
+            )
+            consistency_years = st.number_input(
+                "Consistency Years",
+                min_value=2,
+                max_value=30,
+                value=int(div_cfg.get("consistency_years", 10)),
+                step=1,
+                key="div_consistency_years",
+                help="Years of history for payout consistency evaluation.",
+            )
+
+    # ── Build override config from UI controls ────────────────────────────
+    ui_div_cfg = dict(div_cfg)  # start from config.yaml values
+    ui_div_cfg["min_yield"] = min_yield
+    ui_div_cfg["max_yield"] = max_yield
+    ui_div_cfg["min_consistency"] = min_consistency
+    ui_div_cfg["min_streak"] = min_streak
+    ui_div_cfg["cagr_years"] = cagr_years
+    ui_div_cfg["consistency_years"] = consistency_years
+    ui_div_cfg["max_workers"] = int(workers)
+    ui_div_cfg["weights"] = {
+        "yield": w_yield,
+        "growth": w_growth,
+        "consistency": w_consistency,
+        "streak": w_streak,
+    }
+
+    # ── Run button ────────────────────────────────────────────────────────
+    run_scan = st.button("Run Dividend Scan", type="primary", key="run_div_scan_btn")
+
+    if run_scan:
+        tickers = load_universe(universe)
+        total = len(tickers)
+
+        progress_bar = st.progress(0, text=f"Scanning {SCANNER_UNIVERSE_LABELS[universe]} for dividends...")
+        status_text = st.empty()
+
+        def _on_progress(
+            completed: int, total_: int, ticker: str, result: DividendScanResult | None,
+        ) -> None:
+            pct = completed / total_
+            if result and not result.error:
+                status_text.markdown(
+                    f"**[{completed}/{total_}]** {ticker} "
+                    f"— yield {result.current_yield*100:.1f}%, "
+                    f"score {result.dividend_score:.1f}"
+                )
+            elif result and result.error:
+                status_text.markdown(
+                    f"**[{completed}/{total_}]** {ticker} — *error*"
+                )
+            progress_bar.progress(pct, text=f"Scanning... {completed}/{total_}")
+
+        import time as _time
+
+        scanner = DividendScanner(
+            tickers=tickers,
+            div_cfg=ui_div_cfg,
+            on_progress=_on_progress,
+        )
+
+        t0 = _time.time()
+        scanner.run()
+        elapsed = _time.time() - t0
+
+        progress_bar.empty()
+        status_text.empty()
+
+        st.session_state["div_scanner_results"] = scanner.results
+        st.session_state["div_scanner_summary"] = scanner.summary()
+        st.session_state["div_scanner_elapsed"] = elapsed
+        st.session_state["div_scanner_cfg"] = ui_div_cfg
+
+    # ── Display results ───────────────────────────────────────────────────
+    if "div_scanner_results" in st.session_state:
+        results_all: list[DividendScanResult] = st.session_state["div_scanner_results"]
+        summary = st.session_state["div_scanner_summary"]
+        elapsed = st.session_state["div_scanner_elapsed"]
+        stored_cfg = st.session_state.get("div_scanner_cfg", ui_div_cfg)
+
+        # Summary metrics
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Scanned", f"{summary['scanned']}")
+        c2.metric("Passed Filters", f"{summary['passed_filters']}")
+        c3.metric("Avg Yield", f"{summary['avg_yield']*100:.1f}%")
+        c4.metric("Avg Score", f"{summary['avg_score']:.1f}")
+        c5.metric("Time", f"{elapsed:.1f}s")
+
+        if summary["errors"] > 0:
+            st.warning(f"{summary['errors']} ticker(s) failed during scan.")
+
+        # Build ranked list using stored config for filtering
+        temp_scanner = DividendScanner([], stored_cfg)
+        temp_scanner._results = results_all
+        top_results = temp_scanner.top(top_n)
+
+        st.markdown(
+            _build_dividend_results_html(top_results, f"Top {len(top_results)} Dividend Stocks"),
+            unsafe_allow_html=True,
+        )
+
+        # Expandable: errors
+        err_results = [r for r in results_all if r.error]
+        if err_results:
+            with st.expander(f"Failed Tickers ({len(err_results)})", expanded=False):
+                for r in err_results:
+                    st.text(f"{r.ticker}: {r.error[:120]}")
+
+
+def _build_dividend_results_html(
+    results: list[DividendScanResult],
+    title: str,
+) -> str:
+    """Build an HTML table for dividend scanner results."""
+    if not results:
+        return "<p style='color:#666;padding:8px 0;'>No dividend stocks passed the filters.</p>"
+
+    header = (
+        "<tr>"
+        "<th style='width:30px;'>#</th>"
+        "<th>Ticker</th>"
+        "<th>Name</th>"
+        "<th>Sector</th>"
+        "<th style='text-align:right;'>Price</th>"
+        "<th style='text-align:right;'>Yield</th>"
+        "<th style='text-align:right;'>Annual Dividend</th>"
+        "<th style='text-align:right;'>CAGR</th>"
+        "<th style='text-align:right;'>Consistency</th>"
+        "<th style='text-align:right;'>Streak</th>"
+        "<th>Yield Score</th>"
+        "<th>Growth Score</th>"
+        "<th>Consistency Score</th>"
+        "<th>Streak Score</th>"
+        "<th>Composite Score</th>"
+        "</tr>"
+    )
+
+    rows_html = []
+    for i, r in enumerate(results, 1):
+        cagr_str = f"{r.dividend_cagr*100:+.1f}%" if r.dividend_cagr is not None else "N/A"
+        cagr_color = (
+            COLOR_BULLISH if r.dividend_cagr is not None and r.dividend_cagr > 0.03
+            else COLOR_BEARISH if r.dividend_cagr is not None and r.dividend_cagr < 0
+            else "#aaa"
+        )
+
+        # Yield color coding
+        if r.current_yield >= 0.06:
+            yield_color = COLOR_BULLISH
+        elif r.current_yield >= 0.03:
+            yield_color = COLOR_NEUTRAL
+        else:
+            yield_color = "#aaa"
+
+        # Currency-aware price formatting
+        price_prefix = "C$" if r.currency == "CAD" else "$"
+
+        row = (
+            f"<tr>"
+            f"<td style='color:#888;'>{i}</td>"
+            f"<td style='font-weight:700;'>{r.ticker}</td>"
+            f"<td style='color:#ccc;max-width:180px;overflow:hidden;text-overflow:ellipsis;"
+            f"white-space:nowrap;'>{r.name}</td>"
+            f"<td style='color:#888;'>{r.sector}</td>"
+            f"<td style='text-align:right;font-family:monospace;'>"
+            f"{price_prefix}{r.current_price:,.2f}</td>"
+            f"<td style='text-align:right;color:{yield_color};font-weight:600;'>"
+            f"{r.current_yield*100:.2f}%</td>"
+            f"<td style='text-align:right;font-family:monospace;'>"
+            f"{price_prefix}{r.annual_dividend:.2f}</td>"
+            f"<td style='text-align:right;color:{cagr_color};'>{cagr_str}</td>"
+            f"<td style='text-align:right;'>{r.payout_consistency*100:.0f}%</td>"
+            f"<td style='text-align:right;font-weight:600;'>{r.increase_streak}yr</td>"
+            f"<td>{score_bar_html(r.yield_score, width=50)}</td>"
+            f"<td>{score_bar_html(r.growth_score, width=50)}</td>"
+            f"<td>{score_bar_html(r.consistency_score, width=50)}</td>"
+            f"<td>{score_bar_html(r.streak_score, width=50)}</td>"
+            f"<td>{score_bar_html(r.dividend_score, width=70)}</td>"
+            f"</tr>"
+        )
+        rows_html.append(row)
+
+    style = (
+        "<style>"
+        ".div-scanner-table { width:100%; border-collapse:collapse; font-size:0.80rem; }"
+        ".div-scanner-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
+        "  color:#aaa; font-weight:600; white-space:nowrap; }"
+        ".div-scanner-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
+        "  vertical-align:middle; }"
+        ".div-scanner-table tr:hover td { background:#1a1d2e; }"
+        "</style>"
+    )
+
+    title_color = COLOR_BULLISH
+
+    return (
+        f"{style}"
+        f"<div style='border-left:3px solid {title_color};padding-left:12px;"
+        f"margin:12px 0 4px 0;'>"
+        f"<span style='color:{title_color};font-weight:700;font-size:1rem;'>"
+        f"{title}</span></div>"
+        f"<div style='overflow-x:auto;'>"
+        f'<table class="div-scanner-table">'
+        f"<thead>{header}</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        f"</table></div>"
+    )
+
+
+def _render_technical_scanner() -> None:
+    """Render the original technical scanner UI."""
     st.markdown(
         "Scan a predefined stock universe through the full analysis + strategy "
         "pipeline to surface the top **BUY** and **SELL** candidates."
