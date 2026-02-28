@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -80,6 +81,16 @@ class WatchlistClosedTrade:
 
 
 @dataclass
+class DCAContext:
+    """DCA (Dollar-Cost Averaging) context for a single ticker."""
+    dip_pct: float              # percentage drop from rolling high
+    tier: str                   # "normal", "mild_dip", "strong_dip", "extreme_dip"
+    multiplier: float           # DCA allocation multiplier for this tier
+    rolling_high: float         # the rolling high price used for dip detection
+    is_dca_buy: bool            # True if this is a good DCA buy opportunity (any dip)
+
+
+@dataclass
 class WatchlistSignal:
     """Signal output for a single ticker scan."""
     ticker: str
@@ -94,6 +105,7 @@ class WatchlistSignal:
     current_price: float
     signal_notes: str = ""
     error: str | None = None
+    dca: DCAContext | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +403,13 @@ class WatchlistMonitor:
             # 11. Determine action
             action = self._determine_action(order.signal, pos)
 
+            # 12. Compute DCA context (dip tier, multiplier, buy guidance)
+            try:
+                dca_ctx = self._compute_dca_context(df)
+            except Exception:
+                logger.warning("DCA context failed for %s", ticker, exc_info=True)
+                dca_ctx = None
+
             return WatchlistSignal(
                 ticker=ticker,
                 signal=order.signal,
@@ -403,6 +422,7 @@ class WatchlistMonitor:
                 position=pos,
                 current_price=current_price,
                 signal_notes=order.notes,
+                dca=dca_ctx,
             )
 
         except Exception as exc:
@@ -579,6 +599,69 @@ class WatchlistMonitor:
         else:
             # gate mode — just return indicator composite
             return ind_composite
+
+    def _compute_dca_context(self, df: pd.DataFrame) -> DCAContext:
+        """Compute DCA dip-detection context for a ticker.
+
+        Reuses the same dip-detection logic as the DCA backtester:
+        rolling high over a configurable lookback window, dip percentage,
+        and tier classification with multipliers.
+
+        All thresholds and multipliers are read from config → dca section.
+        """
+        dca_cfg = self._cfg.section("dca")
+
+        # Dip thresholds
+        dt = dca_cfg.get("dip_thresholds", {})
+        lookback_days = int(dt.get("lookback_days", 30))
+        mild_drop_pct = float(dt.get("mild_drop_pct", 5.0))
+        strong_drop_pct = float(dt.get("strong_drop_pct", 10.0))
+        extreme_drop_pct = float(dt.get("extreme_drop_pct", 20.0))
+
+        # Multipliers
+        ml = dca_cfg.get("multipliers", {})
+        mult_normal = float(ml.get("normal", 1.0))
+        mult_mild = float(ml.get("mild_dip", 1.5))
+        mult_strong = float(ml.get("strong_dip", 2.0))
+        mult_extreme = float(ml.get("extreme_dip", 3.0))
+
+        # Safety
+        safety = dca_cfg.get("safety", {})
+        max_multiplier = float(safety.get("max_multiplier", 3.0))
+
+        # Compute rolling high
+        close = df["close"].values
+        rolling_high = float(
+            pd.Series(close).rolling(window=lookback_days, min_periods=1).max().iloc[-1]
+        )
+
+        # Compute dip percentage
+        current_price = float(close[-1])
+        if rolling_high > 0:
+            dip_pct = max(0.0, (rolling_high - current_price) / rolling_high * 100.0)
+        else:
+            dip_pct = 0.0
+
+        # Classify tier
+        if dip_pct >= extreme_drop_pct:
+            tier, multiplier = "extreme_dip", mult_extreme
+        elif dip_pct >= strong_drop_pct:
+            tier, multiplier = "strong_dip", mult_strong
+        elif dip_pct >= mild_drop_pct:
+            tier, multiplier = "mild_dip", mult_mild
+        else:
+            tier, multiplier = "normal", mult_normal
+
+        # Clamp multiplier
+        multiplier = min(multiplier, max_multiplier)
+
+        return DCAContext(
+            dip_pct=round(dip_pct, 1),
+            tier=tier,
+            multiplier=multiplier,
+            rolling_high=round(rolling_high, 2),
+            is_dca_buy=dip_pct >= mild_drop_pct,
+        )
 
     def _determine_action(
         self, signal: Signal, position: WatchlistPosition | None,

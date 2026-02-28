@@ -449,9 +449,9 @@ def main() -> None:
         monitor = WatchlistMonitor(wl_provider, cfg)
         signals = monitor.scan(wl_tickers)
 
-        # Signal table
+        # ── Active Strategy Signal table ──────────────────────────────────
         table = Table(
-            title="Watchlist Signals",
+            title="Active Strategy Signals",
             show_header=True,
             header_style="bold",
             expand=True,
@@ -459,9 +459,9 @@ def main() -> None:
         table.add_column("Ticker", style="bold white", no_wrap=True)
         table.add_column("Signal", justify="center", no_wrap=True)
         table.add_column("Action", no_wrap=True)
-        table.add_column("Eff.", justify="right", no_wrap=True)
-        table.add_column("Ind.", justify="right", no_wrap=True)
-        table.add_column("Pat.", justify="right", no_wrap=True)
+        table.add_column("Score", justify="right", no_wrap=True)
+        table.add_column("Indicator", justify="right", no_wrap=True)
+        table.add_column("Pattern", justify="right", no_wrap=True)
         table.add_column("Regime", no_wrap=True)
         table.add_column("Price", justify="right", no_wrap=True)
         table.add_column("Position", no_wrap=True)
@@ -512,6 +512,62 @@ def main() -> None:
         console.print()
         console.print(table)
 
+        # ── DCA Context table ─────────────────────────────────────────────
+        dca_signals = [s for s in signals if s.dca is not None]
+        if dca_signals:
+            dca_table = Table(
+                title="DCA Context",
+                show_header=True,
+                header_style="bold",
+                expand=True,
+            )
+            dca_table.add_column("Ticker", style="bold white", no_wrap=True)
+            dca_table.add_column("Price", justify="right", no_wrap=True)
+            dca_table.add_column("Rolling High", justify="right", no_wrap=True)
+            dca_table.add_column("Dip %", justify="right", no_wrap=True)
+            dca_table.add_column("Tier", no_wrap=True)
+            dca_table.add_column("Multiplier", justify="right", no_wrap=True)
+            dca_table.add_column("DCA Guidance", no_wrap=True)
+
+            for sig in dca_signals:
+                dca = sig.dca
+                tier_display = dca.tier.replace("_", " ").title()
+
+                # Color the tier
+                if dca.tier == "extreme_dip":
+                    tier_str = f"[bold red]{tier_display}[/bold red]"
+                    guidance = f"[bold red]DCA Buy ({tier_display})[/bold red]"
+                elif dca.tier == "strong_dip":
+                    tier_str = f"[red]{tier_display}[/red]"
+                    guidance = f"[red]DCA Buy ({tier_display})[/red]"
+                elif dca.tier == "mild_dip":
+                    tier_str = f"[yellow]{tier_display}[/yellow]"
+                    guidance = f"[yellow]DCA Buy ({tier_display})[/yellow]"
+                else:
+                    tier_str = f"[dim]{tier_display}[/dim]"
+                    guidance = "[dim]Normal DCA[/dim]"
+
+                # Color the dip percentage
+                if dca.dip_pct >= 10:
+                    dip_str = f"[red]{dca.dip_pct:.1f}%[/red]"
+                elif dca.dip_pct >= 5:
+                    dip_str = f"[yellow]{dca.dip_pct:.1f}%[/yellow]"
+                else:
+                    dip_str = f"[dim]{dca.dip_pct:.1f}%[/dim]"
+
+                dca_table.add_row(
+                    sig.ticker,
+                    f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
+                    f"${dca.rolling_high:,.2f}",
+                    dip_str,
+                    tier_str,
+                    f"{dca.multiplier:.1f}x",
+                    guidance,
+                )
+
+            console.print()
+            console.print(dca_table)
+
         # Show signal notes for actionable signals
         actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
         if actionable:
@@ -524,7 +580,14 @@ def main() -> None:
                     f"{sig.action}"
                 )
                 if sig.signal_notes:
-                    console.print(f"    [dim]{sig.signal_notes}[/dim]")
+                    console.print(f"    [dim]Active Strategy: {sig.signal_notes}[/dim]")
+                if sig.dca and sig.dca.is_dca_buy:
+                    tier_display = sig.dca.tier.replace("_", " ")
+                    console.print(
+                        f"    [dim]DCA: {tier_display} "
+                        f"({sig.dca.dip_pct:.1f}% dip, "
+                        f"{sig.dca.multiplier:.1f}x multiplier)[/dim]"
+                    )
 
         # Save state
         monitor.save_state()

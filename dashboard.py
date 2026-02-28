@@ -50,7 +50,7 @@ from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LABELS
 from engine.strategy import Signal, StrategyContext
-from engine.watchlist import WatchlistMonitor, WatchlistSignal, WatchlistState
+from engine.watchlist import WatchlistMonitor, WatchlistSignal, WatchlistState, DCAContext
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 from scanner import Scanner, ScanResult
@@ -1787,43 +1787,43 @@ def render_sidebar() -> dict:
     wl = data.setdefault("watchlist", {})
     wl_tickers: list[str] = [t.upper() for t in wl.get("tickers", []) if t.strip()]
 
-    # Display current watchlist
-    if wl_tickers:
-        st.sidebar.caption(f"Monitoring: {', '.join(wl_tickers)}")
-    else:
-        st.sidebar.caption("No tickers in watchlist.")
-
-    # Add ticker
-    col_add, col_btn = st.sidebar.columns([3, 1])
-    with col_add:
+    # Add ticker via form (Enter key submits)
+    with st.sidebar.form("wl_add_form", clear_on_submit=True):
         new_wl_ticker = st.text_input(
             "Add ticker", value="", key="sidebar_wl_add",
-            label_visibility="collapsed", placeholder="Add ticker...",
+            label_visibility="collapsed", placeholder="Type ticker and press Enter",
         ).upper().strip()
-    with col_btn:
-        if st.button("+", key="sidebar_wl_add_btn", help="Add ticker to watchlist"):
-            if new_wl_ticker and new_wl_ticker not in wl_tickers:
+        submitted = st.form_submit_button(
+            "Add to Watchlist", use_container_width=True,
+        )
+        if submitted and new_wl_ticker:
+            if new_wl_ticker not in wl_tickers:
                 wl_tickers.append(new_wl_ticker)
                 wl["tickers"] = wl_tickers
                 st.session_state["config_data"] = data
+                # Clear stale scan results so the tab shows the updated list
+                st.session_state.pop("wl_signals", None)
                 st.toast(f"Added {new_wl_ticker} to watchlist")
                 st.rerun()
+            else:
+                st.toast(f"{new_wl_ticker} is already in the watchlist")
 
-    # Remove ticker buttons
+    # Display current watchlist with remove buttons
     if wl_tickers:
-        remove_ticker = st.sidebar.selectbox(
-            "Remove ticker",
-            options=[""] + wl_tickers,
-            key="sidebar_wl_remove",
-            label_visibility="collapsed",
-            format_func=lambda x: "Remove ticker..." if x == "" else f"Remove {x}",
-        )
-        if remove_ticker:
-            wl_tickers.remove(remove_ticker)
-            wl["tickers"] = wl_tickers
-            st.session_state["config_data"] = data
-            st.toast(f"Removed {remove_ticker} from watchlist")
-            st.rerun()
+        st.sidebar.caption(f"Monitoring: {', '.join(wl_tickers)}")
+        for t in wl_tickers:
+            if st.sidebar.button(
+                f"Remove {t}", key=f"sidebar_wl_rm_{t}",
+                use_container_width=True,
+            ):
+                wl_tickers.remove(t)
+                wl["tickers"] = wl_tickers
+                st.session_state["config_data"] = data
+                st.session_state.pop("wl_signals", None)
+                st.toast(f"Removed {t} from watchlist")
+                st.rerun()
+    else:
+        st.sidebar.caption("No tickers in watchlist.")
 
     return {
         "ticker": ticker,
@@ -5145,6 +5145,9 @@ def render_watchlist() -> None:
         )
         return
 
+    # ── Current watchlist ─────────────────────────────────────────────────
+    st.caption(f"Watching: **{', '.join(wl_tickers)}**")
+
     # ── Settings ──────────────────────────────────────────────────────────
     col_period, col_mode, col_scan = st.columns([2, 2, 1])
     with col_period:
@@ -5192,6 +5195,7 @@ def render_watchlist() -> None:
 
     signals: list[WatchlistSignal] = st.session_state.get("wl_signals", [])
     if not signals:
+        st.info("Click **Scan Now** to fetch signals for your watchlist.")
         return
 
     # ── Signal summary metrics ────────────────────────────────────────────
@@ -5206,8 +5210,12 @@ def render_watchlist() -> None:
     m3.metric("Hold", hold_count)
     m4.metric("Errors", error_count)
 
-    # ── Signal table ──────────────────────────────────────────────────────
-    st.subheader("Signals")
+    # ── Active Strategy Signal table ──────────────────────────────────────
+    st.subheader("Active Strategy Signals")
+    st.caption(
+        "Signals from the score-based active trading strategy "
+        "(same logic as the backtest engine)."
+    )
 
     # Build DataFrame for display
     rows = []
@@ -5252,6 +5260,53 @@ def render_watchlist() -> None:
         },
     )
 
+    # ── DCA Context table ─────────────────────────────────────────────────
+    dca_signals = [s for s in signals if s.dca is not None]
+    if dca_signals:
+        st.subheader("DCA Context")
+        st.caption(
+            "Dollar-cost averaging guidance based on dip detection. "
+            "Shows how far each ticker has dropped from its rolling high "
+            "and the recommended DCA allocation multiplier."
+        )
+
+        dca_rows = []
+        for sig in dca_signals:
+            dca = sig.dca
+            assert dca is not None  # guarded by filter above
+
+            tier_display = dca.tier.replace("_", " ").title()
+            if dca.is_dca_buy:
+                guidance = f"DCA Buy ({tier_display})"
+            else:
+                guidance = "Normal DCA"
+
+            dca_rows.append({
+                "Ticker": sig.ticker,
+                "Price": f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
+                "Rolling High": f"${dca.rolling_high:,.2f}",
+                "Dip %": f"{dca.dip_pct:.1f}%",
+                "Tier": tier_display,
+                "Multiplier": f"{dca.multiplier:.1f}x",
+                "DCA Guidance": guidance,
+            })
+
+        df_dca = _pd.DataFrame(dca_rows)
+        st.dataframe(
+            df_dca,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Ticker": st.column_config.TextColumn(width="small"),
+                "Price": st.column_config.TextColumn(width="small"),
+                "Rolling High": st.column_config.TextColumn(width="small"),
+                "Dip %": st.column_config.TextColumn(width="small"),
+                "Tier": st.column_config.TextColumn(width="small"),
+                "Multiplier": st.column_config.TextColumn(width="small"),
+                "DCA Guidance": st.column_config.TextColumn(width="medium"),
+            },
+        )
+
     # ── Actionable signals detail ─────────────────────────────────────────
     actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
     if actionable:
@@ -5263,6 +5318,8 @@ def render_watchlist() -> None:
                 f"@ ${sig.current_price:,.2f} — {sig.action}",
                 expanded=True,
             ):
+                # Active strategy scores
+                st.markdown("**Active Strategy**")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Effective Score", f"{sig.effective_score:.1f}")
                 c2.metric("Indicator Score", f"{sig.indicator_score:.1f}")
@@ -5276,6 +5333,23 @@ def render_watchlist() -> None:
 
                 if sig.signal_notes:
                     st.caption(f"Strategy notes: {sig.signal_notes}")
+
+                # DCA context
+                if sig.dca:
+                    st.markdown("**DCA Context**")
+                    d1, d2, d3, d4 = st.columns(4)
+                    d1.metric("Dip from High", f"{sig.dca.dip_pct:.1f}%")
+                    d2.metric("Tier", sig.dca.tier.replace("_", " ").title())
+                    d3.metric("Multiplier", f"{sig.dca.multiplier:.1f}x")
+                    d4.metric(
+                        "Rolling High",
+                        f"${sig.dca.rolling_high:,.2f}",
+                    )
+                    if sig.dca.is_dca_buy:
+                        st.success(
+                            f"DCA opportunity: {sig.dca.tier.replace('_', ' ')} — "
+                            f"consider allocating {sig.dca.multiplier:.1f}x your normal DCA amount."
+                        )
 
                 if sig.position:
                     pnl = sig.position.unrealized_pnl_pct(sig.current_price)
