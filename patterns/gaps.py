@@ -10,13 +10,14 @@ Detects price gaps between consecutive bars and classifies them:
 Classification follows standard TA definitions (Murphy, Bulkowski):
   - Breakaway: requires prior consolidation detected via Bollinger Band width
     percentile (K of M bars below threshold, percentile ranked over a separate
-    longer window to avoid self-referential noise) PLUS a volume surge PLUS
-    the gap clears the consolidation range (open > rolling high for gap-up,
-    open < rolling low for gap-down).
+    longer window to avoid self-referential noise) PLUS near-zero net return
+    over the consolidation window (weak-trend gate) PLUS a volume surge PLUS
+    the gap clears the consolidation *close* range (open > rolling close-high
+    for gap-up, open < rolling close-low for gap-down).
   - Exhaustion: requires an extended, *mature* prior trend — total return over
     the trend window exceeds threshold, return over a longer maturity window is
-    also in the same direction, AND price is extended from its MA — PLUS a
-    volume surge and a gap *with* that trend.  Reversal warning.
+    also in the same direction (both halves), AND price is extended from its
+    MA — PLUS a volume surge and a gap *with* that trend.  Reversal warning.
 
 Scoring:
   Recent bullish gaps → score > 5 (bullish)
@@ -76,6 +77,11 @@ class GapPattern(BasePattern):
             self.config.get("consolidation_bb_percentile", 50)
         )
         consolidation_min_bars = int(self.config.get("consolidation_min_bars", 5))
+        # Weak-trend gate: absolute return over consolidation window must be
+        # below this for true consolidation (prevents labeling low-vol trends).
+        consolidation_max_return = float(
+            self.config.get("consolidation_max_return", 0.03)
+        )
 
         # Exhaustion params (total return + MA distance + trend maturity)
         exhaustion_min_return = float(
@@ -132,10 +138,16 @@ class GapPattern(BasePattern):
             window=consolidation_lookback, min_periods=1
         ).sum()
 
-        # Rolling high/low of close over consolidation window (for breakaway
-        # directional check #1)
-        rolling_high = df["high"].rolling(window=consolidation_lookback).max()
-        rolling_low = df["low"].rolling(window=consolidation_lookback).min()
+        # Net return over consolidation window — true consolidation has near-
+        # zero net return (price hasn't gone anywhere).
+        consolidation_return = close.pct_change(periods=consolidation_lookback).abs()
+
+        # Rolling high/low of *close* over consolidation window for the
+        # breakaway range-clearing check.  Using close (not high/low) avoids
+        # counting wick-clearing gaps as breakaways in instruments with long
+        # wicks.
+        rolling_high = close.rolling(window=consolidation_lookback).max()
+        rolling_low = close.rolling(window=consolidation_lookback).min()
 
         # Total return over trend_period for exhaustion detection (#2)
         total_return = close.pct_change(periods=trend_period)
@@ -199,7 +211,7 @@ class GapPattern(BasePattern):
             )
 
             # -------------------------------------------------------
-            # Consolidation detection (#3 + #4)
+            # Consolidation detection (#3 + #4 + weak-trend gate)
             # -------------------------------------------------------
             # At least consolidation_min_bars of the last consolidation_lookback
             # bars must have had narrow BB width.
@@ -210,24 +222,34 @@ class GapPattern(BasePattern):
             )
             sustained_consolidation = prior_narrow >= consolidation_min_bars
 
+            # Weak-trend gate: absolute return over the consolidation window
+            # must be small.  A low-vol trending stock has narrow BB width but
+            # non-zero net return — not true consolidation.
+            prior_consol_ret = (
+                float(consolidation_return.iloc[i - 1])
+                if i >= 1 and not np.isnan(consolidation_return.iloc[i - 1])
+                else 0.0
+            )
+            weak_trend = prior_consol_ret <= consolidation_max_return
+
             # Directional breakaway check (#1): gap must clear the
-            # consolidation range (rolling high/low measured at bar before gap).
+            # consolidation close range (rolling close high/low at bar before gap).
             prior_rolling_high = (
                 float(rolling_high.iloc[i - 1])
                 if i >= 1 and not np.isnan(rolling_high.iloc[i - 1])
-                else prev_high
+                else prev_close
             )
             prior_rolling_low = (
                 float(rolling_low.iloc[i - 1])
                 if i >= 1 and not np.isnan(rolling_low.iloc[i - 1])
-                else prev_low
+                else prev_close
             )
             clears_range = (
                 (direction == "up" and curr_open > prior_rolling_high)
                 or (direction == "down" and curr_open < prior_rolling_low)
             )
 
-            in_consolidation = sustained_consolidation and clears_range
+            in_consolidation = sustained_consolidation and weak_trend and clears_range
 
             # -------------------------------------------------------
             # Exhaustion detection (#2 + #5 + maturity)

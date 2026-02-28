@@ -300,6 +300,7 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `gaps.bb_percentile_lookback` | 40 | Longer window for BB width percentile ranking (decoupled from `consolidation_lookback` to avoid self-referential noise) |
 | `gaps.consolidation_bb_percentile` | 50 | BB width rank <= this percentile = narrow range (consolidation) |
 | `gaps.consolidation_min_bars` | 5 | At least this many of the last `consolidation_lookback` bars must have narrow BB width for sustained consolidation |
+| `gaps.consolidation_max_return` | 0.03 | Absolute return over `consolidation_lookback` bars must be <= this (3%) for true consolidation (weak-trend gate; prevents low-vol trends from triggering breakaway) |
 | `gaps.exhaustion_min_return` | 0.10 | Total return over `trend_period` bars must exceed this (10%) for exhaustion eligibility |
 | `gaps.exhaustion_min_distance_pct` | 0.05 | Price must be >= this fraction from its EMA (5%) for exhaustion eligibility |
 | `gaps.exhaustion_min_trend_bars` | 40 | Trend maturity check: return over this many bars must also be in the gap direction (prevents fast early trends from triggering exhaustion) |

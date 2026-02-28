@@ -254,6 +254,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bb_percentile_lookback": 40,        # longer window for BB width percentile ranking
         "consolidation_bb_percentile": 50,   # BB width rank <= this = narrow (consolidation)
         "consolidation_min_bars": 5,         # K of last M bars must be narrow for breakaway
+        "consolidation_max_return": 0.03,    # abs return over consolidation window must be <= this (weak-trend gate)
         "exhaustion_min_return": 0.10,       # total return over trend_period for exhaustion (10%)
         "exhaustion_min_distance_pct": 0.05, # price must be >= 5% from MA for exhaustion
         "exhaustion_min_trend_bars": 40,     # return over this many bars must also confirm direction
@@ -717,6 +718,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "consolidation_lookback": 15,
                 "bb_percentile_lookback": 30,
                 "consolidation_min_bars": 3,
+                "consolidation_max_return": 0.015,
                 "exhaustion_min_return": 0.06,
                 "exhaustion_min_distance_pct": 0.03,
                 "exhaustion_min_trend_bars": 25,
