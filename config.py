@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -1404,3 +1405,32 @@ class Config:
             with open(output_path, "w") as fh:
                 yaml.dump(DEFAULT_CONFIG, fh, default_flow_style=False, sort_keys=False)
             print(f"Default config written to: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# Utility — persist watchlist tickers to config.yaml
+# ---------------------------------------------------------------------------
+
+def save_watchlist_tickers(config_path: str | Path, tickers: list[str]) -> None:
+    """Write the watchlist ticker list to config.yaml using targeted regex
+    replacement so that comments and formatting are preserved.
+
+    Raises ``FileNotFoundError`` if *config_path* does not exist.
+    """
+    config_path = Path(config_path)
+    content = config_path.read_text()
+
+    if tickers:
+        ticker_list = ", ".join(f'"{t.upper()}"' for t in tickers)
+        new_line = f"  tickers: [{ticker_list}]"
+    else:
+        new_line = "  tickers: []"
+
+    content = re.sub(
+        r"(^watchlist:\s*\n(?:.*\n)*?)  tickers:.*",
+        rf"\g<1>{new_line}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    config_path.write_text(content)

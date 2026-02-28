@@ -42,7 +42,7 @@ from analysis.analyzer import Analyzer, AnalysisResult
 from analysis.multi_timeframe import _build_percentile_window
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
-from config import Config, DEFAULT_CONFIG
+from config import Config, save_watchlist_tickers, DEFAULT_CONFIG
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.dca import DCABacktester, DCAResult
@@ -113,6 +113,8 @@ def _get_config() -> Config:
     if data is None:
         cfg = Config.load()
         st.session_state["config_data"] = cfg.to_dict()
+        if cfg.path:
+            st.session_state["config_path"] = cfg.path
         return cfg
     return Config.from_dict(data)
 
@@ -122,6 +124,8 @@ def _init_config_data() -> None:
     if "config_data" not in st.session_state:
         cfg = Config.load()
         st.session_state["config_data"] = cfg.to_dict()
+        if cfg.path:
+            st.session_state["config_path"] = cfg.path
 
 
 def _apply_objective_to_session(objective: str | None) -> None:
@@ -1799,13 +1803,20 @@ def render_sidebar() -> dict:
             label_visibility="collapsed", placeholder="Add ticker symbol",
         ).upper().strip()
         submitted = st.form_submit_button(
-            "Add to Watchlist", use_container_width=True,
+            "Add to Watchlist", width="stretch",
         )
         if submitted and new_wl_ticker:
             if new_wl_ticker not in wl_tickers:
                 wl_tickers.append(new_wl_ticker)
                 wl["tickers"] = wl_tickers
                 st.session_state["config_data"] = data
+                # Persist to config.yaml
+                cfg_path = st.session_state.get("config_path")
+                if cfg_path:
+                    try:
+                        save_watchlist_tickers(cfg_path, wl_tickers)
+                    except Exception:
+                        pass  # best-effort; session state is still updated
                 # Clear stale scan results so the tab shows the updated list
                 st.session_state.pop("wl_signals", None)
                 st.toast(f"Added {new_wl_ticker} to watchlist")
@@ -1819,11 +1830,17 @@ def render_sidebar() -> dict:
         for t in wl_tickers:
             if st.sidebar.button(
                 f"Remove {t}", key=f"sidebar_wl_rm_{t}",
-                use_container_width=True,
-            ):
+                width="stretch",            ):
                 wl_tickers.remove(t)
                 wl["tickers"] = wl_tickers
                 st.session_state["config_data"] = data
+                # Persist to config.yaml
+                cfg_path = st.session_state.get("config_path")
+                if cfg_path:
+                    try:
+                        save_watchlist_tickers(cfg_path, wl_tickers)
+                    except Exception:
+                        pass  # best-effort
                 st.session_state.pop("wl_signals", None)
                 st.toast(f"Removed {t} from watchlist")
                 st.rerun()
@@ -5177,7 +5194,7 @@ def render_watchlist() -> None:
             "Scan Now",
             key="wl_scan_btn",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     # ── Run scan ──────────────────────────────────────────────────────────
@@ -5249,7 +5266,7 @@ def render_watchlist() -> None:
     # Color-code with Streamlit column config
     st.dataframe(
         df_signals,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Ticker": st.column_config.TextColumn(width="small"),
@@ -5299,7 +5316,7 @@ def render_watchlist() -> None:
         df_dca = _pd.DataFrame(dca_rows)
         st.dataframe(
             df_dca,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Ticker": st.column_config.TextColumn(width="small"),
@@ -5387,7 +5404,7 @@ def render_watchlist() -> None:
             })
 
         df_pos = _pd.DataFrame(pos_rows)
-        st.dataframe(df_pos, use_container_width=True, hide_index=True)
+        st.dataframe(df_pos, width="stretch", hide_index=True)
 
     if wl_state and wl_state.closed_trades:
         with st.expander(f"Closed Trades ({len(wl_state.closed_trades)})"):
@@ -5404,7 +5421,7 @@ def render_watchlist() -> None:
                     "Reason": ct.exit_reason,
                 })
             df_ct = _pd.DataFrame(ct_rows)
-            st.dataframe(df_ct, use_container_width=True, hide_index=True)
+            st.dataframe(df_ct, width="stretch", hide_index=True)
 
 
 # ---------------------------------------------------------------------------

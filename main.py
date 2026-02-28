@@ -377,7 +377,7 @@ def main() -> None:
 
     # ── --watchlist-add / --watchlist-remove ───────────────────────────────────
     if args.watchlist_add or args.watchlist_remove:
-        import re as _re
+        from config import save_watchlist_tickers
         wl_tickers = [t.upper() for t in cfg.section("watchlist").get("tickers", [])]
 
         if args.watchlist_add:
@@ -396,27 +396,10 @@ def main() -> None:
             else:
                 console.print(f"[yellow]{t}[/yellow] is not in the watchlist.")
 
-        # Persist to config.yaml — targeted line replacement to preserve formatting
+        # Persist to config.yaml
         if cfg.path:
             try:
-                with open(cfg.path) as fh:
-                    content = fh.read()
-                # Build the new tickers line
-                if wl_tickers:
-                    ticker_list = ", ".join(f'"{t}"' for t in wl_tickers)
-                    new_line = f"  tickers: [{ticker_list}]"
-                else:
-                    new_line = "  tickers: []"
-                # Replace the existing tickers line under the watchlist section
-                content = _re.sub(
-                    r"(^watchlist:\s*\n(?:.*\n)*?)  tickers:.*",
-                    rf"\g<1>{new_line}",
-                    content,
-                    count=1,
-                    flags=_re.MULTILINE,
-                )
-                with open(cfg.path, "w") as fh:
-                    fh.write(content)
+                save_watchlist_tickers(cfg.path, wl_tickers)
                 console.print(f"[dim]Saved to {cfg.path}[/dim]")
             except Exception as exc:
                 console.print(f"[red]Failed to save config:[/red] {exc}")
