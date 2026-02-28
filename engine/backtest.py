@@ -1261,21 +1261,25 @@ class BacktestEngine:
         warmup = result.warmup_bars
         trading_curve = curve[warmup:] if warmup < len(curve) else curve
 
-        # Annualized return — use only post-warmup trading bars
+        # Annualized return — use post-warmup equity window so the time
+        # period matches the return period (no warmup inflation).
         if len(trading_curve) >= 2 and result.initial_cash > 0:
             n_bars = len(trading_curve)
             years = n_bars / bars_per_year
-            if years > 0:
-                total_return = result.final_equity / result.initial_cash
+            start_equity = trading_curve[0]["equity"]
+            end_equity = trading_curve[-1]["equity"]
+            if years > 0 and start_equity > 0:
+                total_return = end_equity / start_equity
                 if total_return > 0:
                     result.annualized_return_pct = (
                         (total_return ** (1 / years) - 1) * 100
                     )
                 else:
-                    # Equity went negative — compute via total return
+                    # Equity went negative — compute via total return pct
+                    pct = (end_equity - start_equity) / start_equity * 100
                     result.annualized_return_pct = (
-                        ((1 + result.total_return_pct / 100) ** (1 / years) - 1) * 100
-                        if result.total_return_pct > -100
+                        ((1 + pct / 100) ** (1 / years) - 1) * 100
+                        if pct > -100
                         else -100.0
                     )
 
