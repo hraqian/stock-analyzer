@@ -18,6 +18,7 @@ BUILTIN_UNIVERSES: dict[str, str] = {
     "dow30": "dow30",
     "nasdaq100": "nasdaq100",
     "sp500": "sp500",
+    "tsx60": "tsx60",
 }
 
 
