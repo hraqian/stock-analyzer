@@ -37,7 +37,7 @@ from data.universes import load as load_universe
 from data.yahoo import YahooFinanceProvider
 from engine.regime import RegimeSubType, RegimeType
 from engine.score_strategy import ScoreBasedStrategy
-from engine.suitability import TradingMode
+from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.strategy import StrategyContext
 
 
@@ -209,9 +209,17 @@ class Scanner:
         strat_cfg = self._cfg.section("strategy")
         regime_adapt = self._cfg.section("regime").get("strategy_adaptation", {})
 
+        # ── Determine trading mode via suitability analysis ──────────────
+        trading_mode = TradingMode.LONG_SHORT  # fallback
+        try:
+            suit_assessment = SuitabilityAnalyzer(self._cfg).assess(df)
+            trading_mode = suit_assessment.mode
+        except Exception:
+            pass  # graceful degradation — default to LONG_SHORT
+
         strategy = ScoreBasedStrategy(
             params=strat_cfg,
-            trading_mode=TradingMode.LONG_SHORT,
+            trading_mode=trading_mode,
             regime_adaptation=regime_adapt,
         )
         strategy.on_start({"ticker": ticker, "recommendation": True})

@@ -2752,13 +2752,17 @@ def compute_recommendation(
     strat_cfg = cfg.section("strategy")
     regime_adapt = cfg.section("regime").get("strategy_adaptation", {})
 
-    # ── Determine trading mode from backtest (or default to long_short) ──
-    trading_mode = TradingMode.LONG_SHORT
-    if bt_result is not None and hasattr(bt_result, "regime"):
-        # The backtest was run with a specific trading mode; we could
-        # recover it from the engine, but we don't store it on the result.
-        # Use auto mode (long_short) for a fresh-entry recommendation.
-        pass
+    # ── Determine trading mode via suitability analysis ────────────────────
+    # Auto-detect whether the stock is suitable for long/short, long-only,
+    # or hold-only rather than blindly assuming long_short.
+    df_for_suit = result.df
+    trading_mode = TradingMode.LONG_SHORT  # fallback
+    if df_for_suit is not None and not df_for_suit.empty:
+        try:
+            suit_assessment = SuitabilityAnalyzer(cfg).assess(df_for_suit)
+            trading_mode = suit_assessment.mode
+        except Exception:
+            pass  # graceful degradation — default to LONG_SHORT
 
     # ── Create a fresh strategy instance (no accumulated state) ──────────
     strategy = ScoreBasedStrategy(
