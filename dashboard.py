@@ -3458,11 +3458,12 @@ def _render_dca_params(cfg: Config) -> dict:
 
 def _create_dca_equity_chart(
     dca_result: DCAResult,
-    bt_result: BacktestResult | None = None,
 ) -> go.Figure:
-    """Build a Plotly equity chart for DCA results, optionally overlaying
-    the active strategy equity curve for comparison."""
-    fig = go.Figure()
+    """Build a Plotly equity chart for DCA results with stock price on
+    a secondary y-axis for direct comparison."""
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     # DCA portfolio value
     if dca_result.equity_curve:
@@ -3474,36 +3475,22 @@ def _create_dca_equity_chart(
             x=dates, y=values,
             name="DCA Portfolio Value",
             line=dict(color="#2196F3", width=2),
-        ))
+        ), secondary_y=False)
         fig.add_trace(go.Scatter(
             x=dates, y=invested,
             name="Total Invested",
             line=dict(color="#9E9E9E", width=1, dash="dash"),
-        ))
+        ), secondary_y=False)
 
-    # Stock price (buy & hold) overlay — shows what the total invested
-    # amount would be worth if it had all been invested lump-sum on day 1.
+    # Stock price on secondary y-axis — actual closing price so it aligns
+    # with the price chart at the top of the page.
     if dca_result.equity_curve and "price" in dca_result.equity_curve[0]:
         prices = [e["price"] for e in dca_result.equity_curve]
-        first_price = prices[0]
-        total_invested = dca_result.total_invested
-        if first_price > 0 and total_invested > 0:
-            stock_growth = [total_invested * (p / first_price) for p in prices]
-            fig.add_trace(go.Scatter(
-                x=dates, y=stock_growth,
-                name="Stock Price (Buy & Hold)",
-                line=dict(color="#E91E63", width=2, dash="dashdot"),
-            ))
-
-    # Active strategy overlay
-    if bt_result and bt_result.equity_curve:
-        bt_dates = [e["date"] for e in bt_result.equity_curve]
-        bt_values = [e["equity"] for e in bt_result.equity_curve]
         fig.add_trace(go.Scatter(
-            x=bt_dates, y=bt_values,
-            name="Active Strategy Equity",
-            line=dict(color="#FF9800", width=2, dash="dot"),
-        ))
+            x=dates, y=prices,
+            name="Stock Price",
+            line=dict(color="#E91E63", width=2, dash="dashdot"),
+        ), secondary_y=True)
 
     # Mark dip purchases
     dip_buys = [p for p in dca_result.purchases if p.multiplier > 1.0]
@@ -3519,17 +3506,18 @@ def _create_dca_equity_chart(
             ),
             text=[f"{p.tier} ({p.multiplier}x, -{p.dip_pct}%)" for p in dip_buys],
             hoverinfo="text+x+y",
-        ))
+        ), secondary_y=False)
 
     fig.update_layout(
         title="DCA Equity Curve",
         xaxis_title="Date",
-        yaxis_title="Value ($)",
         hovermode="x unified",
         template="plotly_white",
         height=450,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+    fig.update_yaxes(title_text="Portfolio Value ($)", secondary_y=False)
+    fig.update_yaxes(title_text="Stock Price ($)", secondary_y=True)
     return fig
 
 
@@ -3658,7 +3646,7 @@ def render_dca_section(
 
     # ── Equity chart ─────────────────────────────────────────────────────
     st.subheader("Equity Curve")
-    eq_fig = _create_dca_equity_chart(dca_result, bt_result)
+    eq_fig = _create_dca_equity_chart(dca_result)
     st.plotly_chart(eq_fig, width="stretch")
 
     # ── Comparison vs active strategy ────────────────────────────────────
@@ -5132,7 +5120,7 @@ def main() -> None:
             dca_period = st.selectbox(
                 "DCA Period",
                 dca_period_opts,
-                index=dca_period_opts.index("5y"),
+                index=dca_period_opts.index("2y"),
                 key="dca_period",
             )
 
