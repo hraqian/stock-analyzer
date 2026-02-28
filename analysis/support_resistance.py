@@ -61,6 +61,14 @@ def calculate_levels(df: pd.DataFrame, config: dict, current_price: float) -> di
         key=lambda x: x.price,
     )[:num_levels]
 
+    # Ensure level_type is consistent with the list each level landed in.
+    # Clustering may have flipped the type via majority vote, but the
+    # authoritative classification is price vs current_price.
+    for lvl in support:
+        lvl.level_type = "support"
+    for lvl in resistance:
+        lvl.level_type = "resistance"
+
     return {"support": support, "resistance": resistance}
 
 
