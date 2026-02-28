@@ -2,14 +2,21 @@
 patterns/gaps.py — Gap detection and classification.
 
 Detects price gaps between consecutive bars and classifies them:
-  - Common gap:     small gap within a consolidation range (neutral)
-  - Breakaway gap:  gap away from a support/resistance level with high volume (directional)
+  - Common gap:     small gap, no special context (neutral)
+  - Breakaway gap:  gap out of a prior consolidation with high volume (directional)
   - Runaway gap:    gap in direction of an existing trend (continuation)
-  - Exhaustion gap: gap at the end of a trend with extreme volume (reversal warning)
+  - Exhaustion gap: gap at the end of an extended trend with high volume (reversal warning)
+
+Classification follows standard TA definitions (Murphy, Bulkowski):
+  - Breakaway: requires prior consolidation (low ATR% relative to recent history)
+    plus a volume surge.  The gap breaks out of the range — directional signal.
+  - Exhaustion: requires an extended prior trend (consecutive same-direction bars)
+    plus a volume surge and a gap *with* that trend.  Reversal warning.
 
 Scoring:
   Recent bullish gaps → score > 5 (bullish)
   Recent bearish gaps → score < 5 (bearish)
+  Exhaustion gaps get inverse scoring (gap up = bearish warning, gap down = bullish).
   No gaps → 5.0 (neutral)
 
 Gaps are less meaningful on intraday data (overnight gaps don't appear
@@ -36,6 +43,11 @@ class GapPattern(BasePattern):
         volume_surge_mult = float(self.config.get("volume_surge_mult", 1.5))
         trend_period = int(self.config.get("trend_period", 20))
 
+        # New classifier params
+        consolidation_lookback = int(self.config.get("consolidation_lookback", 20))
+        consolidation_atr_percentile = float(self.config.get("consolidation_atr_percentile", 50))
+        trend_extension_bars = int(self.config.get("trend_extension_bars", 10))
+
         if len(df) < trend_period + 2:
             return {"gaps": [], "recent_gaps": [], "net_gap_score": 0.0}
 
@@ -45,6 +57,34 @@ class GapPattern(BasePattern):
         # Simple trend detection: EMA slope
         ema = df["close"].ewm(span=trend_period, adjust=False).mean()
         ema_slope = ema.diff()
+
+        # ATR% series for consolidation detection
+        tr = pd.concat([
+            df["high"] - df["low"],
+            (df["high"] - df["close"].shift(1)).abs(),
+            (df["low"] - df["close"].shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(window=min(trend_period, 14)).mean()
+        atr_pct = atr / df["close"]
+
+        # Rolling percentile rank of ATR% (how current ATR% compares to
+        # its own recent history).  Low rank = consolidation.
+        atr_pct_rank = atr_pct.rolling(window=consolidation_lookback).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100
+            if len(x) >= 2 else 50.0,
+            raw=False,
+        )
+
+        # Consecutive same-direction EMA slope bars (for extended trend detection)
+        slope_sign = np.sign(ema_slope.values)
+        consec_trend = np.zeros(len(df), dtype=int)
+        for i in range(1, len(df)):
+            if slope_sign[i] == slope_sign[i - 1] and slope_sign[i] != 0:
+                consec_trend[i] = consec_trend[i - 1] + 1
+            elif slope_sign[i] != 0:
+                consec_trend[i] = 1
+            else:
+                consec_trend[i] = 0
 
         gaps = []
         for i in range(1, len(df)):
@@ -68,7 +108,7 @@ class GapPattern(BasePattern):
             if gap_pct < min_gap_pct:
                 continue
 
-            # Classify the gap
+            # Context for classification
             avg_vol_val = float(avg_volume.iloc[i]) if not np.isnan(avg_volume.iloc[i]) else curr_volume
             volume_surge = curr_volume > (avg_vol_val * volume_surge_mult)
             slope_val = float(ema_slope.iloc[i]) if not np.isnan(ema_slope.iloc[i]) else 0.0
@@ -77,12 +117,30 @@ class GapPattern(BasePattern):
             trending_up = slope_val > 0
             trending_down = slope_val < 0
             gap_with_trend = (direction == "up" and trending_up) or (direction == "down" and trending_down)
-            gap_against_trend = (direction == "up" and trending_down) or (direction == "down" and trending_up)
 
-            # Classification heuristics
-            if volume_surge and gap_against_trend:
+            # Consolidation: ATR% rank at the bar *before* the gap,
+            # AND trend must be weak (not in a strong directional move).
+            # True consolidation = low volatility + no clear trend direction.
+            prior_atr_rank = float(atr_pct_rank.iloc[i - 1]) if (
+                i >= 1 and not np.isnan(atr_pct_rank.iloc[i - 1])
+            ) else 50.0
+            low_volatility = prior_atr_rank <= consolidation_atr_percentile
+
+            # Weak trend: few consecutive same-direction bars before the gap
+            prior_consec = int(consec_trend[i - 1]) if i >= 1 else 0
+            weak_trend = prior_consec < trend_extension_bars
+
+            in_consolidation = low_volatility and weak_trend
+
+            # Extended trend: consecutive same-direction slope bars before gap
+            extended_trend = prior_consec >= trend_extension_bars
+
+            # Classification (textbook-aligned)
+            if volume_surge and in_consolidation:
+                # Gap out of consolidation with volume = breakaway
                 gap_type = "breakaway"
-            elif volume_surge and gap_with_trend and gap_pct > min_gap_pct * 2:
+            elif volume_surge and extended_trend and gap_with_trend and gap_pct > min_gap_pct * 2:
+                # Late-stage gap in direction of extended trend with volume = exhaustion
                 gap_type = "exhaustion"
             elif gap_with_trend:
                 gap_type = "runaway"

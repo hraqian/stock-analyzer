@@ -296,6 +296,9 @@ stock is*. Each pattern scores 0-10, with 5.0 = no pattern / neutral.
 | `gaps.min_gap_pct` | 0.005 | Minimum gap size as fraction of price (0.5%) |
 | `gaps.volume_surge_mult` | 1.5 | Volume > avg * this = surge (for gap classification) |
 | `gaps.trend_period` | 20 | EMA period for trend detection |
+| `gaps.consolidation_lookback` | 20 | Bars of ATR% history for consolidation detection |
+| `gaps.consolidation_atr_percentile` | 50 | ATR% rank <= this percentile = consolidation (breakaway eligible) |
+| `gaps.trend_extension_bars` | 10 | Consecutive same-direction EMA slope bars required for extended trend (exhaustion eligible) |
 | `gaps.type_weights.common` | 0.3 | Weight of common gaps in net signal |
 | `gaps.type_weights.runaway` | 0.7 | Weight of runaway (continuation) gaps |
 | `gaps.type_weights.breakaway` | 1.0 | Weight of breakaway gaps |

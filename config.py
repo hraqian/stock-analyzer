@@ -250,6 +250,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_gap_pct": 0.005,
         "volume_surge_mult": 1.5,
         "trend_period": 20,
+        "consolidation_lookback": 20,       # bars of ATR% history for consolidation detection
+        "consolidation_atr_percentile": 50,  # ATR% rank <= this = consolidation (breakaway eligible)
+        "trend_extension_bars": 10,         # consecutive same-direction slope bars for exhaustion
         "type_weights": {
             "common": 0.3,
             "runaway": 0.7,

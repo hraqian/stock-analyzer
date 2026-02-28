@@ -177,6 +177,9 @@ gaps:
   min_gap_pct: 0.005          # minimum gap size as fraction of price (0.5%)
   volume_surge_mult: 1.5      # volume > avg * this = surge (for gap classification)
   trend_period: 20            # EMA period for trend detection
+  consolidation_lookback: 20  # bars of ATR% history for consolidation detection
+  consolidation_atr_percentile: 50  # ATR% rank <= this = consolidation (breakaway eligible)
+  trend_extension_bars: 10    # consecutive same-direction slope bars = extended trend (exhaustion eligible)
   type_weights:               # weight of each gap type in net signal
     common: 0.3
     runaway: 0.7
