@@ -71,10 +71,11 @@ class VolumeRangePattern(BasePattern):
             is_contraction = rr <= contraction_threshold and vr <= contraction_threshold
 
             if is_expansion:
-                if direction >= 0:
+                if direction > 0:
                     recent_expansions_bull += 1
-                else:
+                elif direction < 0:
                     recent_expansions_bear += 1
+                # direction == 0 (doji) — expansion with no direction; skip count
                 # Weight by magnitude
                 directional_sum += direction * rr * vr
             elif is_contraction:
@@ -88,7 +89,12 @@ class VolumeRangePattern(BasePattern):
         curr_dir = float(bar_direction[-1])
 
         if curr_rr >= expansion_threshold and curr_vr >= expansion_threshold:
-            regime = "expansion_bull" if curr_dir >= 0 else "expansion_bear"
+            if curr_dir > 0:
+                regime = "expansion_bull"
+            elif curr_dir < 0:
+                regime = "expansion_bear"
+            else:
+                regime = "neutral"  # doji expansion — no directional bias
         elif curr_rr <= contraction_threshold and curr_vr <= contraction_threshold:
             regime = "contraction"
         elif curr_rr >= expansion_threshold and curr_vr <= contraction_threshold:
