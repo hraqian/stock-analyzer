@@ -21,7 +21,7 @@ console = Console()
 
 def _score_color(score: float, cfg: dict) -> str:
     bearish_max = float(cfg.get("bearish_max", 3.5))
-    neutral_max = float(cfg.get("neutral_max", 6.5))
+    neutral_max = float(cfg.get("neutral_max", 6.0))
     if score <= bearish_max:
         return "red"
     if score <= neutral_max:
@@ -255,52 +255,53 @@ def render(result: "AnalysisResult", cfg: "Config") -> None:
         ))
 
     # ── Support & Resistance ─────────────────────────────────────────────────
-    sr_table = Table(
-        box=box.SIMPLE_HEAD,
-        show_header=True,
-        header_style="bold cyan",
-        expand=True,
-        padding=(0, 1),
-        title="[bold]Support & Resistance[/bold]",
-        title_style="bold white",
-    )
-    sr_table.add_column("Support Levels",    style="green",  min_width=22)
-    sr_table.add_column("Source",            style="dim",    min_width=14)
-    sr_table.add_column("  ",                min_width=3)
-    sr_table.add_column("Resistance Levels", style="red",    min_width=22)
-    sr_table.add_column("Source",            style="dim",    min_width=14)
+    if result.support_levels or result.resistance_levels:
+        sr_table = Table(
+            box=box.SIMPLE_HEAD,
+            show_header=True,
+            header_style="bold cyan",
+            expand=True,
+            padding=(0, 1),
+            title="[bold]Support & Resistance[/bold]",
+            title_style="bold white",
+        )
+        sr_table.add_column("Support Levels",    style="green",  min_width=22)
+        sr_table.add_column("Source",            style="dim",    min_width=14)
+        sr_table.add_column("  ",                min_width=3)
+        sr_table.add_column("Resistance Levels", style="red",    min_width=22)
+        sr_table.add_column("Source",            style="dim",    min_width=14)
 
-    max_rows = max(len(result.support_levels), len(result.resistance_levels))
-    for i in range(max_rows):
-        # Support
-        if i < len(result.support_levels):
-            sl = result.support_levels[i]
-            s_price = f"${sl.price:.{price_dp}f}"
-            if sl.label:
-                s_price += f"  [{sl.label}]"
-            s_source = sl.source
-        else:
-            s_price = ""
-            s_source = ""
+        max_rows = max(len(result.support_levels), len(result.resistance_levels))
+        for i in range(max_rows):
+            # Support
+            if i < len(result.support_levels):
+                sl = result.support_levels[i]
+                s_price = f"${sl.price:.{price_dp}f}"
+                if sl.label:
+                    s_price += f"  [{sl.label}]"
+                s_source = sl.source
+            else:
+                s_price = ""
+                s_source = ""
 
-        # Resistance
-        if i < len(result.resistance_levels):
-            rl = result.resistance_levels[i]
-            r_price = f"${rl.price:.{price_dp}f}"
-            if rl.label:
-                r_price += f"  [{rl.label}]"
-            r_source = rl.source
-        else:
-            r_price = ""
-            r_source = ""
+            # Resistance
+            if i < len(result.resistance_levels):
+                rl = result.resistance_levels[i]
+                r_price = f"${rl.price:.{price_dp}f}"
+                if rl.label:
+                    r_price += f"  [{rl.label}]"
+                r_source = rl.source
+            else:
+                r_price = ""
+                r_source = ""
 
-        sr_table.add_row(s_price, s_source, "│", r_price, r_source)
+            sr_table.add_row(s_price, s_source, "│", r_price, r_source)
 
-    console.print(sr_table)
+        console.print(sr_table)
 
     # ── Score Legend ─────────────────────────────────────────────────────────
     bearish_max = float(color_thresholds.get("bearish_max", 3.5))
-    neutral_max = float(color_thresholds.get("neutral_max", 6.5))
+    neutral_max = float(color_thresholds.get("neutral_max", 6.0))
     legend = (
         f"  Score legend:  "
         f"[red]0 – {bearish_max:.1f} Bearish[/red]  "

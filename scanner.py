@@ -212,7 +212,7 @@ class Scanner:
         # ── Determine trading mode via suitability analysis ──────────────
         trading_mode = TradingMode.LONG_SHORT  # fallback
         try:
-            suit_assessment = SuitabilityAnalyzer(self._cfg).assess(df)
+            suit_assessment = SuitabilityAnalyzer(self._cfg).assess(result.df)
             trading_mode = suit_assessment.mode
         except Exception:
             pass  # graceful degradation — default to LONG_SHORT

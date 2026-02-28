@@ -81,28 +81,38 @@ class Analyzer:
         registry = IndicatorRegistry(self._cfg, only=self._only)
         indicator_results = registry.run_all(df)
 
-        # 3. Run pattern detectors
-        pattern_registry = PatternRegistry(self._cfg)
-        pattern_results = pattern_registry.run_all(df)
-
-        # 4. Support / Resistance
-        sr_cfg = self._cfg.section("support_resistance")
-        sr = calculate_levels(df, sr_cfg, current_price)
-
-        # 5. Composite scores
+        # 5. Composite scores (indicators)
         scorer = CompositeScorer(self._cfg)
         composite = scorer.score(indicator_results)
 
-        pattern_scorer = PatternCompositeScorer(self._cfg)
-        pattern_composite = pattern_scorer.score(pattern_results)
+        # 3-4, 6. Skip patterns, S/R, and regime when the user asked for
+        # specific indicators only (--indicators flag).  Running them would
+        # be wasteful and, worse, display pattern signals alongside a
+        # deliberately limited indicator-only view.
+        if self._only is not None:
+            pattern_results: list[PatternResult] = []
+            sr: dict[str, list[SRLevel]] = {"support": [], "resistance": []}
+            pattern_composite: dict[str, Any] = {"overall": 5.0, "n_scored": 0, "details": []}
+            regime_assessment: RegimeAssessment | None = None
+        else:
+            # 3. Run pattern detectors
+            pattern_registry = PatternRegistry(self._cfg)
+            pattern_results = pattern_registry.run_all(df)
 
-        # 6. Regime classification
-        regime_assessment: RegimeAssessment | None = None
-        try:
-            classifier = RegimeClassifier(self._cfg)
-            regime_assessment = classifier.classify(df)
-        except Exception:
-            pass  # regime is optional — don't break analysis if it fails
+            # 4. Support / Resistance
+            sr_cfg = self._cfg.section("support_resistance")
+            sr = calculate_levels(df, sr_cfg, current_price)
+
+            pattern_scorer = PatternCompositeScorer(self._cfg)
+            pattern_composite = pattern_scorer.score(pattern_results)
+
+            # 6. Regime classification
+            regime_assessment = None
+            try:
+                classifier = RegimeClassifier(self._cfg)
+                regime_assessment = classifier.classify(df)
+            except Exception:
+                pass  # regime is optional — don't break analysis if it fails
 
         return AnalysisResult(
             ticker=ticker.upper(),

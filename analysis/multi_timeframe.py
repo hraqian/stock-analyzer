@@ -400,6 +400,8 @@ def _build_percentile_window(
     pat_weight: float = 0.3,
     boost_strength: float = 0.5,
     boost_dead_zone: float = 0.3,
+    start: str | None = None,
+    end: str | None = None,
 ) -> list[float]:
     """Build a rolling effective-score window for percentile signals.
 
@@ -411,6 +413,9 @@ def _build_percentile_window(
     produce fewer than *lookback_bars* samples from the available data,
     the step is reduced so the window has enough resolution for
     meaningful percentile ranking.
+
+    When *start*/*end* are provided (date-range mode), *period* is
+    ignored and the dates are forwarded to ``compute_score_timeseries``.
     """
     # Pre-fetch data to know how many post-warmup bars are available,
     # then clamp step so we get at least lookback_bars samples.
@@ -431,8 +436,8 @@ def _build_percentile_window(
         ticker=ticker,
         period=period,
         interval=interval,
-        start=None,
-        end=None,
+        start=start,
+        end=end,
         step=effective_step,
     )
     if df_scores.empty:
@@ -447,8 +452,8 @@ def _build_percentile_window(
             ticker=ticker,
             period=period,
             interval=interval,
-            start=None,
-            end=None,
+            start=start,
+            end=end,
             step=1,
         )
         if df_scores.empty:

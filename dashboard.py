@@ -2788,11 +2788,25 @@ def compute_recommendation(
             boost_dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
 
             provider = YahooFinanceProvider()
+
+            # result.period is a display label (e.g. "6mo" or "2024-01-01 → today").
+            # For date-range periods, parse start/end and pass them explicitly
+            # so the Yahoo fetch receives valid parameters.
+            _pct_period: str | None = result.period
+            _pct_start: str | None = None
+            _pct_end: str | None = None
+            if _pct_period and "\u2192" in _pct_period:
+                # Format: "YYYY-MM-DD → YYYY-MM-DD" or "YYYY-MM-DD → today"
+                parts = [p.strip() for p in _pct_period.split("\u2192")]
+                _pct_start = parts[0]
+                _pct_end = None if parts[1] == "today" else parts[1]
+                _pct_period = None  # use start/end instead
+
             window = _build_percentile_window(
                 cfg,
                 provider,
                 ticker=result.ticker,
-                period=result.period,
+                period=_pct_period,
                 interval="1d",
                 lookback_bars=lookback_bars,
                 step=pct_step,
@@ -2801,6 +2815,8 @@ def compute_recommendation(
                 pat_weight=pat_weight,
                 boost_strength=boost_strength,
                 boost_dead_zone=boost_dead_zone,
+                start=_pct_start,
+                end=_pct_end,
             )
             if window:
                 strategy.seed_score_window(window)
