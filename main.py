@@ -180,7 +180,7 @@ Streamlit dashboard:
     )
     parser.add_argument(
         "--dca-frequency",
-        choices=["weekly", "biweekly", "monthly"],
+        choices=["daily", "weekly", "biweekly", "monthly"],
         default=None,
         metavar="FREQ",
         help="DCA purchase frequency (default: from config.yaml dca.frequency)",
@@ -564,6 +564,13 @@ def main() -> None:
         table.add_row("Purchases", f"{dca_result.num_purchases}")
         table.add_row("Dip Purchases", f"{dca_result.num_dip_purchases}")
         table.add_row("Avg Multiplier", f"{dca_result.avg_multiplier:.2f}x")
+        if dca_result.total_commissions > 0:
+            table.add_row("Total Commissions", f"${dca_result.total_commissions:,.2f}")
+            comm_pct = (
+                dca_result.total_commissions / dca_result.total_invested * 100
+                if dca_result.total_invested > 0 else 0.0
+            )
+            table.add_row("Commission Drag", f"{comm_pct:.2f}%")
         if dca_result.total_dividends > 0:
             table.add_row("Dividends Reinvested", f"${dca_result.total_dividends:,.2f}")
             table.add_row("DRIP Shares", f"{dca_result.drip_shares:.4f}")

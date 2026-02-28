@@ -3263,7 +3263,7 @@ _DCA_MODE_LABELS = {
     "dip_weighted": "Dip-Weighted DCA",
     "score_integrated": "Score-Integrated DCA",
 }
-_DCA_FREQUENCIES = ["weekly", "biweekly", "monthly"]
+_DCA_FREQUENCIES = ["daily", "weekly", "biweekly", "monthly"]
 
 
 def _render_dca_params(cfg: Config) -> dict:
@@ -3307,8 +3307,9 @@ def _render_dca_params(cfg: Config) -> dict:
             index=_DCA_FREQUENCIES.index(dca.get("frequency", "monthly")),
             key="dca_freq",
             help=(
-                "How often to buy. Weekly ≈ every 5 trading days, biweekly ≈ "
-                "every 10, monthly ≈ every 21 trading days."
+                "How often to buy. Daily = every trading day (not recommended for pure DCA — "
+                "spreads capital thin and incurs more commissions), weekly ≈ every 5 trading "
+                "days, biweekly ≈ every 10, monthly ≈ every 21 trading days."
             ),
         )
         ov["frequency"] = freq
@@ -3525,14 +3526,27 @@ def _render_dca_metrics(result: DCAResult) -> None:
         st.metric("Dip Purchases", str(result.num_dip_purchases))
         st.metric("Avg Multiplier", f"{result.avg_multiplier:.2f}x")
 
-    if result.drip_shares > 0:
+    # Commission + dividend rows
+    show_commissions = result.total_commissions > 0
+    show_drip = result.drip_shares > 0
+    if show_commissions or show_drip:
         c1, c2, c3, _ = st.columns(4)
-        with c1:
-            st.metric("Dividends Reinvested", f"${result.total_dividends:,.2f}")
-        with c2:
-            st.metric("DRIP Shares", f"{result.drip_shares:.4f}")
-        with c3:
-            st.metric("Total Shares", f"{result.total_shares:.4f}")
+        if show_commissions:
+            with c1:
+                st.metric("Total Commissions", f"${result.total_commissions:,.2f}")
+                comm_pct = (
+                    result.total_commissions / result.total_invested * 100
+                    if result.total_invested > 0 else 0.0
+                )
+                st.metric("Commission Drag", f"{comm_pct:.2f}%")
+        if show_drip:
+            col = c2 if show_commissions else c1
+            with col:
+                st.metric("Dividends Reinvested", f"${result.total_dividends:,.2f}")
+            next_col = c3 if show_commissions else c2
+            with next_col:
+                st.metric("DRIP Shares", f"{result.drip_shares:.4f}")
+                st.metric("Total Shares", f"{result.total_shares:.4f}")
 
 
 def _render_dca_purchase_log(result: DCAResult) -> None:
@@ -3543,19 +3557,25 @@ def _render_dca_purchase_log(result: DCAResult) -> None:
         return
 
     rows = []
+    has_commissions = any(p.commission > 0 for p in result.purchases)
     for p in result.purchases:
-        rows.append({
+        row: dict = {
             "Date": p.date,
             "Price": f"${p.price:,.2f}",
             "Dip %": f"{p.dip_pct:.1f}%",
             "Tier": p.tier.replace("_", " ").title(),
             "Multiplier": f"{p.multiplier:.1f}x",
             "Amount": f"${p.amount:,.2f}",
+        }
+        if has_commissions:
+            row["Commission"] = f"${p.commission:,.2f}"
+        row.update({
             "Shares": f"{p.shares:.4f}",
             "Cumulative Shares": f"{p.cumulative_shares:.4f}",
             "Cumulative Invested": f"${p.cumulative_invested:,.2f}",
             "Portfolio Value": f"${p.portfolio_value:,.2f}",
         })
+        rows.append(row)
     df = pd.DataFrame(rows)
     st.dataframe(df, width="stretch", hide_index=True, height=400)
 
@@ -4870,11 +4890,16 @@ graph TD
 
 **DRIP** (Dividend Reinvestment Plan): When enabled, dividends are automatically reinvested as additional shares at the current price on the ex-dividend date.
 
+**Frequency Options:** Daily (every trading day), weekly (~5 days), biweekly (~10 days), monthly (~21 days). Daily frequency is not recommended for pure DCA — it spreads capital thin and incurs more commissions. It is most useful with dip-weighted or score-integrated modes where you want to react to dips as they happen.
+
+**Commissions:** The DCA backtester applies the same commission model as the active backtest engine (configured in `config.yaml` under `backtest.commission_per_trade`, `backtest.commission_pct`, and `backtest.commission_mode`). Commission is deducted from each purchase's allocated amount before buying shares.
+
 **CLI Usage:**
 ```
 python main.py AAPL --dca --period 5y               # dip-weighted DCA (default)
 python main.py AAPL --dca --dca-mode pure            # pure DCA, no dip weighting
 python main.py AAPL --dca --dca-amount 1000          # $1000 per period
+python main.py AAPL --dca --dca-frequency daily      # daily purchases
 python main.py AAPL --dca --dca-frequency weekly     # weekly purchases
 ```
 

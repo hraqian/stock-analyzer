@@ -1043,7 +1043,7 @@ dividend:
 dca:
   # Base parameters
   base_amount: 500             # dollars per buy
-  frequency: "monthly"         # "weekly", "biweekly", "monthly"
+  frequency: "monthly"         # "daily", "weekly", "biweekly", "monthly"
   drip: true                   # reinvest dividends automatically
 
   # Mode: "pure", "dip_weighted", "score_integrated"

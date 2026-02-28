@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FREQ_TRADING_DAYS = {
+    "daily": 1,
     "weekly": 5,
     "biweekly": 10,
     "monthly": 21,
@@ -73,8 +74,9 @@ class DCAPurchase:
     """Record of a single DCA buy."""
     date: str
     price: float
-    amount: float           # dollars invested this period
-    shares: float           # shares acquired (amount / price)
+    amount: float           # dollars invested this period (before commission)
+    commission: float       # commission paid on this purchase
+    shares: float           # shares acquired ((amount - commission) / price)
     multiplier: float       # applied multiplier (1.0 for pure DCA)
     dip_pct: float          # drop % from recent high (0.0 if none)
     tier: str               # "normal", "mild_dip", "strong_dip", "extreme_dip"
@@ -93,6 +95,7 @@ class DCAResult:
 
     # Capital
     total_invested: float = 0.0
+    total_commissions: float = 0.0
     final_value: float = 0.0
     total_shares: float = 0.0
 
@@ -178,6 +181,12 @@ class DCABacktester:
         self.max_period_alloc: float = float(sf.get("max_period_allocation", 1500))
         self.skip_breakaway: bool = bool(sf.get("skip_breakaway_gaps", True))
         self.min_vol_ratio: float = float(sf.get("min_volume_ratio", 0.5))
+
+        # Commission model — reuse the backtest commission config
+        bt_cfg = cfg.section("backtest")
+        self._commission_flat: float = float(bt_cfg.get("commission_per_trade", 0.0))
+        self._commission_pct: float = float(bt_cfg.get("commission_pct", 0.0))
+        self._commission_mode: str = str(bt_cfg.get("commission_mode", "additive"))
 
     # ------------------------------------------------------------------
     # Public API
@@ -277,6 +286,7 @@ class DCABacktester:
 
         cum_shares: float = 0.0
         cum_invested: float = 0.0
+        cum_commissions: float = 0.0
         cum_dividends: float = 0.0
         drip_shares: float = 0.0
         purchases: list[DCAPurchase] = []
@@ -317,15 +327,19 @@ class DCABacktester:
                     avg_vol=avg_vol,
                 )
                 amount = self._apply_safety(self.base_amount * multiplier)
-                shares = amount / price
+                commission = self._calc_commission(amount)
+                net_amount = amount - commission  # dollars actually buying shares
+                shares = net_amount / price if net_amount > 0 else 0.0
 
                 cum_shares += shares
-                cum_invested += amount
+                cum_invested += amount  # total outlay includes commission
+                cum_commissions += commission
 
                 purchases.append(DCAPurchase(
                     date=date_str,
                     price=round(price, 4),
                     amount=round(amount, 2),
+                    commission=round(commission, 2),
                     shares=round(shares, 4),
                     multiplier=round(multiplier, 2),
                     dip_pct=round(dip_pct, 2),
@@ -347,6 +361,7 @@ class DCABacktester:
         result.equity_curve = equity_curve
         result.dividend_events = dividend_events
         result.total_invested = round(cum_invested, 2)
+        result.total_commissions = round(cum_commissions, 2)
         result.final_value = round(cum_shares * float(close[-1]), 2)
         result.total_shares = round(cum_shares, 4)
         result.total_dividends = round(cum_dividends, 2)
@@ -447,6 +462,20 @@ class DCABacktester:
     def _apply_safety(self, raw_amount: float) -> float:
         """Enforce max period allocation cap."""
         return min(raw_amount, self.max_period_alloc)
+
+    def _calc_commission(self, notional: float) -> float:
+        """Compute commission for a single DCA purchase.
+
+        Uses the same commission model as the active backtest engine:
+
+        - **additive**: ``flat + pct × notional``
+        - **max**: ``max(flat, pct × notional)``
+        """
+        flat = self._commission_flat
+        pct = self._commission_pct * abs(notional)
+        if self._commission_mode == "max":
+            return max(flat, pct)
+        return flat + pct
 
     def _compute_metrics(
         self,
