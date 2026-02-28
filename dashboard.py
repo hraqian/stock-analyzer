@@ -3481,6 +3481,20 @@ def _create_dca_equity_chart(
             line=dict(color="#9E9E9E", width=1, dash="dash"),
         ))
 
+    # Stock price (buy & hold) overlay — normalized so it starts at the
+    # same value as the DCA portfolio, making relative growth comparable.
+    if dca_result.equity_curve and "price" in dca_result.equity_curve[0]:
+        prices = [e["price"] for e in dca_result.equity_curve]
+        first_price = prices[0]
+        if first_price > 0 and values:
+            start_val = values[0]
+            stock_growth = [start_val * (p / first_price) for p in prices]
+            fig.add_trace(go.Scatter(
+                x=dates, y=stock_growth,
+                name="Stock Price (Buy & Hold)",
+                line=dict(color="#E91E63", width=2, dash="dashdot"),
+            ))
+
     # Active strategy overlay
     if bt_result and bt_result.equity_curve:
         bt_dates = [e["date"] for e in bt_result.equity_curve]

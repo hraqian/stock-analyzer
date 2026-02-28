@@ -354,6 +354,7 @@ class DCABacktester:
                 "date": date_str,
                 "value": round(cum_shares * price, 2),
                 "invested": round(cum_invested, 2),
+                "price": round(price, 4),
             })
 
         # ── Populate result ──────────────────────────────────────────────
