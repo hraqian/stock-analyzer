@@ -3619,6 +3619,352 @@ def render_scanner() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Help / User Guide tab
+# ---------------------------------------------------------------------------
+
+def render_help() -> None:
+    """Render the Help tab with architecture diagrams and decision-point explanations."""
+
+    st.header("How It Works")
+    st.caption(
+        "End-to-end architecture of the stock analyzer — "
+        "how analysis, backtesting, and scanning work under the hood."
+    )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 1: STOCK ANALYSIS
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader("1. Stock Analysis Flow")
+    st.markdown(
+        "When you enter a ticker in the **Analyze** tab (or run `python main.py AAPL` "
+        "on the CLI), this is what happens:"
+    )
+
+    st.markdown("""
+```mermaid
+flowchart TD
+    A["Enter Ticker + Period"] --> B["Fetch OHLCV Data<br/><i>YahooFinanceProvider</i>"]
+    B --> C{"--indicators<br/>flag set?"}
+    C -- "Yes" --> D["Run Selected Indicators Only"]
+    C -- "No (default)" --> E["Run All Indicators"]
+    E --> F["Run All Pattern Detectors"]
+    E --> G["Calculate S/R Levels"]
+    E --> H["Classify Market Regime"]
+    D --> I["Composite Indicator Score"]
+    F --> J["Composite Pattern Score"]
+    I --> K["Display Results"]
+    J --> K
+    G --> K
+    H --> K
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style B fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style K fill:#2d5a1e,stroke:#6abf4b,color:#fff
+```
+""")
+
+    with st.expander("Indicators (8 total) — what they measure and how they score"):
+        st.markdown("""
+Each indicator produces a **0 – 10 score** where 0 = extremely bearish, 5 = neutral, 10 = extremely bullish.
+
+| Indicator | What It Measures | Scoring Logic |
+|-----------|-----------------|---------------|
+| **RSI** | Momentum oscillator (0-100) | RSI ≤ 30 → 9.0 (oversold/bullish). RSI ≥ 70 → 1.0 (overbought/bearish). Linear between. |
+| **MACD** | Trend momentum via histogram | Histogram normalized by price (hist%). Strong bull (≥0.5%) → 8.5–10. Strong bear (≤-0.5%) → 0–1.5. Crossover bonus ±1.5. |
+| **Bollinger Bands** | Price position within bands | %B (0=lower, 1=upper). Near lower band → 9.5 (oversold). Near upper band → 0.5 (overbought). |
+| **Moving Averages** | Price vs SMA/EMA alignment | Points for: price above each MA (+1.5), bullish MA stacking (+1.0), golden cross (+2.0). Normalized to 0–10. |
+| **Stochastic** | Momentum (%K oscillator) | %K ≤ 20 → 9.0 (oversold). %K ≥ 80 → 1.0 (overbought). Cross bonus ±1.0. |
+| **ADX** | Trend strength + direction | DI spread sets direction (0–10). ADX multiplier pulls toward 5.0 in weak trends — ADX < 30 dampens signal to ±2.0 from neutral. |
+| **Volume (OBV)** | Volume-price confirmation | Confirming + rising → 6.5–9.5. Confirming + falling → 0.5–3.5. Diverging → 5.0 (neutral). |
+| **Fibonacci** | Proximity to Fib retracement levels | Near a Fib level → level-specific score. Otherwise: linear by range position (low=2.0, high=8.0). |
+""")
+
+    with st.expander("Pattern Detectors (5 total) — what they detect"):
+        st.markdown("""
+Each pattern produces a **0 – 10 score** where 5.0 = no signal (neutral baseline).
+
+| Pattern | What It Detects | Key Logic |
+|---------|----------------|-----------|
+| **Gaps** | Price gaps between bars | Classified as **common** (0.3 weight), **runaway** (0.7, with-trend), **breakaway** (1.0, out of consolidation), or **exhaustion** (0.5, reversal warning). Uses BB width percentile for consolidation, total return + MA distance for exhaustion. |
+| **Volume-Range** | Bar range vs volume correlation | Expansion bull (wide + high vol) → 8.0. Expansion bear → 2.0. Adjusted ±1.5 by recent bull/bear expansion bias. |
+| **Candlesticks** | 18 classic patterns | Single-bar (doji, hammer, marubozu, etc.), two-bar (engulfing, harami, tweezers), three-bar (morning/evening star, soldiers/crows). Recency-weighted net signal. |
+| **Spikes** | Sudden price moves (>N σ) | Confirmed spikes signal continuation. Unconfirmed "trap" spikes signal reversal (inverse). |
+| **Inside/Outside** | Consolidation & breakout bars | Inside bars wait for breakout direction (no lookahead). Outside bars signal based on close direction, stronger as reversals. |
+""")
+
+    with st.expander("Composite Scoring — how individual scores become one number"):
+        st.markdown("""
+**Indicator Composite** has two weighting modes (set via `scoring.mode`):
+
+- **Directional** (default): Groups indicators into **Trend** (MA, ADX, MACD), **Contrarian** (RSI, Stochastic, Bollinger), and **Neutral** (Volume, Fibonacci). The dominant group (biggest deviation from 5.0) gets 60% weight, secondary 25%, tertiary 15%. This lets trend and contrarian signals take turns leading.
+- **Average**: Simple weighted average of all indicator scores.
+
+After weighting, a **score spread factor** amplifies deviations from 5.0: `final = 5.0 + (raw - 5.0) × spread_factor`.
+
+**Pattern Composite** is a straight weighted average of all pattern scores.
+
+**Effective Score** combines both composites via `combination_mode`:
+
+| Mode | Formula | When to use |
+|------|---------|-------------|
+| **weighted** (default) | `0.7 × indicator + 0.3 × pattern` | General purpose |
+| **boost** | Indicator ± pattern deviation × boost_strength | When patterns should amplify, not override |
+| **gate** | Indicator score, but BUY/SELL requires both indicator AND pattern to agree | Conservative — reduces false signals |
+""")
+
+    with st.expander("Market Regime Classification"):
+        st.markdown("""
+The regime classifier scores 4 regime types and picks the highest:
+
+```mermaid
+flowchart LR
+    M["Compute Metrics<br/>ADX, ATR%, Return,<br/>Dir Changes, MA%"] --> S1["Score: Strong Trend"]
+    M --> S2["Score: Mean Reverting"]
+    M --> S3["Score: Volatile Choppy"]
+    M --> S4["Score: Breakout Transition"]
+    S1 --> W{"Highest<br/>Score Wins"}
+    S2 --> W
+    S3 --> W
+    S4 --> W
+    W --> R["Regime + Confidence"]
+    R --> ST["Sub-Type via 2×2 Matrix"]
+
+    style W fill:#5a3a1e,stroke:#d9a04a,color:#fff
+```
+
+**Regime types and what drives them:**
+| Regime | Key Drivers |
+|--------|------------|
+| **Strong Trend** | High ADX (>30), consistent direction, strong total return, price persistently above/below MA |
+| **Mean Reverting** | Low ADX (<25), many direction changes, price oscillating around MA |
+| **Volatile Choppy** | High ATR%, many direction changes, inconsistent trend |
+| **Breakout Transition** | Recent ADX spike, low rolling ADX but rising, early directional move |
+
+**Sub-types** (2×2 matrix of volatility × return):
+| | High |Return| Low |Return| |
+|---|---|---|---|---|---|
+| **High ATR%** | Explosive Mover | | Volatile Directionless | |
+| **Low ATR%** | Steady Compounder | | Stagnant | |
+""")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 2: BACKTEST
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader("2. Backtest Flow")
+    st.markdown(
+        "When you click **Run Quick Backtest** (or run `python main.py AAPL --backtest`), "
+        "the engine replays history bar-by-bar, simulating trades."
+    )
+
+    st.markdown("""
+```mermaid
+flowchart TD
+    A["Start Backtest"] --> B["Suitability Check"]
+    B --> C{"Trading Mode?"}
+    C -- "HOLD_ONLY" --> D["Stop — Stock Unsuitable"]
+    C -- "LONG_ONLY" --> E["Engine Loop<br/><i>SELL signals blocked<br/>except to close longs</i>"]
+    C -- "LONG_SHORT" --> F["Engine Loop<br/><i>Full signal set</i>"]
+
+    E --> G["Warmup Phase<br/><i>No trading, build indicator history</i>"]
+    F --> G
+    G --> H{"Every N bars<br/>(rebalance)"}
+    H -- "Rebalance bar" --> I["Recompute indicators,<br/>patterns, regime, S/R<br/>on trailing data only<br/><i>(no lookahead)</i>"]
+    I --> J["Strategy.on_bar()"]
+    H -- "Non-rebalance bar" --> K["Check Exit Triggers Only"]
+    J --> L{"Signal?"}
+    L -- "BUY" --> M["Open/Adjust Position"]
+    L -- "SELL" --> N["Open Short / Close Long"]
+    L -- "HOLD" --> K
+    K --> O["Next Bar"]
+    M --> O
+    N --> O
+    O --> H
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style D fill:#5a1e1e,stroke:#d94a4a,color:#fff
+    style G fill:#3a3a1e,stroke:#d9d94a,color:#fff
+```
+""")
+
+    with st.expander("Suitability Assessment — how trading mode is determined"):
+        st.markdown("""
+Before the backtest starts, the engine evaluates whether the stock is suitable for active trading:
+
+| Condition | Result | Rationale |
+|-----------|--------|-----------|
+| Avg volume < 100K **or** ATR% < 0.5% | **HOLD_ONLY** | Too illiquid or too flat for any active strategy |
+| ADX < 25 **or** ATR% < 1% **or** Avg volume < 500K **or** % above 200-MA > 65% | **LONG_ONLY** | Moderate liquidity/trend — shorting is risky |
+| All checks pass | **LONG_SHORT** | Sufficient liquidity, volatility, and trend for both directions |
+
+These thresholds are configurable in the `suitability` section of config.yaml. The CLI `--mode` flag or config `mode_override` can force any mode.
+""")
+
+    with st.expander("Strategy Decision Tree — how on_bar() decides BUY / SELL / HOLD"):
+        st.markdown("""
+The `ScoreBasedStrategy.on_bar()` method runs a **10-stage decision pipeline** on each rebalance bar:
+
+```mermaid
+flowchart TD
+    A["Receive bar context:<br/>ind_score, pat_score,<br/>regime, price, position"] --> B["NaN guard:<br/>replace NaN scores with 5.0"]
+    B --> C{"Regime =<br/>Strong Trend?"}
+    C -- "Yes + Holding" --> D["Strong Trend Hold:<br/>Stay in position unless<br/>extreme counter-signal<br/>(score ±1.5 beyond threshold)"]
+    C -- "Yes + Flat" --> E["Strong Trend Entry:<br/>Require price distance<br/>from MA + min score.<br/>Cooldown after consecutive losses."]
+    C -- "No" --> F["Compute Effective Score<br/>(weighted / boost / gate)"]
+    E -- "Conditions not met" --> F
+    F --> G["Map Score → Raw Signal<br/>(fixed thresholds or percentile)"]
+    G --> H{"Regime =<br/>Breakout?"}
+    H -- "Yes" --> I["Breakout Gate:<br/>Require large bar move +<br/>volume surge to confirm"]
+    H -- "No" --> J["Global Directional Bias:<br/>Block SELL in strong uptrend<br/>Block BUY in strong downtrend"]
+    I -- "Not confirmed" --> HOLD["→ HOLD"]
+    I -- "Confirmed" --> J
+    J --> K["Trading Mode Constraint:<br/>LONG_ONLY blocks new shorts"]
+    K --> L{"Trend Confirmation<br/>enabled + flat?"}
+    L -- "Yes" --> M["Price vs Trend MA:<br/>BUY blocked if below MA<br/>SELL blocked if above MA"]
+    L -- "No / Grace period" --> N["Anti-Pyramiding:<br/>Block same-direction signal<br/>if already in position"]
+    M --> N
+    N --> O["Final Signal"]
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style HOLD fill:#3a3a1e,stroke:#d9d94a,color:#fff
+    style O fill:#2d5a1e,stroke:#6abf4b,color:#fff
+```
+
+**Key config knobs:**
+- `threshold_mode`: `"fixed"` (score ≤ 3.5 = SELL, > 6.0 = BUY) or `"percentile"` (rolling window rank)
+- `trend_confirm_enabled`: whether price must be on the "right side" of the trend MA
+- `reentry_grace_bars`: bars after exit where trend confirmation is skipped (default 10)
+- `hold_with_trend` / `ignore_score_entries`: strong-trend special handling (both default True)
+- `global_trend_bias`: block counter-trend entries when total return > ±10%
+""")
+
+    with st.expander("Exit Triggers — checked every bar (not just rebalance bars)"):
+        st.markdown("""
+Exit triggers are checked in this priority order on **every bar**:
+
+| Priority | Trigger | Condition | Config Keys |
+|----------|---------|-----------|-------------|
+| 1 | **Trailing Stop (Strong Trend)** | In strong trend regime: trail by ATR × multiplier from highest profit | `trailing_stop_atr_mult` |
+| 2 | **Chandelier Exit** | Price drops ATR × multiplier from N-bar high (longs) or rises from N-bar low (shorts) | `chandelier_atr_mult`, `chandelier_period` |
+| 3 | **S/R Stop** | Long: price breaks below nearest support × (1 - buffer). Short: price breaks above nearest resistance × (1 + buffer) | `support_stop_enabled`, `support_stop_buffer_pct` |
+| 4 | **Fixed / ATR Stop-Loss** | Price moves against entry by stop_loss_pct or ATR × multiplier | `stop_loss_pct`, `atr_stop_mult` |
+| 5 | **Take-Profit** | Price moves in favor of entry by take_profit_pct (disabled in strong trend if configured) | `take_profit_pct`, `disable_take_profit_in_strong_trend` |
+
+The first trigger that fires wins — later triggers are not checked.
+""")
+
+    with st.expander("Commission Model"):
+        st.markdown("""
+Commissions are applied per trade leg (entry and exit separately):
+
+- **Flat fee**: `commission_per_trade` (e.g., $1.00)
+- **Percentage fee**: `commission_pct` × trade value (e.g., 0.1%)
+- **Combination**: `commission_mode` = `"additive"` (flat + pct) or `"max"` (whichever is greater)
+
+Default: $0 flat + 0.1% percentage, additive mode.
+""")
+
+    with st.expander("Performance Metrics — what the results show"):
+        st.markdown("""
+All metrics are computed on the **post-warmup** portion only (the flat warmup period is excluded):
+
+| Metric | Description |
+|--------|------------|
+| **Total Return %** | `(final_equity - initial) / initial × 100` |
+| **Annualized Return %** | Geometric annualization using post-warmup bar count and bars-per-year for the interval |
+| **Max Drawdown %** | Largest peak-to-trough decline in the equity curve |
+| **Win Rate %** | Percentage of closed trades with positive PnL |
+| **Profit Factor** | Gross profit / gross loss (∞ if no losses) |
+| **Sharpe Ratio** | `(mean_bar_return / std_bar_return) × √(bars_per_year)` — annualized risk-adjusted return |
+| **Avg Trade PnL %** | Mean PnL percentage across all closed trades |
+| **Best / Worst Trade** | Largest single-trade gain and loss |
+| **Avg Bars Held** | Mean holding period in bars |
+""")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 3: SCANNER / TOP 10
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader("3. Scanner / Top 10 Flow")
+    st.markdown(
+        "When you run a scan in the **Scanner** tab, the engine analyzes every stock "
+        "in a universe in parallel and ranks them by signal strength."
+    )
+
+    st.markdown("""
+```mermaid
+flowchart TD
+    A["Select Universe<br/>(DOW 30 / NASDAQ 100 / S&P 500)"] --> B["Load Ticker List<br/>from .txt file"]
+    B --> C["ThreadPoolExecutor<br/>(parallel, N workers)"]
+    C --> D["Per Ticker: _scan_one()"]
+
+    D --> E["Fetch OHLCV + Run Full Analysis<br/><i>(indicators + patterns + regime)</i>"]
+    E --> F["Suitability Assessment<br/>→ Trading Mode"]
+    F --> G["Create Strategy Instance"]
+    G --> H{"Percentile<br/>mode?"}
+    H -- "Yes" --> I["Seed score window<br/>with historical scores"]
+    H -- "No" --> J["Call strategy.on_bar()<br/>with last bar context"]
+    I --> J
+    J --> K["Extract signal:<br/>BUY / SELL / HOLD"]
+    K --> L["Compute effective_score<br/>+ confidence"]
+
+    L --> M["Collect All Results"]
+    M --> N["Rank: Top BUYs<br/><i>by effective_score ↓</i>"]
+    M --> O["Rank: Top SELLs<br/><i>by effective_score ↑</i>"]
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style C fill:#3a3a1e,stroke:#d9d94a,color:#fff
+    style N fill:#2d5a1e,stroke:#6abf4b,color:#fff
+    style O fill:#5a1e1e,stroke:#d94a4a,color:#fff
+```
+""")
+
+    with st.expander("Ranking Logic — how the top 10 are selected"):
+        st.markdown("""
+**Effective score** is the single number that drives all ranking:
+
+1. Each ticker gets a full analysis (all 8 indicators + 5 patterns)
+2. The strategy's `on_bar()` runs once on the latest bar to produce a BUY/SELL/HOLD signal
+3. The effective score is computed using the same combination mode as the strategy:
+   - **Weighted**: `(0.7 × indicator_score + 0.3 × pattern_score)`
+   - **Boost**: indicator ± pattern deviation × boost_strength
+   - **Gate**: indicator_score (patterns used only as entry gate)
+
+**Top BUYs** = filter signal == "BUY", sort by effective_score **descending** (strongest buy conviction first)
+
+**Top SELLs** = filter signal == "SELL", sort by effective_score **ascending** (strongest sell conviction first)
+
+**Confidence** is derived from distance to the nearest threshold:
+- **High**: ≥ 1.5 points past the BUY/SELL threshold
+- **Medium**: ≥ 0.5 points past
+- **Low**: barely past the threshold
+""")
+
+    with st.expander("Multi-Timeframe Confirmation (optional)"):
+        st.markdown("""
+When enabled, each ticker is analyzed on **three timeframes** (daily, weekly, monthly) with configurable weights (default 50% / 30% / 20%).
+
+The scanner checks whether all timeframes **agree**:
+- **Aligned**: all timeframes give the same signal → full weight (×1.0)
+- **Mixed**: some agree, some neutral → reduced weight (×0.7)
+- **Conflicting**: timeframes disagree → heavily reduced (×0.4)
+
+The aggregated MT score replaces the single-timeframe effective_score for ranking when MT mode is active.
+""")
+
+    with st.expander("Available Universes"):
+        st.markdown("""
+Universes are plain text files in `data/universes/`:
+
+| Universe | File | Description |
+|----------|------|-------------|
+| **DOW 30** | `dow30.txt` | 30 Dow Jones Industrial Average components |
+| **NASDAQ 100** | `nasdaq100.txt` | 100 largest NASDAQ-listed non-financial companies |
+| **S&P 500** | `sp500.txt` | 500 largest US-listed companies |
+
+You can add custom universes by placing a `.txt` file (one ticker per line, `#` for comments) in the same directory.
+""")
+
+
+# ---------------------------------------------------------------------------
 # Main (new stepped flow)
 # ---------------------------------------------------------------------------
 
@@ -3626,13 +3972,19 @@ def main() -> None:
     params = render_sidebar()
 
     # ── Top-level navigation tabs ─────────────────────────────────────────
-    tab_analyze, tab_scanner = st.tabs(["Analyze", "Scanner"])
+    tab_analyze, tab_scanner, tab_help = st.tabs(["Analyze", "Scanner", "Help"])
 
     # ══════════════════════════════════════════════════════════════════════
     # SCANNER TAB
     # ══════════════════════════════════════════════════════════════════════
     with tab_scanner:
         render_scanner()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HELP TAB
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_help:
+        render_help()
 
     # ══════════════════════════════════════════════════════════════════════
     # ANALYZE TAB
