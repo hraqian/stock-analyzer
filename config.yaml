@@ -1036,3 +1036,42 @@ dividend:
 
   # Scanner concurrency
   max_workers: 8
+
+# ===========================================================================
+# Dollar Cost Averaging (DCA)
+# ===========================================================================
+dca:
+  # Base parameters
+  base_amount: 500             # dollars per buy
+  frequency: "monthly"         # "weekly", "biweekly", "monthly"
+  drip: true                   # reinvest dividends automatically
+
+  # Mode: "pure", "dip_weighted", "score_integrated"
+  mode: "dip_weighted"
+
+  # Dip detection thresholds (percentage drop from recent high)
+  dip_thresholds:
+    mild_drop_pct: 5.0         # price down 5% from recent high
+    strong_drop_pct: 10.0      # price down 10%
+    extreme_drop_pct: 20.0     # price down 20%
+    lookback_days: 30          # window for "recent high"
+
+  # Multiplier tiers — how much to scale base_amount at each dip level
+  multipliers:
+    normal: 1.0
+    mild_dip: 1.5
+    strong_dip: 2.0
+    extreme_dip: 3.0
+
+  # Score-integrated mode thresholds
+  score_thresholds:
+    buy_zone_below: 3.5        # score below this = BUY zone
+    oversold_rsi: 30.0         # RSI below this = oversold
+    bb_percentile_low: 10.0    # BB percentile below this = near lower band
+
+  # Safety gates
+  safety:
+    max_multiplier: 3.0              # absolute cap on any single multiplier
+    max_period_allocation: 1500      # max dollars in any single period
+    skip_breakaway_gaps: true        # don't overweight on breakaway-down gaps
+    min_volume_ratio: 0.5            # skip overweight if volume < 50% of avg
