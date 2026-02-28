@@ -1745,13 +1745,13 @@ def render_sidebar() -> dict:
                 f"Load #{slot}" if exists else f"#{slot} (empty)",
                 key=f"load_{slot}",
                 disabled=not exists,
-                use_container_width=True,
+                width="stretch",
             ):
                 if _load_loadout(slot):
                     st.toast(f"Loaded config slot #{slot}")
                     st.rerun()
         with c_save:
-            if st.button(f"Save #{slot}", key=f"save_{slot}", use_container_width=True):
+            if st.button(f"Save #{slot}", key=f"save_{slot}", width="stretch"):
                 _save_loadout(slot)
                 st.toast(f"Saved to config slot #{slot}")
                 st.rerun()
@@ -2515,7 +2515,7 @@ def render_trade_log(bt_result: BacktestResult) -> None:
         })
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True, height=400)
+    st.dataframe(df, width="stretch", hide_index=True, height=400)
 
 
 def render_significant_patterns(bt_result: BacktestResult) -> None:
@@ -2559,7 +2559,7 @@ def render_significant_patterns(bt_result: BacktestResult) -> None:
         f'</div>',
         unsafe_allow_html=True,
     )
-    st.dataframe(df, use_container_width=True, hide_index=True, height=400)
+    st.dataframe(df, width="stretch", hide_index=True, height=400)
 
 
 def render_strategy_config(cfg: Config) -> None:
@@ -2646,7 +2646,7 @@ def render_strategy_config(cfg: Config) -> None:
     rows.append(("Close on End", "ON" if bt_cfg.get("close_on_end_of_data", True) else "OFF"))
 
     df = pd.DataFrame(rows, columns=["Parameter", "Value"])
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 
@@ -2710,7 +2710,7 @@ def render_stock_overview(
     # ── Price chart ───────────────────────────────────────────────────────
     st.subheader("Price Chart")
     price_fig = create_price_chart(result, score_df=None, cfg=cfg)
-    st.plotly_chart(price_fig, use_container_width=True)
+    st.plotly_chart(price_fig, width="stretch")
 
     # ── Indicator & Pattern breakdown (collapsed by default) ──────────────
     with st.expander("Indicator Breakdown"):
@@ -3236,7 +3236,7 @@ def render_backtest_section(
     # ── Equity curve ──────────────────────────────────────────────────────
     st.subheader("Equity Curve")
     eq_fig = create_equity_chart(bt_result, result.df)
-    st.plotly_chart(eq_fig, use_container_width=True)
+    st.plotly_chart(eq_fig, width="stretch")
 
     # ── Strategy config ───────────────────────────────────────────────────
     with st.expander("Strategy Configuration"):
