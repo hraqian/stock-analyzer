@@ -358,7 +358,9 @@ def render_backtest(
         ("Rebalance Interval", f"every {strat_cfg.get('rebalance_interval', 5)} bars"),
         ("EOD Flatten", "[bold green]ON[/bold green]" if strat_cfg.get("flatten_eod", False) else "[dim]OFF[/dim]"),
         ("Slippage", f"{bt_cfg.get('slippage_pct', 0.001) * 100:.2f}%"),
-        ("Commission", f"${bt_cfg.get('commission_per_trade', 0.0):.2f} / trade"),
+        ("Commission (flat)", f"${bt_cfg.get('commission_per_trade', 0.0):.2f} / leg"),
+        ("Commission (%)", f"{bt_cfg.get('commission_pct', 0.0) * 100:.3f}% / leg"),
+        ("Commission Mode", bt_cfg.get("commission_mode", "additive")),
         ("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"),
     ]
 

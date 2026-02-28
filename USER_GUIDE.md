@@ -571,7 +571,9 @@ Section: `backtest`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `backtest.initial_cash` | 100000.0 | Starting portfolio cash |
-| `backtest.commission_per_trade` | 0.0 | Flat commission per trade |
+| `backtest.commission_per_trade` | 0.0 | Flat dollar commission per trade leg (entry & exit each) |
+| `backtest.commission_pct` | 0.0 | Percentage commission per trade leg as a fraction (0.001 = 0.1%) |
+| `backtest.commission_mode` | "additive" | How flat + pct fees combine: `"additive"` (sum both) or `"max"` (whichever is greater) |
 | `backtest.slippage_pct` | 0.001 | Simulated slippage as fraction of price (0.1%) |
 | `backtest.warmup_bars` | 100 | Minimum bars before first signal (must be >= longest indicator lookback) |
 | `backtest.max_warmup_ratio` | 0.5 | Maximum fraction of data that warmup can consume |

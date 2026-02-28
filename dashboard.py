@@ -331,7 +331,9 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "strategy.global_bias_threshold": "total return above this triggers counter-trend suppression (e.g. 0.10 = 10%)",
     # -- Backtest params --
     "backtest.initial_cash": "starting portfolio value for the simulation",
-    "backtest.commission_per_trade": "higher = more realistic, reduces net returns",
+    "backtest.commission_per_trade": "flat dollar fee per trade leg (entry & exit each)",
+    "backtest.commission_pct": "percentage fee per trade leg (e.g. 0.1% of notional)",
+    "backtest.commission_mode": "how flat + pct fees combine: additive (sum) or max (whichever is greater)",
     "backtest.slippage_pct": "higher = more realistic fill price slippage",
     "backtest.warmup_bars": "more bars = indicators are fully warmed up before trading begins",
     "backtest.significant_pattern_min_strength": "higher = only the strongest patterns appear in the timeline",
@@ -1044,6 +1046,22 @@ def _edit_backtest_params(data: dict) -> None:
         step=1.0, key="commission", format="%.2f",
     )
     _default_hint(_db.get("commission_per_trade"), PARAM_DESCRIPTIONS.get("backtest.commission_per_trade"))
+
+    bt["commission_pct"] = st.number_input(
+        "Commission %",
+        0.0, 5.0,
+        value=float(bt.get("commission_pct", 0.0)) * 100,
+        step=0.01, key="commission_pct", format="%.3f",
+    ) / 100.0
+    _default_hint(f"{_db.get('commission_pct', 0.0) * 100:.3f}%", PARAM_DESCRIPTIONS.get("backtest.commission_pct"))
+
+    bt["commission_mode"] = st.selectbox(
+        "Commission mode",
+        options=["additive", "max"],
+        index=["additive", "max"].index(bt.get("commission_mode", "additive")),
+        key="commission_mode",
+    )
+    _default_hint(_db.get("commission_mode", "additive"), PARAM_DESCRIPTIONS.get("backtest.commission_mode"))
 
     bt["slippage_pct"] = st.number_input(
         "Slippage %",

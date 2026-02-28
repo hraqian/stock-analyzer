@@ -448,6 +448,8 @@ strategy:
 backtest:
   initial_cash: 100000.0    # starting portfolio cash
   commission_per_trade: 0.0 # flat commission per trade (set 0 to ignore)
+  commission_pct: 0.0       # percentage commission per leg as fraction (0.001 = 0.1%)
+  commission_mode: additive # "additive" (flat + pct) or "max" (whichever is greater)
   slippage_pct: 0.001       # simulated slippage as fraction of price (0.1%)
   # Minimum bars of data needed before the first signal can be generated
   # (must be >= longest indicator lookback, e.g. 200 for SMA200)

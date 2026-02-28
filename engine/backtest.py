@@ -224,7 +224,9 @@ class BacktestEngine:
         strat_cfg = cfg.section("strategy")
 
         self._initial_cash: float = float(bt_cfg.get("initial_cash", 100_000))
-        self._commission: float = float(bt_cfg.get("commission_per_trade", 0.0))
+        self._commission_flat: float = float(bt_cfg.get("commission_per_trade", 0.0))
+        self._commission_pct: float = float(bt_cfg.get("commission_pct", 0.0))
+        self._commission_mode: str = str(bt_cfg.get("commission_mode", "additive"))
         self._slippage_pct: float = float(bt_cfg.get("slippage_pct", 0.001))
         self._warmup_bars: int = int(bt_cfg.get("warmup_bars", 200))
 
@@ -793,6 +795,24 @@ class BacktestEngine:
     # Position management
     # ------------------------------------------------------------------
 
+    def _calc_commission(self, notional: float) -> float:
+        """Compute commission for a single leg (entry OR exit).
+
+        Combines the flat per-trade fee and percentage-of-notional fee
+        according to ``commission_mode``:
+
+        - **additive**: ``flat + pct * notional`` — both always apply.
+        - **max**: ``max(flat, pct * notional)`` — whichever is greater.
+
+        Set either component to 0 to effectively disable it.
+        """
+        flat = self._commission_flat
+        pct = self._commission_pct * abs(notional)
+        if self._commission_mode == "max":
+            return max(flat, pct)
+        # Default: additive
+        return flat + pct
+
     def _cap_quantity_to_cash(
         self, desired_qty: float, price: float, available_cash: float
     ) -> float:
@@ -802,13 +822,22 @@ class BacktestEngine:
         insufficient for even a single share.  For shorts, the cash
         constraint doesn't apply the same way (short proceeds add cash),
         so callers should only use this for long entries.
+
+        The commission is notional-dependent (when ``commission_pct > 0``),
+        so we solve: ``qty * price + commission(qty * price) <= cash``.
+        For additive mode: ``qty * price * (1 + pct) + flat <= cash``.
+        For max mode we use the conservative (additive) bound.
         """
         if desired_qty <= 0 or price <= 0:
             return 0.0
-        max_cost = available_cash - self._commission
+        # Solve for max affordable quantity conservatively
+        effective_rate = 1.0 + self._commission_pct  # covers both modes conservatively
+        max_cost = available_cash - self._commission_flat
         if max_cost <= 0:
             return 0.0
-        max_qty = int(max_cost / price)
+        max_qty = int(max_cost / (price * effective_rate))
+        if max_qty <= 0:
+            return 0.0
         return min(desired_qty, max_qty)
 
     def _open_position(
@@ -837,11 +866,12 @@ class BacktestEngine:
             entry_reason=entry_reason,
             entry_atr=entry_atr,
         )
+        notional = fill_price * quantity
+        commission = self._calc_commission(notional)
         if side == "long":
-            cost = fill_price * quantity + self._commission
+            cost = notional + commission
         else:
-            proceeds = fill_price * quantity
-            cost = -(proceeds - self._commission)
+            cost = -(notional - commission)
         return pos, cost
 
     def _close_position(
@@ -859,8 +889,11 @@ class BacktestEngine:
         else:
             pnl = (position.entry_price - fill_price) * position.quantity
 
-        # Commissions on both entry and exit
-        pnl -= (2 * self._commission)
+        # Commissions on both entry and exit (notionals may differ)
+        entry_notional = position.entry_price * position.quantity
+        exit_notional = fill_price * position.quantity
+        pnl -= (self._calc_commission(entry_notional)
+                + self._calc_commission(exit_notional))
 
         entry_cost = position.entry_price * position.quantity
         pnl_pct = pnl / entry_cost if entry_cost != 0 else 0.0
@@ -882,13 +915,15 @@ class BacktestEngine:
     def _trade_proceeds(self, trade: BacktestTrade, position: _Position) -> float:
         """Cash returned when closing a position.
 
-        Long close:  quantity * exit_price - commission (already in pnl)
-        Short close: -(quantity * exit_price + commission)
+        Long close:  quantity * exit_price - exit_commission
+        Short close: -(quantity * exit_price + exit_commission)
         """
+        exit_notional = trade.exit_price * trade.quantity
+        exit_commission = self._calc_commission(exit_notional)
         if trade.side == "long":
-            return trade.exit_price * trade.quantity - self._commission
+            return exit_notional - exit_commission
         else:
-            return -(trade.exit_price * trade.quantity + self._commission)
+            return -(exit_notional + exit_commission)
 
     def _apply_slippage(self, price: float, side: str, opening: bool) -> float:
         """Adjust fill price for slippage.

@@ -223,6 +223,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "backtest": {
         "initial_cash": 100_000.0,
         "commission_per_trade": 0.0,
+        "commission_pct": 0.0,             # percentage commission per leg (0.001 = 0.1%)
+        "commission_mode": "additive",     # "additive" (flat + pct) or "max" (whichever is greater)
         "slippage_pct": 0.001,
         "warmup_bars": 50,
         "max_warmup_ratio": 0.5,       # warmup can't exceed this fraction of total data
@@ -1050,6 +1052,16 @@ class Config:
         slippage = bt.get("slippage_pct", 0.001)
         if not isinstance(slippage, (int, float)) or slippage < 0:
             errors.append(f"backtest.slippage_pct must be non-negative, got {slippage!r}")
+
+        commission_pct = bt.get("commission_pct", 0.0)
+        if not isinstance(commission_pct, (int, float)) or commission_pct < 0:
+            errors.append(f"backtest.commission_pct must be non-negative, got {commission_pct!r}")
+
+        commission_mode = bt.get("commission_mode", "additive")
+        if commission_mode not in ("additive", "max"):
+            errors.append(
+                f"backtest.commission_mode must be 'additive' or 'max', got {commission_mode!r}"
+            )
 
         # Suitability parameters
         suit = self._data.get("suitability", {})
