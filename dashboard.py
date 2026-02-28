@@ -3307,25 +3307,103 @@ def _render_dca_params(cfg: Config) -> dict:
     )
     ov["mode"] = mode
 
-    col1, col2 = st.columns(2)
-    with col1:
-        ov["base_amount"] = st.number_input(
-            "Base Amount ($)",
-            min_value=50, max_value=50_000, step=50,
-            value=int(dca.get("base_amount", 500)),
-            key="dca_base_amount",
-            help=(
-                "The fixed dollar amount invested each period. In dip-weighted / "
-                "score-integrated modes, this is the baseline — actual amount = "
-                "base × multiplier when dips are detected."
-            ),
-        )
-    with col2:
+    # ── Funding mode: Fixed Amount vs Total Budget ───────────────────
+    _FUNDING_MODES = ["Fixed Amount", "Total Budget"]
+    budget_cfg = dca.get("budget", {})
+    funding_default = 1 if budget_cfg.get("enabled", False) else 0
+    funding_mode = st.radio(
+        "Funding Mode",
+        _FUNDING_MODES,
+        index=funding_default,
+        key="dca_funding_mode",
+        horizontal=True,
+        help=(
+            "**Fixed Amount:** Specify a dollar amount per period (traditional DCA). "
+            "**Total Budget:** Specify total dollars to invest over the entire period — "
+            "the engine computes the per-period amount automatically, with a reserve "
+            "for dip opportunities."
+        ),
+    )
+    budget_enabled = funding_mode == "Total Budget"
+
+    if budget_enabled:
+        col1, col2 = st.columns(2)
+        with col1:
+            total_budget = st.number_input(
+                "Total Budget ($)",
+                min_value=1000, max_value=1_000_000, step=1000,
+                value=int(budget_cfg.get("total_budget", 50000)),
+                key="dca_total_budget",
+                help=(
+                    "Total dollars you plan to invest over the backtest period. "
+                    "The engine computes the per-period base amount based on the "
+                    "number of buy periods and the selected reserve method."
+                ),
+            )
+        with col2:
+            _RESERVE_METHODS = ["conservative", "adaptive"]
+            _RESERVE_LABELS = {
+                "conservative": "Conservative (worst-case reserve)",
+                "adaptive": "Adaptive (historical dip frequency)",
+            }
+            reserve_method = st.selectbox(
+                "Reserve Method",
+                _RESERVE_METHODS,
+                index=_RESERVE_METHODS.index(
+                    budget_cfg.get("reserve_method", "conservative")
+                ),
+                format_func=lambda m: _RESERVE_LABELS.get(m, m),
+                key="dca_reserve_method",
+                help=(
+                    "**Conservative:** Assumes every period could hit the max multiplier — "
+                    "lower base amount, but guarantees budget is never exceeded. "
+                    "**Adaptive:** Analyzes the stock's historical dip frequency to estimate "
+                    "a realistic average multiplier — higher base amount, with a hard budget "
+                    "cap as safety net."
+                ),
+            )
+        ov["budget"] = {
+            "enabled": True,
+            "total_budget": total_budget,
+            "reserve_method": reserve_method,
+        }
+        # base_amount will be computed by the engine
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            ov["base_amount"] = st.number_input(
+                "Base Amount ($)",
+                min_value=50, max_value=50_000, step=50,
+                value=int(dca.get("base_amount", 500)),
+                key="dca_base_amount",
+                help=(
+                    "The fixed dollar amount invested each period. In dip-weighted / "
+                    "score-integrated modes, this is the baseline — actual amount = "
+                    "base × multiplier when dips are detected."
+                ),
+            )
+        with col2:
+            freq = st.selectbox(
+                "Frequency",
+                _DCA_FREQUENCIES,
+                index=_DCA_FREQUENCIES.index(dca.get("frequency", "monthly")),
+                key="dca_freq",
+                help=(
+                    "How often to buy. Daily = every trading day (not recommended for pure DCA — "
+                    "spreads capital thin and incurs more commissions), weekly ≈ every 5 trading "
+                    "days, biweekly ≈ every 10, monthly ≈ every 21 trading days."
+                ),
+            )
+            ov["frequency"] = freq
+        ov["budget"] = {"enabled": False}
+
+    # Frequency selector for budget mode (shown separately since col layout differs)
+    if budget_enabled:
         freq = st.selectbox(
             "Frequency",
             _DCA_FREQUENCIES,
             index=_DCA_FREQUENCIES.index(dca.get("frequency", "monthly")),
-            key="dca_freq",
+            key="dca_freq_budget",
             help=(
                 "How often to buy. Daily = every trading day (not recommended for pure DCA — "
                 "spreads capital thin and incurs more commissions), weekly ≈ every 5 trading "
@@ -3610,6 +3688,25 @@ def _render_dca_metrics(result: DCAResult) -> None:
             with next_col:
                 st.metric("DRIP Shares", f"{result.drip_shares:.4f}")
                 st.metric("Total Shares", f"{result.total_shares:.4f}")
+
+    # Budget mode info
+    if result.budget_mode:
+        st.markdown("---")
+        b1, b2, b3, b4 = st.columns(4)
+        with b1:
+            st.metric("Total Budget", f"${result.total_budget:,.0f}")
+        with b2:
+            st.metric("Computed Base/Period", f"${result.computed_base_amount:,.2f}")
+        with b3:
+            st.metric("Budget Remaining", f"${result.budget_remaining:,.2f}")
+        with b4:
+            utilisation = (
+                (result.total_budget - result.budget_remaining)
+                / result.total_budget * 100
+                if result.total_budget > 0 else 0.0
+            )
+            st.metric("Budget Utilisation", f"{utilisation:.1f}%")
+            st.caption(f"Reserve method: {result.reserve_method}")
 
 
 def _render_dca_purchase_log(result: DCAResult) -> None:

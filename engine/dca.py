@@ -124,6 +124,13 @@ class DCAResult:
     best_purchase_return_pct: float = 0.0
     worst_purchase_return_pct: float = 0.0
 
+    # Budget mode fields
+    budget_mode: bool = False
+    total_budget: float = 0.0
+    budget_remaining: float = 0.0
+    computed_base_amount: float = 0.0  # base amount computed from budget
+    reserve_method: str = ""
+
 
 # ---------------------------------------------------------------------------
 # DCA Backtester
@@ -187,6 +194,12 @@ class DCABacktester:
         self._commission_flat: float = float(bt_cfg.get("commission_per_trade", 0.0))
         self._commission_pct: float = float(bt_cfg.get("commission_pct", 0.0))
         self._commission_mode: str = str(bt_cfg.get("commission_mode", "additive"))
+
+        # Budget mode
+        bg = {**dca.get("budget", {}), **ov.get("budget", {})}
+        self.budget_enabled: bool = bool(bg.get("enabled", False))
+        self.total_budget: float = float(bg.get("total_budget", 50000))
+        self.reserve_method: str = str(bg.get("reserve_method", "conservative"))
 
     # ------------------------------------------------------------------
     # Public API
@@ -276,6 +289,20 @@ class DCABacktester:
         # ── Determine buy dates ──────────────────────────────────────────
         buy_positions = _buy_dates(dates, self.frequency)
 
+        # ── Budget mode: compute base amount from total budget ───────────
+        effective_base = self.base_amount
+        budget_remaining: float | None = None
+        if self.budget_enabled:
+            num_periods = len(buy_positions)
+            effective_base = self._compute_budget_base_amount(
+                num_periods, close, dates, rolling_high, buy_positions
+            )
+            budget_remaining = self.total_budget
+            logger.info(
+                "Budget mode (%s): $%.0f over %d periods → base $%.2f/period",
+                self.reserve_method, self.total_budget, num_periods, effective_base,
+            )
+
         # ── Simulate ─────────────────────────────────────────────────────
         result = DCAResult(
             ticker=ticker,
@@ -317,37 +344,49 @@ class DCABacktester:
 
             # ── DCA buy ──────────────────────────────────────────────────
             if i in buy_set:
-                dip_pct = self._compute_dip_pct(price, float(rolling_high[i]))
-                multiplier, tier = self._resolve_multiplier(
-                    dip_pct=dip_pct,
-                    bar_idx=i,
-                    score_df=score_df,
-                    dates=dates,
-                    volume=volume,
-                    avg_vol=avg_vol,
-                )
-                amount = self._apply_safety(self.base_amount * multiplier)
-                commission = self._calc_commission(amount)
-                net_amount = amount - commission  # dollars actually buying shares
-                shares = net_amount / price if net_amount > 0 else 0.0
+                # Skip if budget is exhausted
+                if budget_remaining is not None and budget_remaining <= 0:
+                    pass  # no purchase — budget depleted
+                else:
+                    dip_pct = self._compute_dip_pct(price, float(rolling_high[i]))
+                    multiplier, tier = self._resolve_multiplier(
+                        dip_pct=dip_pct,
+                        bar_idx=i,
+                        score_df=score_df,
+                        dates=dates,
+                        volume=volume,
+                        avg_vol=avg_vol,
+                    )
+                    amount = self._apply_safety(effective_base * multiplier)
 
-                cum_shares += shares
-                cum_invested += amount  # total outlay includes commission
-                cum_commissions += commission
+                    # Budget cap: clamp to remaining budget
+                    if budget_remaining is not None:
+                        amount = min(amount, budget_remaining)
 
-                purchases.append(DCAPurchase(
-                    date=date_str,
-                    price=round(price, 4),
-                    amount=round(amount, 2),
-                    commission=round(commission, 2),
-                    shares=round(shares, 4),
-                    multiplier=round(multiplier, 2),
-                    dip_pct=round(dip_pct, 2),
-                    tier=tier,
-                    cumulative_shares=round(cum_shares, 4),
-                    cumulative_invested=round(cum_invested, 2),
-                    portfolio_value=round(cum_shares * price, 2),
-                ))
+                    commission = self._calc_commission(amount)
+                    net_amount = amount - commission  # dollars actually buying shares
+                    shares = net_amount / price if net_amount > 0 else 0.0
+
+                    cum_shares += shares
+                    cum_invested += amount  # total outlay includes commission
+                    cum_commissions += commission
+
+                    if budget_remaining is not None:
+                        budget_remaining -= amount
+
+                    purchases.append(DCAPurchase(
+                        date=date_str,
+                        price=round(price, 4),
+                        amount=round(amount, 2),
+                        commission=round(commission, 2),
+                        shares=round(shares, 4),
+                        multiplier=round(multiplier, 2),
+                        dip_pct=round(dip_pct, 2),
+                        tier=tier,
+                        cumulative_shares=round(cum_shares, 4),
+                        cumulative_invested=round(cum_invested, 2),
+                        portfolio_value=round(cum_shares * price, 2),
+                    ))
 
             # ── Daily equity curve entry ─────────────────────────────────
             equity_curve.append({
@@ -369,6 +408,14 @@ class DCABacktester:
         result.drip_shares = round(drip_shares, 4)
         result.current_price = round(float(close[-1]), 4)
         result.num_purchases = len(purchases)
+
+        # Budget mode metadata
+        if self.budget_enabled:
+            result.budget_mode = True
+            result.total_budget = self.total_budget
+            result.budget_remaining = round(budget_remaining or 0.0, 2)
+            result.computed_base_amount = round(effective_base, 2)
+            result.reserve_method = self.reserve_method
 
         self._compute_metrics(result, close, dates)
         return result
@@ -463,6 +510,83 @@ class DCABacktester:
     def _apply_safety(self, raw_amount: float) -> float:
         """Enforce max period allocation cap."""
         return min(raw_amount, self.max_period_alloc)
+
+    def _compute_budget_base_amount(
+        self,
+        num_periods: int,
+        close: np.ndarray,
+        dates: pd.DatetimeIndex,
+        rolling_high: np.ndarray,
+        buy_positions: list[int],
+    ) -> float:
+        """Compute the per-period base amount from the total budget.
+
+        **Conservative**: assumes every period could trigger max multiplier,
+        so ``base = budget / (num_periods × max_multiplier)``.
+
+        **Adaptive**: scans the historical price data to estimate the
+        frequency of dip tiers, computes an expected average multiplier,
+        and sets ``base = budget / (num_periods × avg_expected_multiplier)``.
+        """
+        if num_periods <= 0:
+            return self.base_amount  # fallback
+
+        if self.reserve_method == "adaptive":
+            return self._adaptive_base_amount(
+                num_periods, close, rolling_high, buy_positions
+            )
+
+        # Conservative: worst-case — every period at max multiplier
+        max_mult = self.max_multiplier
+        if max_mult <= 0:
+            max_mult = 1.0
+        return self.total_budget / (num_periods * max_mult)
+
+    def _adaptive_base_amount(
+        self,
+        num_periods: int,
+        close: np.ndarray,
+        rolling_high: np.ndarray,
+        buy_positions: list[int],
+    ) -> float:
+        """Use historical dip frequency to compute expected avg multiplier.
+
+        Walk through the buy dates, classify each into a dip tier, tally
+        the frequencies, and compute the weighted average multiplier.
+        Then ``base = budget / (num_periods × avg_multiplier)``.
+        """
+        tier_counts = {"normal": 0, "mild": 0, "strong": 0, "extreme": 0}
+
+        for pos in buy_positions:
+            price = float(close[pos])
+            rh = float(rolling_high[pos])
+            dip_pct = self._compute_dip_pct(price, rh)
+
+            if dip_pct >= self.extreme_drop_pct:
+                tier_counts["extreme"] += 1
+            elif dip_pct >= self.strong_drop_pct:
+                tier_counts["strong"] += 1
+            elif dip_pct >= self.mild_drop_pct:
+                tier_counts["mild"] += 1
+            else:
+                tier_counts["normal"] += 1
+
+        total = sum(tier_counts.values())
+        if total <= 0:
+            return self.total_budget / num_periods
+
+        # Weighted average multiplier based on historical tier frequencies
+        avg_mult = (
+            tier_counts["normal"] * self.mult_normal
+            + tier_counts["mild"] * self.mult_mild
+            + tier_counts["strong"] * self.mult_strong
+            + tier_counts["extreme"] * self.mult_extreme
+        ) / total
+
+        if avg_mult <= 0:
+            avg_mult = 1.0
+
+        return self.total_budget / (num_periods * avg_mult)
 
     def _calc_commission(self, notional: float) -> float:
         """Compute commission for a single DCA purchase.

@@ -889,6 +889,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "skip_breakaway_gaps": True,     # don't overweight on breakaway-down gaps
             "min_volume_ratio": 0.5,         # skip overweight if volume < 50% of avg
         },
+
+        # Budget mode — alternative to fixed base_amount.
+        # Instead of specifying $/period, specify a total budget over the
+        # backtest period and let the engine compute the base amount.
+        "budget": {
+            "enabled": False,               # toggle budget mode
+            "total_budget": 50000,          # total dollars to invest over the period
+            "reserve_method": "conservative",  # "conservative" or "adaptive"
+            # conservative: assumes every period could be max multiplier
+            # adaptive: uses historical dip frequency to estimate reserve
+        },
     },
 }
 
