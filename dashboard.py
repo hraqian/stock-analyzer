@@ -39,6 +39,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from analysis.analyzer import Analyzer, AnalysisResult
+from analysis.multi_timeframe import _build_percentile_window
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
 from config import Config, DEFAULT_CONFIG
@@ -2728,10 +2729,15 @@ def compute_recommendation(
 ) -> dict:
     """Compute a BUY/HOLD/SELL recommendation using the strategy's own decision logic.
 
-    Creates a fresh ``ScoreBasedStrategy`` with no accumulated state and calls
-    ``on_bar()`` with a ``StrategyContext`` built from the analysis result's
-    last bar.  Position is set to 0 (flat) so the answer is "if you had money
-    to deploy right now, what would the strategy say?"
+    Creates a fresh ``ScoreBasedStrategy`` and calls ``on_bar()`` with a
+    ``StrategyContext`` built from the analysis result's last bar.  Position is
+    set to 0 (flat) so the answer is "if you had money to deploy right now,
+    what would the strategy say?"
+
+    When percentile threshold mode is active, the strategy's score window is
+    pre-seeded with historical effective scores (via ``_build_percentile_window``)
+    so that percentile ranking works correctly despite the single ``on_bar()``
+    call.
 
     The strategy's full decision pipeline applies: score thresholds, trend
     confirmation, regime adaptation, global directional bias, breakout gates,
@@ -2761,6 +2767,41 @@ def compute_recommendation(
         regime_adaptation=regime_adapt,
     )
     strategy.on_start({"ticker": result.ticker, "recommendation": True})
+
+    # ── Seed percentile window if percentile mode is active ──────────────
+    # Without seeding, percentile mode always falls back to fixed thresholds
+    # because a single on_bar() call can never fill the min_samples window.
+    threshold_mode = str(strat_cfg.get("threshold_mode", "fixed"))
+    if threshold_mode == "percentile":
+        try:
+            pct_cfg = strat_cfg.get("percentile_thresholds", {})
+            lookback_bars = int(pct_cfg.get("lookback_bars", 60))
+            pct_step = max(1, int(pct_cfg.get("percentile_step", 5)))
+            combination_mode = str(strat_cfg.get("combination_mode", "weighted"))
+            ind_weight = float(strat_cfg.get("indicator_weight", 0.7))
+            pat_weight = float(strat_cfg.get("pattern_weight", 0.3))
+            boost_strength = float(strat_cfg.get("boost_strength", 0.5))
+            boost_dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
+
+            provider = YahooFinanceProvider()
+            window = _build_percentile_window(
+                cfg,
+                provider,
+                ticker=result.ticker,
+                period=result.period,
+                interval="1d",
+                lookback_bars=lookback_bars,
+                step=pct_step,
+                combination_mode=combination_mode,
+                ind_weight=ind_weight,
+                pat_weight=pat_weight,
+                boost_strength=boost_strength,
+                boost_dead_zone=boost_dead_zone,
+            )
+            if window:
+                strategy.seed_score_window(window)
+        except Exception:
+            pass  # graceful degradation — percentile falls back to fixed
 
     # ── Build StrategyContext from the analysis result's last bar ─────────
     df = result.df

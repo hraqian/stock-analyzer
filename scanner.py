@@ -29,7 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from analysis.analyzer import Analyzer
-from analysis.multi_timeframe import MultiTimeframeAnalyzer
+from analysis.multi_timeframe import MultiTimeframeAnalyzer, _build_percentile_window
 from config import Config
 from data.provider import DataProvider
 from data.universes import available as available_universes
@@ -215,6 +215,41 @@ class Scanner:
             regime_adaptation=regime_adapt,
         )
         strategy.on_start({"ticker": ticker, "recommendation": True})
+
+        # ── Seed percentile window if percentile mode is active ──────────
+        # Without seeding, percentile mode always falls back to fixed
+        # thresholds because a single on_bar() call can never fill the
+        # min_samples window.
+        threshold_mode = str(strat_cfg.get("threshold_mode", "fixed"))
+        if threshold_mode == "percentile":
+            try:
+                pct_cfg = strat_cfg.get("percentile_thresholds", {})
+                lookback_bars = int(pct_cfg.get("lookback_bars", 60))
+                pct_step = max(1, int(pct_cfg.get("percentile_step", 5)))
+                combination_mode = str(strat_cfg.get("combination_mode", "weighted"))
+                ind_weight = float(strat_cfg.get("indicator_weight", 0.7))
+                pat_weight = float(strat_cfg.get("pattern_weight", 0.3))
+                boost_strength = float(strat_cfg.get("boost_strength", 0.5))
+                boost_dead_zone = float(strat_cfg.get("boost_dead_zone", 0.3))
+
+                window = _build_percentile_window(
+                    self._cfg,
+                    provider,
+                    ticker=ticker,
+                    period=self._period,
+                    interval="1d",
+                    lookback_bars=lookback_bars,
+                    step=pct_step,
+                    combination_mode=combination_mode,
+                    ind_weight=ind_weight,
+                    pat_weight=pat_weight,
+                    boost_strength=boost_strength,
+                    boost_dead_zone=boost_dead_zone,
+                )
+                if window:
+                    strategy.seed_score_window(window)
+            except Exception:
+                pass  # graceful degradation — percentile falls back to fixed
 
         df = result.df
         if df is None or df.empty:

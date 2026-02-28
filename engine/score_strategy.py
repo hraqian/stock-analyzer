@@ -432,6 +432,18 @@ class ScoreBasedStrategy(Strategy):
         self._bars_since_exit = 999
         self._consecutive_losses = 0
 
+    def seed_score_window(self, scores: list[float]) -> None:
+        """Pre-populate the rolling score window with historical effective scores.
+
+        Used by recommendation and scanner code paths that call ``on_bar()``
+        only once.  Without seeding, percentile mode silently falls back to
+        fixed thresholds because the window never reaches ``min_samples``.
+
+        Only the last ``lookback_bars`` entries are kept (deque maxlen).
+        """
+        for s in scores:
+            self._score_window.append(s)
+
     def on_trade_close(self, pnl_pct: float, exit_reason: str) -> None:
         """Track consecutive losses and reset re-entry grace on engine exits.
 
