@@ -4328,8 +4328,110 @@ Universes are plain text files in `data/universes/`:
 | **DOW 30** | `dow30.txt` | 30 Dow Jones Industrial Average components |
 | **NASDAQ 100** | `nasdaq100.txt` | 100 largest NASDAQ-listed non-financial companies |
 | **S&P 500** | `sp500.txt` | 500 largest US-listed companies |
+| **S&P/TSX 60** | `tsx60.txt` | 60 largest Canadian stocks (Toronto Stock Exchange, `.TO` suffix) |
 
 You can add custom universes by placing a `.txt` file (one ticker per line, `#` for comments) in the same directory.
+""")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 4: DIVIDEND SCANNER
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader("4. Dividend Scanner Flow")
+    st.markdown(
+        "When you select **Dividend** mode in the Scanner tab, the engine fetches "
+        "dividend data for every stock in the universe and ranks them by dividend quality."
+    )
+
+    st.markdown("""
+```mermaid
+flowchart TD
+    A["Select Universe +<br/>Dividend Mode"] --> B["Load Ticker List"]
+    B --> C["ThreadPoolExecutor<br/>(parallel, N workers)"]
+    C --> D["Per Ticker:<br/>fetch_dividend_metrics()"]
+
+    D --> E["yfinance: .info + .dividends"]
+    E --> F["Compute Metrics"]
+    F --> F1["Current Yield<br/><i>trailing 12m / price</i>"]
+    F --> F2["Dividend CAGR<br/><i>N-year compound growth</i>"]
+    F --> F3["Payout Consistency<br/><i>% of years with dividend</i>"]
+    F --> F4["Increase Streak<br/><i>consecutive YoY increases</i>"]
+
+    F1 --> G["Score Each Metric<br/>(0-10 via config curves)"]
+    F2 --> G
+    F3 --> G
+    F4 --> G
+
+    G --> H["Weighted Composite Score"]
+    H --> I["Apply Threshold Filters"]
+    I --> J["Rank by Score ↓"]
+    J --> K["Display Top N"]
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style C fill:#3a3a1e,stroke:#d9d94a,color:#fff
+    style K fill:#2d5a1e,stroke:#6abf4b,color:#fff
+```
+""")
+
+    with st.expander("Dividend Metrics — what each measures"):
+        st.markdown("""
+| Metric | What It Measures | Data Source |
+|--------|-----------------|-------------|
+| **Current Yield** | Annual dividend / current price | `trailingAnnualDividendRate` from yfinance `.info`, or computed from last 12 months of payments |
+| **Dividend CAGR** | Compound annual growth rate of total annual dividends | Calendar-year aggregation of `.dividends` history (configurable N years, default 5) |
+| **Payout Consistency** | Fraction of years with at least one dividend payment | Calendar-year check over N years (default 10) |
+| **Increase Streak** | Consecutive years of year-over-year dividend increases | Walk backwards from most recent full year |
+
+**Additional metadata** (displayed but not scored): payout ratio, 5-year average yield, ex-dividend date, sector.
+""")
+
+    with st.expander("Scoring Curves — how raw metrics become 0-10 scores"):
+        st.markdown("""
+Each metric is converted to a **0-10 score** using piecewise linear interpolation. All curve parameters are configurable.
+
+**Yield Scoring:**
+| Yield | Score | Logic |
+|-------|-------|-------|
+| ≤ 0.5% | 0 | Too low to be meaningful |
+| 3.0% | 5 | Moderate yield |
+| 6.0% | 10 | Excellent yield |
+| 6-10% | 10 | Still excellent |
+| > 10% | 10→5 | Distress penalty — extremely high yields often signal a dividend cut |
+
+**Growth Scoring (CAGR):**
+| CAGR | Score | Logic |
+|------|-------|-------|
+| -20% or worse | 0 | Severe decline |
+| 0% | 4 | Flat growth |
+| 7% | 8 | Target growth |
+| 15%+ | 10 | Exceptional growth |
+
+**Consistency Scoring:**
+- 100% → 10, 50% → 5, 0% → 0 (linear)
+
+**Streak Scoring:**
+| Streak | Score | Label |
+|--------|-------|-------|
+| 0 years | 0 | No streak |
+| 5 years | 5 | Decent |
+| 10 years | 7 | Good |
+| 25+ years | 10 | Dividend Aristocrat |
+
+**Composite** = weighted average of all four scores (default: yield 30%, growth 30%, consistency 20%, streak 20%).
+""")
+
+    with st.expander("Threshold Filters — which stocks are excluded"):
+        st.markdown("""
+Before ranking, stocks are filtered by minimum thresholds (all configurable via UI sliders):
+
+| Filter | Default | Purpose |
+|--------|---------|---------|
+| **Minimum Yield** | 1% | Exclude stocks with negligible dividends |
+| **Maximum Yield** | 15% | Exclude likely-distressed yields |
+| **Minimum CAGR** | -10% | Exclude stocks with severe dividend cuts |
+| **Minimum Consistency** | 50% | Exclude unreliable payers |
+| **Minimum Streak** | 0 years | No streak filter by default |
+
+Stocks that fail any filter are excluded from the ranked results but still appear in the error/excluded count.
 """)
 
 
