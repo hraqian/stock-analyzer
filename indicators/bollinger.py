@@ -23,7 +23,7 @@ class BollingerBandsIndicator(BaseIndicator):
         bb = ta.volatility.BollingerBands(
             close=df["close"],
             window=period,
-            window_dev=int(std_dev),
+            window_dev=std_dev,
         )
         upper = float(bb.bollinger_hband().iloc[-1])
         middle = float(bb.bollinger_mavg().iloc[-1])
