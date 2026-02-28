@@ -1,5 +1,13 @@
 """
 data/yahoo.py — Yahoo Finance data provider (via yfinance).
+
+Uses ``auto_adjust=False`` so that OHLC prices reflect the actual traded
+values (split-adjusted only, *not* dividend-adjusted).  This prevents
+dividend adjustments from distorting candlestick pattern geometry, gap
+detection, and support/resistance levels.
+
+The ``Adj Close`` column is dropped after fetch — the rest of the codebase
+works with split-adjusted prices only.
 """
 
 from __future__ import annotations
@@ -43,7 +51,7 @@ class YahooFinanceProvider(DataProvider):
 
         if start:
             # Date-range mode: ignore period
-            raw = tk.history(start=start, end=end, interval=interval, auto_adjust=True)
+            raw = tk.history(start=start, end=end, interval=interval, auto_adjust=False)
         else:
             # Period mode
             period = (period or "6mo").lower().strip()
@@ -52,12 +60,13 @@ class YahooFinanceProvider(DataProvider):
                     f"Invalid period '{period}'. "
                     f"Valid options: {sorted(VALID_PERIODS)}"
                 )
-            raw = tk.history(period=period, interval=interval, auto_adjust=True)
+            raw = tk.history(period=period, interval=interval, auto_adjust=False)
         assert isinstance(raw, pd.DataFrame), "yfinance did not return a DataFrame"
 
         df: pd.DataFrame = self._normalise_columns(raw)
 
-        # Drop any extra columns yfinance may return (dividends, splits, etc.)
+        # Drop extra columns (dividends, splits, adj close, etc.) — we use
+        # raw split-adjusted OHLCV only (auto_adjust=False).
         keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
         df = df[keep].copy()
 
