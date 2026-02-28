@@ -15,6 +15,9 @@ Usage:
     python main.py AAPL --objective long_term            # use long-term indicator presets
     python main.py AAPL --objective short_term -b        # short-term backtest
     python main.py AAPL -o day_trading -b -i 5m --start <recent>  # day trading
+    python main.py AAPL --dca --period 5y               # DCA backtest (5 years)
+    python main.py AAPL --dca --dca-mode pure            # pure DCA (no dip weighting)
+    python main.py AAPL --dca --dca-amount 1000 --dca-frequency weekly  # custom DCA
     python main.py --generate-config             # write a fresh config.yaml
     python main.py --validate-config             # check config.yaml for errors
     python main.py --list-indicators             # list all available indicators
@@ -63,6 +66,9 @@ Examples:
   python main.py AAPL --objective long_term            # long-term indicator presets
   python main.py AAPL --objective short_term -b -p 6mo # short-term backtest
   python main.py AAPL -o day_trading -b -i 5m --start {d['recent_intraday']}  # day trading
+  python main.py AAPL --dca --period 5y            # DCA backtest (5 years, default dip-weighted)
+  python main.py AAPL --dca --dca-mode pure         # pure DCA, no dip weighting
+  python main.py AAPL --dca --dca-amount 1000       # DCA with $1000/period
   python main.py --generate-config
   python main.py --validate-config
   python main.py --list-indicators
@@ -145,6 +151,39 @@ Streamlit dashboard:
             "Overrides config.yaml suitability.mode_override. "
             "Only used with --backtest."
         ),
+    )
+
+    # DCA backtest mode
+    parser.add_argument(
+        "--dca",
+        action="store_true",
+        help=(
+            "Run a Dollar Cost Averaging backtest. "
+            "Mode is controlled by config.yaml dca.mode "
+            "(pure, dip_weighted, score_integrated). "
+            "Combines with --period (default 5y) and --start/--end."
+        ),
+    )
+    parser.add_argument(
+        "--dca-mode",
+        choices=["pure", "dip_weighted", "score_integrated"],
+        default=None,
+        metavar="MODE",
+        help="DCA mode override (default: from config.yaml dca.mode)",
+    )
+    parser.add_argument(
+        "--dca-amount",
+        type=float,
+        default=None,
+        metavar="AMOUNT",
+        help="DCA base amount in dollars (default: from config.yaml dca.base_amount)",
+    )
+    parser.add_argument(
+        "--dca-frequency",
+        choices=["weekly", "biweekly", "monthly"],
+        default=None,
+        metavar="FREQ",
+        help="DCA purchase frequency (default: from config.yaml dca.frequency)",
     )
 
     # Objective preset
@@ -457,6 +496,105 @@ def main() -> None:
             raise
 
         render_backtest(bt_result, cfg, assessment=assessment)
+        return
+
+    # ── DCA backtest mode ─────────────────────────────────────────────────────
+    if args.dca:
+        from engine.dca import DCABacktester
+        from rich.table import Table
+
+        # Build overrides from CLI flags
+        dca_overrides: dict = {}
+        if args.dca_mode:
+            dca_overrides["mode"] = args.dca_mode
+        if args.dca_amount:
+            dca_overrides["base_amount"] = args.dca_amount
+        if args.dca_frequency:
+            dca_overrides["frequency"] = args.dca_frequency
+
+        # Default to 5y for DCA if no period/start specified
+        dca_period = args.period if args.period != "6mo" else "5y"
+
+        dca_bt = DCABacktester(cfg=cfg, overrides=dca_overrides)
+        mode_label = dca_bt.mode.replace("_", " ").title()
+        console.print(
+            f"[dim]Running DCA backtest: [bold]{mode_label}[/bold] — "
+            f"${dca_bt.base_amount:,.0f} {dca_bt.frequency} "
+            f"({'DRIP on' if dca_bt.drip else 'DRIP off'})...[/dim]"
+        )
+
+        try:
+            dca_result = dca_bt.run(
+                ticker,
+                period=dca_period if not start_date else "5y",
+                interval=args.interval,
+                start=start_date,
+                end=end_date,
+            )
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            sys.exit(1)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Unexpected error:[/red] {exc}")
+            raise
+
+        # ── Render DCA results ────────────────────────────────────────────
+        console.print(f"\n[bold cyan]DCA Backtest Results — {ticker}[/bold cyan]")
+        console.print(f"[dim]{mode_label} | {dca_result.frequency.title()} | "
+                       f"{dca_result.period} | {dca_result.num_purchases} purchases[/dim]\n")
+
+        # Summary table
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric", style="white")
+        table.add_column("Value", justify="right", style="cyan")
+
+        table.add_row("Total Invested", f"${dca_result.total_invested:,.2f}")
+        table.add_row("Final Value", f"${dca_result.final_value:,.2f}")
+        net = dca_result.final_value - dca_result.total_invested
+        color = "green" if net >= 0 else "red"
+        table.add_row("Net Profit", f"[{color}]${net:,.2f}[/{color}]")
+        color = "green" if dca_result.total_return_pct >= 0 else "red"
+        table.add_row("Total Return", f"[{color}]{dca_result.total_return_pct:+.2f}%[/{color}]")
+        color = "green" if dca_result.annualized_return_pct >= 0 else "red"
+        table.add_row("Annualized Return", f"[{color}]{dca_result.annualized_return_pct:+.2f}%[/{color}]")
+        table.add_row("Max Drawdown", f"[red]-{dca_result.max_drawdown_pct:.2f}%[/red]")
+        table.add_row("Avg Cost Basis", f"${dca_result.avg_cost_basis:,.2f}")
+        table.add_row("Current Price", f"${dca_result.current_price:,.2f}")
+        table.add_row("Total Shares", f"{dca_result.total_shares:.4f}")
+        table.add_row("Purchases", f"{dca_result.num_purchases}")
+        table.add_row("Dip Purchases", f"{dca_result.num_dip_purchases}")
+        table.add_row("Avg Multiplier", f"{dca_result.avg_multiplier:.2f}x")
+        if dca_result.total_dividends > 0:
+            table.add_row("Dividends Reinvested", f"${dca_result.total_dividends:,.2f}")
+            table.add_row("DRIP Shares", f"{dca_result.drip_shares:.4f}")
+        table.add_row("Best Purchase Return", f"{dca_result.best_purchase_return_pct:+.2f}%")
+        table.add_row("Worst Purchase Return", f"{dca_result.worst_purchase_return_pct:+.2f}%")
+
+        console.print(table)
+
+        # Dip purchase details
+        dip_buys = [p for p in dca_result.purchases if p.multiplier > 1.0]
+        if dip_buys:
+            console.print(f"\n[bold]Dip Purchases ({len(dip_buys)}):[/bold]")
+            dip_table = Table(show_header=True, header_style="bold dim")
+            dip_table.add_column("Date")
+            dip_table.add_column("Price", justify="right")
+            dip_table.add_column("Dip %", justify="right")
+            dip_table.add_column("Tier")
+            dip_table.add_column("Multiplier", justify="right")
+            dip_table.add_column("Amount", justify="right")
+            for p in dip_buys:
+                dip_table.add_row(
+                    p.date,
+                    f"${p.price:,.2f}",
+                    f"{p.dip_pct:.1f}%",
+                    p.tier.replace("_", " ").title(),
+                    f"{p.multiplier:.1f}x",
+                    f"${p.amount:,.2f}",
+                )
+            console.print(dip_table)
+
+        console.print()
         return
 
     # ── Standard analysis mode ────────────────────────────────────────────────
