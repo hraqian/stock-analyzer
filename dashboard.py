@@ -3459,11 +3459,8 @@ def _render_dca_params(cfg: Config) -> dict:
 def _create_dca_equity_chart(
     dca_result: DCAResult,
 ) -> go.Figure:
-    """Build a Plotly equity chart for DCA results with stock price on
-    a secondary y-axis for direct comparison."""
-    from plotly.subplots import make_subplots
-
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    """Build a Plotly equity chart for DCA results in dollar terms."""
+    fig = go.Figure()
 
     # DCA portfolio value
     if dca_result.equity_curve:
@@ -3475,22 +3472,12 @@ def _create_dca_equity_chart(
             x=dates, y=values,
             name="DCA Portfolio Value",
             line=dict(color="#2196F3", width=2),
-        ), secondary_y=False)
+        ))
         fig.add_trace(go.Scatter(
             x=dates, y=invested,
             name="Total Invested",
             line=dict(color="#9E9E9E", width=1, dash="dash"),
-        ), secondary_y=False)
-
-    # Stock price on secondary y-axis — actual closing price so it aligns
-    # with the price chart at the top of the page.
-    if dca_result.equity_curve and "price" in dca_result.equity_curve[0]:
-        prices = [e["price"] for e in dca_result.equity_curve]
-        fig.add_trace(go.Scatter(
-            x=dates, y=prices,
-            name="Stock Price",
-            line=dict(color="#E91E63", width=2, dash="dashdot"),
-        ), secondary_y=True)
+        ))
 
     # Mark dip purchases
     dip_buys = [p for p in dca_result.purchases if p.multiplier > 1.0]
@@ -3506,18 +3493,72 @@ def _create_dca_equity_chart(
             ),
             text=[f"{p.tier} ({p.multiplier}x, -{p.dip_pct}%)" for p in dip_buys],
             hoverinfo="text+x+y",
-        ), secondary_y=False)
+        ))
 
     fig.update_layout(
         title="DCA Equity Curve",
         xaxis_title="Date",
+        yaxis_title="Portfolio Value ($)",
         hovermode="x unified",
         template="plotly_white",
         height=450,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
-    fig.update_yaxes(title_text="Portfolio Value ($)", secondary_y=False)
-    fig.update_yaxes(title_text="Stock Price ($)", secondary_y=True)
+    return fig
+
+
+def _create_dca_return_chart(dca_result: DCAResult) -> go.Figure | None:
+    """Build a % return comparison chart: DCA portfolio vs buy & hold.
+
+    Both lines are normalised to 0% at the start so the shapes are
+    directly comparable on the same y-axis.  Returns *None* if there is
+    not enough data to build the chart.
+    """
+    ec = dca_result.equity_curve
+    if not ec or "price" not in ec[0]:
+        return None
+
+    dates = [e["date"] for e in ec]
+    values = [e["value"] for e in ec]
+    invested = [e["invested"] for e in ec]
+    prices = [e["price"] for e in ec]
+
+    first_price = prices[0]
+    if first_price <= 0:
+        return None
+
+    # DCA return: (portfolio_value - total_invested) / total_invested
+    dca_pct = [
+        ((v - inv) / inv * 100) if inv > 0 else 0.0
+        for v, inv in zip(values, invested)
+    ]
+
+    # Buy & hold return: stock price % change from day 1
+    bh_pct = [(p / first_price - 1) * 100 for p in prices]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dates, y=dca_pct,
+        name="DCA Return",
+        line=dict(color="#2196F3", width=2),
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates, y=bh_pct,
+        name="Buy & Hold Return",
+        line=dict(color="#E91E63", width=2, dash="dashdot"),
+    ))
+    # Zero line for reference
+    fig.add_hline(y=0, line_dash="dot", line_color="#9E9E9E", line_width=1)
+
+    fig.update_layout(
+        title="Return Comparison: DCA vs Buy & Hold",
+        xaxis_title="Date",
+        yaxis_title="Return (%)",
+        hovermode="x unified",
+        template="plotly_white",
+        height=350,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
     return fig
 
 
@@ -3648,6 +3689,11 @@ def render_dca_section(
     st.subheader("Equity Curve")
     eq_fig = _create_dca_equity_chart(dca_result)
     st.plotly_chart(eq_fig, width="stretch")
+
+    # ── Return comparison chart ──────────────────────────────────────────
+    ret_fig = _create_dca_return_chart(dca_result)
+    if ret_fig is not None:
+        st.plotly_chart(ret_fig, width="stretch")
 
     # ── Comparison vs active strategy ────────────────────────────────────
     if bt_result is not None:
