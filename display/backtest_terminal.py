@@ -361,7 +361,9 @@ def render_backtest(
         ("Commission (flat)", f"${bt_cfg.get('commission_per_trade', 0.0):.2f} / leg"),
         ("Commission (%)", f"{bt_cfg.get('commission_pct', 0.0) * 100:.3f}% / leg"),
         ("Commission Mode", bt_cfg.get("commission_mode", "additive")),
-        ("Warmup Bars", f"{bt_cfg.get('warmup_bars', 200)}"),
+        ("Warmup Bars", f"{result.warmup_bars}"
+            + (f" [dim](configured {bt_cfg.get('warmup_bars', 200)}, clamped)[/dim]"
+               if result.warmup_bars != int(bt_cfg.get("warmup_bars", 200)) else "")),
     ]
 
     # Regime adaptation status
