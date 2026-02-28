@@ -4785,6 +4785,68 @@ Before ranking, stocks are filtered by minimum thresholds (all configurable via 
 Stocks that fail any filter are excluded from the ranked results but still appear in the error/excluded count.
 """)
 
+    # ── Section 5: DCA Backtest ───────────────────────────────────────────
+    st.subheader("5. DCA Backtest Flow")
+    st.markdown("""
+```mermaid
+graph TD
+    A[Select Ticker + Period] --> B[Choose DCA Mode]
+    B --> C{Mode?}
+    C -->|Pure| D[Fixed amount every interval]
+    C -->|Dip-Weighted| E[Compute dip % from rolling high]
+    C -->|Score-Integrated| F[Factor in technical score + RSI + BB]
+    E --> G[Apply multiplier tier]
+    F --> H[Apply multiplier + safety gates]
+    D --> I[Execute buy]
+    G --> I
+    H --> I
+    I --> J{DRIP enabled?}
+    J -->|Yes| K[Reinvest dividends as new shares]
+    J -->|No| L[Skip dividends]
+    K --> M[Track equity curve]
+    L --> M
+    M --> N[Compute metrics + compare vs active strategy]
+```
+
+**DCA Modes:**
+
+| Mode | Description |
+|------|-------------|
+| **Pure** | Fixed dollar amount at each interval — no timing intelligence. Serves as baseline. |
+| **Dip-Weighted** | Base amount scaled by multiplier when price drops from recent high. Buys more during dips. |
+| **Score-Integrated** | Full integration with technical scoring engine. Uses composite score, RSI, and Bollinger Band percentile to modulate buy amounts. Includes safety gates for breakaway gaps and low volume. |
+
+**Multiplier Tiers:**
+
+| Tier | Default Trigger | Default Multiplier | Description |
+|------|----------------|-------------------|-------------|
+| Normal | No dip detected | 1.0x | Standard DCA amount |
+| Mild Dip | Price down 5%+ | 1.5x | Modest overweight |
+| Strong Dip | Price down 10%+ | 2.0x | Aggressive overweight |
+| Extreme Dip | Price down 20%+ | 3.0x | Maximum conviction |
+
+**Safety Gates** (prevent catching falling knives):
+
+| Gate | Default | Description |
+|------|---------|-------------|
+| Max Multiplier | 3.0x | Absolute cap on any single multiplier |
+| Max Period Allocation | $1,500 | Maximum dollars in any single period |
+| Skip Breakaway Gaps | On | Don't overweight on breakaway-down gaps (trend change, not a dip) |
+| Min Volume Ratio | 0.5 | Skip overweight if volume < 50% of average (illiquid) |
+
+**DRIP** (Dividend Reinvestment Plan): When enabled, dividends are automatically reinvested as additional shares at the current price on the ex-dividend date.
+
+**CLI Usage:**
+```
+python main.py AAPL --dca --period 5y               # dip-weighted DCA (default)
+python main.py AAPL --dca --dca-mode pure            # pure DCA, no dip weighting
+python main.py AAPL --dca --dca-amount 1000          # $1000 per period
+python main.py AAPL --dca --dca-frequency weekly     # weekly purchases
+```
+
+All thresholds, multipliers, and safety parameters are configurable via `config.yaml` (under the `dca` section) and via dashboard sliders in the DCA Backtest tab.
+""")
+
 
 # ---------------------------------------------------------------------------
 # Main (new stepped flow)
