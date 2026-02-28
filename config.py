@@ -783,6 +783,68 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
+    # ── Dividend scanner ──────────────────────────────────────────────────
+    "dividend": {
+        # Data fetch parameters
+        "cagr_years": 5,            # years for dividend CAGR calculation
+        "consistency_years": 10,    # years for payout consistency evaluation
+
+        # Minimum thresholds — tickers below these are excluded from results
+        "min_yield": 0.01,          # 1% minimum current yield
+        "max_yield": 0.15,          # 15% cap (above this signals distress)
+        "min_cagr": -0.10,          # allow small declines; -10% floor
+        "min_consistency": 0.50,    # at least 50% of years paid a dividend
+        "min_streak": 0,            # no minimum streak by default
+
+        # Scoring weights — how much each metric counts in the composite score
+        "weights": {
+            "yield": 0.30,
+            "growth": 0.30,
+            "consistency": 0.20,
+            "streak": 0.20,
+        },
+
+        # Yield scoring curve (linear interpolation)
+        # yield <= low_target  → 0 points
+        # yield == mid_target  → 5 points
+        # yield >= high_target → 10 points
+        # yield >  distress    → score penalised back toward 5
+        "yield_scoring": {
+            "low_target": 0.005,    # 0.5%
+            "mid_target": 0.03,     # 3.0%
+            "high_target": 0.06,    # 6.0%
+            "distress_threshold": 0.10,  # 10% — above this starts penalty
+        },
+
+        # Growth scoring (CAGR → 0-10 score)
+        "growth_scoring": {
+            "negative_score": 2.0,  # score when CAGR < 0
+            "zero_score": 4.0,      # score when CAGR ~ 0
+            "target_cagr": 0.07,    # CAGR that maps to score 8
+            "max_cagr": 0.15,       # CAGR that maps to score 10
+        },
+
+        # Consistency scoring (fraction → 0-10)
+        "consistency_scoring": {
+            "full_score_threshold": 1.0,    # 100% consistency → 10
+            "half_score_threshold": 0.50,   # 50% → 5
+        },
+
+        # Streak scoring
+        "streak_scoring": {
+            "aristocrat_years": 25,     # >= 25yr → score 10
+            "good_years": 10,           # >= 10yr → score 7
+            "decent_years": 5,          # >= 5yr → score 5
+        },
+
+        # Technical score blending (optional)
+        "blend_technical": False,       # whether to factor in technical analysis score
+        "technical_weight": 0.20,       # weight for technical score when blending
+        # When blending, dividend weight = 1 - technical_weight
+
+        # Scanner concurrency
+        "max_workers": 8,
+    },
 }
 
 
