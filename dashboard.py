@@ -5717,10 +5717,10 @@ All thresholds, multipliers, and safety parameters are configurable via `config.
 # ---------------------------------------------------------------------------
 
 def render_watchlist() -> None:
-    """Render the Watchlist / Signal Monitor tab."""
-    st.header("Watchlist Signal Monitor")
+    """Render the Watchlist tab with Market Analysis and Portfolio sub-tabs."""
+    st.header("Watchlist")
     st.caption(
-        "Live trading signals using the same strategy as the backtest engine. "
+        "Live trading signals and portfolio tracking. "
         "Manage tickers in the sidebar."
     )
 
@@ -5788,7 +5788,7 @@ def render_watchlist() -> None:
     # ── Current watchlist ─────────────────────────────────────────────────
     st.caption(f"Watching: **{', '.join(wl_tickers)}**")
 
-    # ── Settings ──────────────────────────────────────────────────────────
+    # ── Settings & scan (shared by both sub-tabs) ─────────────────────────
     col_period, col_mode, col_scan = st.columns([2, 2, 1])
     with col_period:
         wl_period = st.selectbox(
@@ -5840,55 +5840,19 @@ def render_watchlist() -> None:
         st.info("Click **Scan Now** to fetch signals for your watchlist.")
         return
 
-    # ── Portfolio summary ─────────────────────────────────────────────────
-    wl_state: WatchlistState | None = st.session_state.get("wl_state")
-    if wl_state:
-        # Compute portfolio value using latest prices from scan
-        prices = {
-            s.ticker: s.current_price
-            for s in signals if s.current_price > 0
-        }
-        cash = wl_state.cash_balance or 0.0
-        positions_value = sum(
-            pos.quantity * prices.get(ticker, pos.entry_price)
-            for ticker, pos in wl_state.positions.items()
-        )
-        total_equity = cash + positions_value
-        num_positions = len(wl_state.positions)
+    # ── Sub-tabs ──────────────────────────────────────────────────────────
+    tab_analysis, tab_portfolio = st.tabs(["Market Analysis", "Portfolio & Trading"])
 
-        p1, p2, p3, p4 = st.columns(4)
-        with p1:
-            new_cash = st.number_input(
-                "Cash",
-                value=cash,
-                min_value=0.0,
-                step=1000.0,
-                format="%.0f",
-                key="wl_cash_input",
-                help="Available cash for new positions. Edit to adjust your balance.",
-            )
-            if new_cash != cash:
-                wl_state.cash_balance = new_cash
-                # Persist immediately
-                state_path = st.session_state.get("wl_state_path")
-                if state_path:
-                    wl_state.save(state_path)
-                st.session_state["wl_state"] = wl_state
-                # Recompute totals
-                cash = new_cash
-                total_equity = cash + positions_value
-        p2.metric(
-            "Positions Value", f"${positions_value:,.0f}",
-            help="Total market value of all open positions.",
-        )
-        p3.metric(
-            "Total Equity", f"${total_equity:,.0f}",
-            help="Cash plus the market value of all open positions.",
-        )
-        p4.metric(
-            "Open Positions", num_positions,
-            help="Number of stocks currently held.",
-        )
+    with tab_analysis:
+        _render_watchlist_analysis(signals)
+
+    with tab_portfolio:
+        _render_watchlist_portfolio(signals)
+
+
+def _render_watchlist_analysis(signals: list[WatchlistSignal]) -> None:
+    """Market Analysis sub-tab: signal overview, scores, DCA context."""
+    import pandas as _pd
 
     # ── Signal summary metrics ────────────────────────────────────────────
     buy_count = sum(1 for s in signals if s.signal == Signal.BUY)
@@ -5948,7 +5912,6 @@ def render_watchlist() -> None:
             "Notes": sig.signal_notes or (sig.error or ""),
         })
 
-    import pandas as _pd
     df_signals = _pd.DataFrame(rows)
 
     # Color-code with Streamlit column config
@@ -6048,6 +6011,61 @@ def render_watchlist() -> None:
                         f"Rolling High: ${dca.rolling_high:,.2f}"
                     )
 
+
+def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
+    """Portfolio & Trading sub-tab: portfolio state, actionable signals, positions."""
+    import pandas as _pd
+
+    # ── Portfolio summary ─────────────────────────────────────────────────
+    wl_state: WatchlistState | None = st.session_state.get("wl_state")
+    if wl_state:
+        # Compute portfolio value using latest prices from scan
+        prices = {
+            s.ticker: s.current_price
+            for s in signals if s.current_price > 0
+        }
+        cash = wl_state.cash_balance or 0.0
+        positions_value = sum(
+            pos.quantity * prices.get(ticker, pos.entry_price)
+            for ticker, pos in wl_state.positions.items()
+        )
+        total_equity = cash + positions_value
+        num_positions = len(wl_state.positions)
+
+        p1, p2, p3, p4 = st.columns(4)
+        with p1:
+            new_cash = st.number_input(
+                "Cash",
+                value=cash,
+                min_value=0.0,
+                step=1000.0,
+                format="%.0f",
+                key="wl_cash_input",
+                help="Available cash for new positions. Edit to adjust your balance.",
+            )
+            if new_cash != cash:
+                wl_state.cash_balance = new_cash
+                # Persist immediately
+                state_path = st.session_state.get("wl_state_path")
+                if state_path:
+                    wl_state.save(state_path)
+                st.session_state["wl_state"] = wl_state
+                # Recompute totals
+                cash = new_cash
+                total_equity = cash + positions_value
+        p2.metric(
+            "Positions Value", f"${positions_value:,.0f}",
+            help="Total market value of all open positions.",
+        )
+        p3.metric(
+            "Total Equity", f"${total_equity:,.0f}",
+            help="Cash plus the market value of all open positions.",
+        )
+        p4.metric(
+            "Open Positions", num_positions,
+            help="Number of stocks currently held.",
+        )
+
     # ── Actionable signals detail ─────────────────────────────────────────
     actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
     if actionable:
@@ -6110,8 +6128,10 @@ def render_watchlist() -> None:
                         f"@ ${sig.position.entry_price:,.2f} "
                         f"(P&L: {pnl:+.1f}%)"
                     )
+    else:
+        st.info("No actionable signals right now. All tickers are on HOLD.")
 
-    # ── Position tracking ─────────────────────────────────────────────────
+    # ── Open Positions ────────────────────────────────────────────────────
     wl_state = st.session_state.get("wl_state")
     if wl_state and wl_state.positions:
         st.subheader("Open Positions")
@@ -6146,6 +6166,7 @@ def render_watchlist() -> None:
             "Unrealized P&L": st.column_config.TextColumn("Unrealized P&L", help="Profit or loss if you closed this position now, as a percentage."),
         })
 
+    # ── Closed Trades ─────────────────────────────────────────────────────
     if wl_state and wl_state.closed_trades:
         with st.expander(f"Closed Trades ({len(wl_state.closed_trades)})"):
             ct_rows = []
