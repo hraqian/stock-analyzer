@@ -131,7 +131,7 @@ def _print_dca_table(title: str, results: list[DCAScanResult], color: str) -> No
         f"  {DIM}{'#':>3}  {'Ticker':<7} {'DCA':>4} {'Conf':4} "
         f"{'Price':>10} {'Dip%':>5} {'Sigma':>5} "
         f"{'Tier':<12} {'Mult':>5} {'Regime':<12} "
-        f"{'RSI':>5} {'BB%B':>5} {'Vol%':>5} {'Ind':>5}{RESET}"
+        f"{'RSI':>5} {'Boll%':>5} {'Vol%':>5} {'Ind':>5}{RESET}"
     )
     print(f"  {DIM}{'─' * 115}{RESET}")
 

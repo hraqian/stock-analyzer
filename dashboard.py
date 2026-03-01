@@ -4623,7 +4623,7 @@ def _build_dca_scanner_results_html(
         "<th>Multiplier</th>"
         "<th>Regime</th>"
         "<th>RSI</th>"
-        "<th>BB %B</th>"
+        "<th>Bollinger %B</th>"
         "<th>Volatility</th>"
         "<th>Indicator Score</th>"
         "</tr>"
@@ -5644,7 +5644,7 @@ def render_watchlist() -> None:
                         st.markdown(f"- {line}")
                     st.caption(
                         f"Volatility: {dca.volatility:.0f}% annualised · "
-                        f"BB %B: {dca.bb_pctile:.0f}% · "
+                        f"Bollinger %B: {dca.bb_pctile:.0f}% · "
                         f"Composite Score: {dca.composite_score:.1f} · "
                         f"Rolling High: ${dca.rolling_high:,.2f}"
                     )
@@ -5687,7 +5687,7 @@ def render_watchlist() -> None:
 
                     d5, d6, d7, d8 = st.columns(4)
                     d5.metric("RSI", f"{sig.dca.rsi:.0f}")
-                    d6.metric("BB %B", f"{sig.dca.bb_pctile:.0f}%")
+                    d6.metric("Bollinger %B", f"{sig.dca.bb_pctile:.0f}%")
                     d7.metric("Volatility", f"{sig.dca.volatility:.0f}%")
                     d8.metric("Regime", sig.dca.regime.replace("_", " ").title())
 
