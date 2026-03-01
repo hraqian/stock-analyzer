@@ -5832,6 +5832,7 @@ def render_watchlist() -> None:
 
             st.session_state["wl_signals"] = signals
             st.session_state["wl_state"] = monitor.state
+            st.session_state["wl_state_path"] = monitor._state_path
             st.session_state["wl_ticker_overrides"] = monitor.ticker_overrides
 
     signals: list[WatchlistSignal] = st.session_state.get("wl_signals", [])
@@ -5856,10 +5857,26 @@ def render_watchlist() -> None:
         num_positions = len(wl_state.positions)
 
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric(
-            "Cash", f"${cash:,.0f}",
-            help="Available cash for new positions.",
-        )
+        with p1:
+            new_cash = st.number_input(
+                "Cash",
+                value=cash,
+                min_value=0.0,
+                step=1000.0,
+                format="%.0f",
+                key="wl_cash_input",
+                help="Available cash for new positions. Edit to adjust your balance.",
+            )
+            if new_cash != cash:
+                wl_state.cash_balance = new_cash
+                # Persist immediately
+                state_path = st.session_state.get("wl_state_path")
+                if state_path:
+                    wl_state.save(state_path)
+                st.session_state["wl_state"] = wl_state
+                # Recompute totals
+                cash = new_cash
+                total_equity = cash + positions_value
         p2.metric(
             "Positions Value", f"${positions_value:,.0f}",
             help="Total market value of all open positions.",
