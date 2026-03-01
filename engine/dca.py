@@ -189,6 +189,16 @@ class DCABacktester:
         self.skip_breakaway: bool = bool(sf.get("skip_breakaway_gaps", True))
         self.min_vol_ratio: float = float(sf.get("min_volume_ratio", 0.5))
 
+        # Crisis suppression gate
+        cs_cfg = sf.get("crisis_suppression", {})
+        cs_ov = ov.get("safety", {}).get("crisis_suppression", {})
+        cs = {**cs_cfg, **cs_ov}
+        self.crisis_enabled: bool = bool(cs.get("enabled", True))
+        self.crisis_min_signals: int = int(cs.get("min_signals", 2))
+        self.crisis_composite_below: float = float(cs.get("composite_below", 2.0))
+        self.crisis_panic_rsi: float = float(cs.get("panic_rsi_below", 20.0))
+        self.crisis_vol_spike: float = float(cs.get("volume_spike_above", 3.0))
+
         # Commission model — reuse the backtest commission config
         bt_cfg = cfg.section("backtest")
         self._commission_flat: float = float(bt_cfg.get("commission_per_trade", 0.0))
@@ -458,6 +468,40 @@ class DCABacktester:
             mult, tier = self.mult_mild, "mild_dip"
         else:
             mult, tier = self.mult_normal, "normal"
+
+        # ── Crisis suppression gate ──────────────────────────────────────
+        # When multiple bearish signals align simultaneously, suppress any
+        # dip overweight back to 1.0x to avoid doubling down into a
+        # structural collapse (fraud, terrible earnings, etc.).
+        if (
+            self.crisis_enabled
+            and mult > self.mult_normal
+            and score_df is not None
+        ):
+            date = dates[bar_idx]
+            if date in score_df.index:
+                row = score_df.loc[date]
+                crisis_signals = 0
+
+                # Signal 1: composite score extremely low
+                composite_val = float(row.get("composite", 5.0))
+                if composite_val < self.crisis_composite_below:
+                    crisis_signals += 1
+
+                # Signal 2: RSI in panic territory
+                rsi_val = float(row.get("rsi_raw", 50.0))
+                if rsi_val < self.crisis_panic_rsi:
+                    crisis_signals += 1
+
+                # Signal 3: volume spike (confirms the move has conviction)
+                if volume is not None and avg_vol is not None:
+                    cur_vol = float(volume[bar_idx])
+                    avg = float(avg_vol[bar_idx])
+                    if avg > 0 and (cur_vol / avg) > self.crisis_vol_spike:
+                        crisis_signals += 1
+
+                if crisis_signals >= self.crisis_min_signals:
+                    mult, tier = self.mult_normal, "normal"
 
         # ── Score-integrated adjustments ─────────────────────────────────
         if self.mode == "score_integrated" and score_df is not None:

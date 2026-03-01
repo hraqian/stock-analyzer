@@ -3717,11 +3717,59 @@ def _render_dca_params(cfg: Config) -> dict:
                                 float(sf.get("min_volume_ratio", 0.5)),
                                 step=0.1, key="dca_min_vol",
                                 help="If current volume / average volume is below this ratio, the dip is in low-liquidity conditions — overweighting is suppressed.")
+
+            st.divider()
+            st.markdown("**Crisis Suppression**")
+            cs_cfg = sf.get("crisis_suppression", {})
+            crisis_on = st.checkbox(
+                "Enable crisis suppression",
+                value=bool(cs_cfg.get("enabled", True)),
+                key="dca_crisis_on",
+                help="When multiple bearish signals fire at once, suppress dip multipliers back to 1.0x to avoid overweighting into a structural collapse.",
+            )
+            if crisis_on:
+                crisis_min = st.slider(
+                    "Min. signals to suppress", 2, 3, 
+                    int(cs_cfg.get("min_signals", 2)),
+                    step=1, key="dca_crisis_min",
+                    help="How many crisis signals must fire simultaneously to suppress overweighting. 2 = more cautious, 3 = only the worst situations.",
+                )
+                crisis_comp = st.slider(
+                    "Composite score below", 0.5, 5.0,
+                    float(cs_cfg.get("composite_below", 2.0)),
+                    step=0.5, key="dca_crisis_comp",
+                    help="If the composite technical score is below this threshold, it counts as one crisis signal (nearly everything bearish).",
+                )
+                crisis_rsi = st.slider(
+                    "Panic RSI below", 5.0, 30.0,
+                    float(cs_cfg.get("panic_rsi_below", 20.0)),
+                    step=1.0, key="dca_crisis_rsi",
+                    help="If RSI drops below this level, it counts as one crisis signal (panic territory, not just oversold).",
+                )
+                crisis_vol = st.slider(
+                    "Volume spike above (× avg)", 1.5, 10.0,
+                    float(cs_cfg.get("volume_spike_above", 3.0)),
+                    step=0.5, key="dca_crisis_vol",
+                    help="If current volume exceeds average volume by this multiple, it counts as one crisis signal (confirms the move has conviction).",
+                )
+            else:
+                crisis_min = int(cs_cfg.get("min_signals", 2))
+                crisis_comp = float(cs_cfg.get("composite_below", 2.0))
+                crisis_rsi = float(cs_cfg.get("panic_rsi_below", 20.0))
+                crisis_vol = float(cs_cfg.get("volume_spike_above", 3.0))
+
             ov["safety"] = {
                 "max_multiplier": max_mult,
                 "max_period_allocation": max_alloc,
                 "skip_breakaway_gaps": skip_breakaway,
                 "min_volume_ratio": min_vol,
+                "crisis_suppression": {
+                    "enabled": crisis_on,
+                    "min_signals": crisis_min,
+                    "composite_below": crisis_comp,
+                    "panic_rsi_below": crisis_rsi,
+                    "volume_spike_above": crisis_vol,
+                },
             }
 
     if mode == "score_integrated":
@@ -6211,9 +6259,15 @@ def main() -> None:
                     try:
                         dca_bt = DCABacktester(cfg=cfg, overrides=dca_overrides)
 
-                        # Compute score_df for score_integrated mode
+                        # Compute score_df for score_integrated mode,
+                        # or for dip_weighted when crisis suppression is on
+                        # (the crisis gate needs composite + RSI data).
                         score_df = None
-                        if dca_bt.mode == "score_integrated":
+                        need_scores = (
+                            dca_bt.mode == "score_integrated"
+                            or (dca_bt.mode == "dip_weighted" and dca_bt.crisis_enabled)
+                        )
+                        if need_scores:
                             provider = YahooFinanceProvider()
                             score_df = compute_dca_score_df(
                                 cfg,

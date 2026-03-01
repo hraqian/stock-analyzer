@@ -781,13 +781,24 @@ def main() -> None:
             f"({'DRIP on' if dca_bt.drip else 'DRIP off'})...[/dim]"
         )
 
-        # Compute score_df for score_integrated mode
+        # Compute score_df for score_integrated mode, or for
+        # dip_weighted when crisis suppression is enabled (the crisis
+        # gate needs composite + RSI data).
         score_df = None
-        if dca_bt.mode == "score_integrated":
+        need_scores = (
+            dca_bt.mode == "score_integrated"
+            or (dca_bt.mode == "dip_weighted" and dca_bt.crisis_enabled)
+        )
+        if need_scores:
             from analysis.score_timeseries import compute_dca_score_df
             from data.yahoo import YahooFinanceProvider
 
-            console.print("[dim]Computing technical scores for score-integrated mode...[/dim]")
+            label = (
+                "Computing technical scores for score-integrated mode..."
+                if dca_bt.mode == "score_integrated"
+                else "Computing technical scores for crisis suppression gate..."
+            )
+            console.print(f"[dim]{label}[/dim]")
             provider = YahooFinanceProvider()
             score_df = compute_dca_score_df(
                 cfg,

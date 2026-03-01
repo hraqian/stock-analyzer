@@ -1102,6 +1102,18 @@ dca:
     skip_breakaway_gaps: true        # don't overweight on breakaway-down gaps
     min_volume_ratio: 0.5            # skip overweight if volume < 50% of avg
 
+    # Crisis suppression gate — when multiple bearish signals align
+    # simultaneously, suppress dip multipliers back to 1.0x instead of
+    # doubling/tripling down into a potential structural collapse (fraud,
+    # earnings disaster, etc.).  Does NOT skip the purchase — just removes
+    # the overweight so you maintain DCA discipline at the normal amount.
+    crisis_suppression:
+      enabled: true                  # master toggle for crisis suppression
+      min_signals: 2                 # how many signals must fire to suppress
+      composite_below: 2.0           # composite score < this = crisis signal
+      panic_rsi_below: 20.0          # RSI < this = crisis signal
+      volume_spike_above: 3.0        # volume / avg_volume > this = crisis signal
+
   # Budget mode — alternative to fixed base_amount.
   # Specify a total budget and let the engine compute $/period.
   budget:

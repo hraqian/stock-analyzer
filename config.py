@@ -917,6 +917,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_period_allocation": 1500,   # max dollars in any single period
             "skip_breakaway_gaps": True,     # don't overweight on breakaway-down gaps
             "min_volume_ratio": 0.5,         # skip overweight if volume < 50% of avg
+            "crisis_suppression": {
+                "enabled": True,             # master toggle
+                "min_signals": 2,            # how many signals must fire to suppress
+                "composite_below": 2.0,      # composite score < this = crisis signal
+                "panic_rsi_below": 20.0,     # RSI < this = crisis signal
+                "volume_spike_above": 3.0,   # volume / avg_volume > this = crisis signal
+            },
         },
 
         # Budget mode — alternative to fixed base_amount.
