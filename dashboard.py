@@ -6216,6 +6216,11 @@ def _render_recommendation_card(
                     override_quantity=float(edit_qty),
                 )
                 st.session_state.pop(edit_key, None)
+                st.toast(
+                    f"{action_label} {rec.ticker}: "
+                    f"{int(edit_qty)} shares @ ${edit_price:,.2f}",
+                    icon="✅",
+                )
                 st.rerun()
 
         # ── Action buttons ────────────────────────────────────────────
@@ -6229,6 +6234,12 @@ def _render_recommendation_card(
                     help=f"Execute this {action_label.lower()} at the recommended price and quantity.",
                 ):
                     _execute_recommendation(rec, wl_state)
+                    st.toast(
+                        f"{action_label} {rec.ticker}: "
+                        f"{rec.recommended_quantity:.0f} shares "
+                        f"@ ${rec.recommended_price:,.2f}",
+                        icon="✅",
+                    )
                     st.rerun()
             with btn2:
                 if st.button(
@@ -6247,6 +6258,7 @@ def _render_recommendation_card(
                     skipped = st.session_state.get("wl_skipped", set())
                     skipped.add(rec.ticker)
                     st.session_state["wl_skipped"] = skipped
+                    st.toast(f"Skipped {rec.ticker} recommendation.", icon="⏭️")
                     st.rerun()
 
 
@@ -6419,6 +6431,13 @@ def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
         if total_proceeds > 0:
             summary_line += f"  Total sell proceeds: ${total_proceeds:,.0f}."
         st.markdown(summary_line)
+
+        if len(buy_recs) > 1:
+            st.caption(
+                "Note: Each buy recommendation sizes independently from your "
+                "current cash. If you confirm multiple buys, re-scan afterward "
+                "to get updated recommendations with your new cash balance."
+            )
 
         for rec in pending_recs:
             _render_recommendation_card(rec, signals, wl_state)
