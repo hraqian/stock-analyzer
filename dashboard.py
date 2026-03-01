@@ -215,6 +215,7 @@ def _build_score_table_html(
     rows: list[dict],
     name_col: str,
     columns: list[str],
+    column_tooltips: dict[str, str] | None = None,
 ) -> str:
     """Build a dark-themed HTML table with color-coded score bars.
 
@@ -222,18 +223,21 @@ def _build_score_table_html(
         rows: List of row dicts.  Each dict must have keys matching *columns*.
         name_col: Which column holds the row name (e.g. "Indicator" or "Pattern").
         columns: Ordered list of column names to render.
+        column_tooltips: Optional mapping of column name → tooltip text shown on hover.
 
     Special handling:
       - "Score" column → rendered via ``score_bar_html()``.
       - "Weight" column → if float, formatted as percentage; if already str, used as-is.
       - Last row is rendered bold (OVERALL row).
     """
+    tooltips = column_tooltips or {}
+
     # --- CSS ---
     style = (
         "<style>"
         ".score-table { width:100%; border-collapse:collapse; font-size:0.85rem; }"
         ".score-table th { text-align:left; padding:6px 8px; border-bottom:2px solid #444; "
-        "  color:#aaa; font-weight:600; }"
+        "  color:#aaa; font-weight:600; cursor:help; }"
         ".score-table td { padding:5px 8px; border-bottom:1px solid #2a2a2a; color:#ddd; "
         "  vertical-align:middle; }"
         ".score-table tr:last-child td { border-bottom:none; font-weight:700; }"
@@ -242,7 +246,11 @@ def _build_score_table_html(
     )
 
     # --- Header ---
-    header_cells = "".join(f"<th>{c}</th>" for c in columns)
+    header_cells = ""
+    for c in columns:
+        tip = tooltips.get(c, "")
+        title_attr = f' title="{tip}"' if tip else ""
+        header_cells += f"<th{title_attr}>{c}</th>"
     header = f"<tr>{header_cells}</tr>"
 
     # --- Rows ---
@@ -2433,6 +2441,13 @@ def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
         rows,
         name_col="Indicator",
         columns=["Indicator", "Value", "Detail", "Score", "Weight"],
+        column_tooltips={
+            "Indicator": "Name of the technical indicator (e.g. RSI, MACD, ADX).",
+            "Value": "Current reading of this indicator.",
+            "Detail": "Extra context about what the indicator value means.",
+            "Score": "How bullish (10) or bearish (0) this indicator reads. 5 is neutral.",
+            "Weight": "How much influence this indicator has on the overall score.",
+        },
     )
     st.markdown(html, unsafe_allow_html=True)
 
@@ -2483,6 +2498,13 @@ def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
         rows,
         name_col="Pattern",
         columns=["Pattern", "Signal", "Detail", "Score", "Weight"],
+        column_tooltips={
+            "Pattern": "Name of the chart or candlestick pattern detected.",
+            "Signal": "Bullish (price likely to rise), Bearish (likely to fall), or Neutral.",
+            "Detail": "Extra context about the pattern detection.",
+            "Score": "How strongly bullish (10) or bearish (0) this pattern is. 5 is neutral.",
+            "Weight": "How much this pattern contributes to the overall pattern score.",
+        },
     )
     st.markdown(html, unsafe_allow_html=True)
 
@@ -2499,10 +2521,10 @@ def render_suitability(assessment_dict: dict, ticker: str) -> None:
     msg_type = mode_map.get(mode_value, "info")
 
     cols = st.columns(4)
-    cols[0].metric("Trading Mode", mode_label)
-    cols[1].metric("Avg Volume", f"{assessment_dict['avg_daily_volume']:,.0f}")
-    cols[2].metric("ADX", f"{assessment_dict['adx_value']:.1f}")
-    cols[3].metric("ATR%", f"{assessment_dict['atr_pct'] * 100:.2f}%")
+    cols[0].metric("Trading Mode", mode_label, help="Recommended trading style: Long/Short = trade both directions, Long Only = only buy, Hold Only = too risky or illiquid to actively trade.")
+    cols[1].metric("Avg Volume", f"{assessment_dict['avg_daily_volume']:,.0f}", help="Average number of shares traded daily. Higher volume means easier to buy/sell without moving the price.")
+    cols[2].metric("ADX", f"{assessment_dict['adx_value']:.1f}", help="Average Directional Index — measures trend strength. Below 20 = weak/no trend, 20-40 = solid trend, above 40 = very strong trend.")
+    cols[3].metric("ATR%", f"{assessment_dict['atr_pct'] * 100:.2f}%", help="Average True Range as a percentage of price. Shows how much the stock typically moves in a day. Higher = more volatile.")
 
     for reason in assessment_dict["reasons"]:
         if msg_type == "error":
@@ -2553,12 +2575,12 @@ def render_regime(regime: RegimeAssessment | None) -> None:
     # Metrics row
     m = regime.metrics
     mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
-    mc1.metric("Total Return", f"{m.total_return:+.1%}")
-    mc2.metric("ADX (current)", f"{m.adx:.1f}")
-    mc3.metric("ADX (avg)", f"{m.rolling_adx_mean:.1f}")
-    mc4.metric("Trend MA %", f"{m.pct_above_ma:.0f}%")
-    mc5.metric("ATR%", f"{m.atr_pct:.3f}")
-    mc6.metric("Dir Changes", f"{m.direction_changes:.0%}")
+    mc1.metric("Total Return", f"{m.total_return:+.1%}", help="Total price change over the analysis window. Positive = price went up overall.")
+    mc2.metric("ADX (current)", f"{m.adx:.1f}", help="Current ADX reading — measures how strong the trend is right now. Above 25 = meaningful trend.")
+    mc3.metric("ADX (avg)", f"{m.rolling_adx_mean:.1f}", help="Average ADX over the period. Helps distinguish a persistently trending market from one that just spiked briefly.")
+    mc4.metric("Trend MA %", f"{m.pct_above_ma:.0f}%", help="Percentage of days the price was above its moving average. Above 60% = mostly bullish, below 40% = mostly bearish.")
+    mc5.metric("ATR%", f"{m.atr_pct:.3f}", help="Average True Range as a fraction of price. Measures daily volatility — higher means bigger day-to-day price swings.")
+    mc6.metric("Dir Changes", f"{m.direction_changes:.0%}", help="How often the price direction flipped (up-to-down or down-to-up). High = choppy, low = smooth trend.")
 
     # Reasons
     if regime.reasons:
@@ -2584,16 +2606,16 @@ def render_backtest_metrics(bt_result: BacktestResult) -> None:
     c1, c2, c3, c4 = st.columns(4)
 
     ret_delta = f"{bt_result.total_return_pct:+.2f}%"
-    c1.metric("Total Return", ret_delta)
-    c2.metric("Annualized", f"{bt_result.annualized_return_pct:+.2f}%")
-    c3.metric("Max Drawdown", f"{bt_result.max_drawdown_pct:.2f}%")
-    c4.metric("Sharpe Ratio", f"{bt_result.sharpe_ratio:.2f}")
+    c1.metric("Total Return", ret_delta, help="Total percentage gain or loss over the entire backtest period.")
+    c2.metric("Annualized", f"{bt_result.annualized_return_pct:+.2f}%", help="Return scaled to a yearly rate so you can compare strategies across different time periods.")
+    c3.metric("Max Drawdown", f"{bt_result.max_drawdown_pct:.2f}%", help="The worst peak-to-trough decline during the backtest. Smaller is better — it shows how much pain you'd have endured.")
+    c4.metric("Sharpe Ratio", f"{bt_result.sharpe_ratio:.2f}", help="Return per unit of risk. Above 1 is decent, above 2 is very good. Higher means you're getting more reward for the volatility you're taking on.")
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Total Trades", f"{bt_result.total_trades}")
-    c6.metric("Win Rate", f"{bt_result.win_rate_pct:.1f}%")
-    c7.metric("Profit Factor", f"{bt_result.profit_factor:.2f}")
-    c8.metric("Avg Trade P&L", f"{bt_result.avg_trade_pnl_pct:+.2f}%")
+    c5.metric("Total Trades", f"{bt_result.total_trades}", help="Total number of completed round-trip trades (buy then sell) during the backtest.")
+    c6.metric("Win Rate", f"{bt_result.win_rate_pct:.1f}%", help="Percentage of trades that ended in profit. Above 50% means more winners than losers.")
+    c7.metric("Profit Factor", f"{bt_result.profit_factor:.2f}", help="Total profits divided by total losses. Above 1.0 means the strategy is profitable overall. 2.0+ is strong.")
+    c8.metric("Avg Trade P&L", f"{bt_result.avg_trade_pnl_pct:+.2f}%", help="Average profit or loss per trade as a percentage. Positive means the typical trade makes money.")
 
 
 def render_trade_log(bt_result: BacktestResult) -> None:
@@ -2619,7 +2641,19 @@ def render_trade_log(bt_result: BacktestResult) -> None:
         })
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, width="stretch", hide_index=True, height=400)
+    st.dataframe(df, width="stretch", hide_index=True, height=400, column_config={
+        "#": st.column_config.NumberColumn("#"),
+        "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise. SHORT = sold expecting price to drop."),
+        "Entry Date": st.column_config.TextColumn("Entry Date", help="Date the trade was opened."),
+        "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the trade was entered."),
+        "Entry Reason": st.column_config.TextColumn("Entry Reason", help="Why the strategy opened this trade (e.g. score crossed buy threshold)."),
+        "Exit Date": st.column_config.TextColumn("Exit Date", help="Date the trade was closed."),
+        "Exit Price": st.column_config.TextColumn("Exit Price", help="Price at which the trade was exited."),
+        "Qty": st.column_config.NumberColumn("Qty", help="Number of shares bought or sold."),
+        "P&L": st.column_config.TextColumn("P&L", help="Profit or loss in dollars for this trade."),
+        "P&L %": st.column_config.TextColumn("P&L %", help="Profit or loss as a percentage of the entry price."),
+        "Exit Reason": st.column_config.TextColumn("Exit Reason", help="Why the trade was closed (e.g. stop loss hit, take profit reached, signal reversed)."),
+    })
 
 
 def render_significant_patterns(bt_result: BacktestResult) -> None:
@@ -2663,7 +2697,15 @@ def render_significant_patterns(bt_result: BacktestResult) -> None:
         f'</div>',
         unsafe_allow_html=True,
     )
-    st.dataframe(df, width="stretch", hide_index=True, height=400)
+    st.dataframe(df, width="stretch", hide_index=True, height=400, column_config={
+        "Date": st.column_config.TextColumn("Date", help="When this pattern was detected in the price data."),
+        "Detector": st.column_config.TextColumn("Detector", help="Which engine spotted this (e.g. candlestick detector, chart pattern detector)."),
+        "Pattern": st.column_config.TextColumn("Pattern", help="The specific formation (e.g. Hammer, Double Bottom, Head & Shoulders)."),
+        "Signal": st.column_config.TextColumn("Signal", help="Bullish (price likely to rise), Bearish (likely to fall), or Neutral."),
+        "Strength": st.column_config.TextColumn("Strength", help="How textbook-perfect the pattern is. 1.0 = perfect, closer to 0 = weak."),
+        "Confidence": st.column_config.TextColumn("Confidence", help="How reliable this pattern type historically is. Higher = more trustworthy."),
+        "Detail": st.column_config.TextColumn("Detail", help="Extra information about what was detected."),
+    })
 
 
 def render_strategy_config(cfg: Config) -> None:
@@ -2750,7 +2792,10 @@ def render_strategy_config(cfg: Config) -> None:
     rows.append(("Close on End", "ON" if bt_cfg.get("close_on_end_of_data", True) else "OFF"))
 
     df = pd.DataFrame(rows, columns=["Parameter", "Value"])
-    st.dataframe(df, width="stretch", hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True, column_config={
+        "Parameter": st.column_config.TextColumn("Parameter", help="Name of the strategy or backtest setting."),
+        "Value": st.column_config.TextColumn("Value", help="Current value of this setting from your config."),
+    })
 
 
 
@@ -2788,11 +2833,11 @@ def render_stock_overview(
         if meta_parts:
             st.caption(" | ".join(meta_parts))
     with col2:
-        st.metric("Price", f"${price:.2f}")
+        st.metric("Price", f"${price:.2f}", help="Current share price of this stock.")
     with col3:
-        st.metric("Indicator Score", f"{overall_ind:.1f} / 10")
+        st.metric("Indicator Score", f"{overall_ind:.1f} / 10", help="Composite score from technical indicators (RSI, MACD, moving averages, etc.). Above 6 is bullish, below 3.5 is bearish.")
     with col4:
-        st.metric("Pattern Score", f"{overall_pat:.1f} / 10")
+        st.metric("Pattern Score", f"{overall_pat:.1f} / 10", help="Composite score from chart and candlestick pattern recognition. Bullish patterns push it up, bearish patterns pull it down.")
 
     # Subgroup score summary (compact)
     trend_s = result.composite.get("trend_score")
@@ -3812,25 +3857,25 @@ def _render_dca_metrics(result: DCAResult) -> None:
     """Render DCA performance metrics in a 4-column layout."""
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Total Invested", f"${result.total_invested:,.2f}")
-        st.metric("Final Value", f"${result.final_value:,.2f}")
-        st.metric("Net Profit", f"${result.final_value - result.total_invested:,.2f}")
+        st.metric("Total Invested", f"${result.total_invested:,.2f}", help="Total dollars you put in across all DCA purchases.")
+        st.metric("Final Value", f"${result.final_value:,.2f}", help="What your total position is worth today at the current price.")
+        st.metric("Net Profit", f"${result.final_value - result.total_invested:,.2f}", help="Final value minus total invested. Positive = you made money.")
     with c2:
-        st.metric("Total Return", f"{result.total_return_pct:+.2f}%")
-        st.metric("Annualized Return", f"{result.annualized_return_pct:+.2f}%")
-        st.metric("Max Drawdown", f"-{result.max_drawdown_pct:.2f}%")
+        st.metric("Total Return", f"{result.total_return_pct:+.2f}%", help="Overall percentage gain or loss on your total investment.")
+        st.metric("Annualized Return", f"{result.annualized_return_pct:+.2f}%", help="Return scaled to a yearly rate for easy comparison across different time periods.")
+        st.metric("Max Drawdown", f"-{result.max_drawdown_pct:.2f}%", help="Worst peak-to-trough decline. Shows the maximum pain you'd have experienced.")
     with c3:
-        st.metric("Avg Cost Basis", f"${result.avg_cost_basis:,.2f}")
-        st.metric("Current Price", f"${result.current_price:,.2f}")
+        st.metric("Avg Cost Basis", f"${result.avg_cost_basis:,.2f}", help="Your average purchase price per share, weighted by how many shares you bought at each price.")
+        st.metric("Current Price", f"${result.current_price:,.2f}", help="The stock's most recent closing price.")
         basis_vs_price = (
             (result.current_price - result.avg_cost_basis) / result.avg_cost_basis * 100
             if result.avg_cost_basis > 0 else 0.0
         )
-        st.metric("Price vs Basis", f"{basis_vs_price:+.2f}%")
+        st.metric("Price vs Basis", f"{basis_vs_price:+.2f}%", help="How much the current price is above or below your average cost. Positive = you're in profit.")
     with c4:
-        st.metric("Total Purchases", str(result.num_purchases))
-        st.metric("Dip Purchases", str(result.num_dip_purchases))
-        st.metric("Avg Multiplier", f"{result.avg_multiplier:.2f}x")
+        st.metric("Total Purchases", str(result.num_purchases), help="Total number of DCA buy orders executed over the period.")
+        st.metric("Dip Purchases", str(result.num_dip_purchases), help="How many purchases were triggered by a dip (price drop below a threshold). These get a higher investment multiplier.")
+        st.metric("Avg Multiplier", f"{result.avg_multiplier:.2f}x", help="Average investment multiplier across all purchases. Above 1.0x means dip-buying boosted your average allocation.")
 
     # Commission + dividend rows
     show_commissions = result.total_commissions > 0
@@ -3839,38 +3884,38 @@ def _render_dca_metrics(result: DCAResult) -> None:
         c1, c2, c3, _ = st.columns(4)
         if show_commissions:
             with c1:
-                st.metric("Total Commissions", f"${result.total_commissions:,.2f}")
+                st.metric("Total Commissions", f"${result.total_commissions:,.2f}", help="Sum of all trading commissions/fees paid across every DCA purchase.")
                 comm_pct = (
                     result.total_commissions / result.total_invested * 100
                     if result.total_invested > 0 else 0.0
                 )
-                st.metric("Commission Drag", f"{comm_pct:.2f}%")
+                st.metric("Commission Drag", f"{comm_pct:.2f}%", help="Commissions as a percentage of total invested. Lower is better — this eats into your returns.")
         if show_drip:
             col = c2 if show_commissions else c1
             with col:
-                st.metric("Dividends Reinvested", f"${result.total_dividends:,.2f}")
+                st.metric("Dividends Reinvested", f"${result.total_dividends:,.2f}", help="Total dollar amount of dividends that were automatically reinvested to buy more shares (DRIP).")
             next_col = c3 if show_commissions else c2
             with next_col:
-                st.metric("DRIP Shares", f"{result.drip_shares:.4f}")
-                st.metric("Total Shares", f"{result.total_shares:.4f}")
+                st.metric("DRIP Shares", f"{result.drip_shares:.4f}", help="Number of extra shares acquired through dividend reinvestment.")
+                st.metric("Total Shares", f"{result.total_shares:.4f}", help="Total shares owned including both DCA purchases and DRIP shares.")
 
     # Budget mode info
     if result.budget_mode:
         st.markdown("---")
         b1, b2, b3, b4 = st.columns(4)
         with b1:
-            st.metric("Total Budget", f"${result.total_budget:,.0f}")
+            st.metric("Total Budget", f"${result.total_budget:,.0f}", help="The fixed dollar amount you allocated for the entire DCA plan.")
         with b2:
-            st.metric("Computed Base/Period", f"${result.computed_base_amount:,.2f}")
+            st.metric("Computed Base/Period", f"${result.computed_base_amount:,.2f}", help="The calculated base investment per period, derived from your total budget and number of periods.")
         with b3:
-            st.metric("Budget Remaining", f"${result.budget_remaining:,.2f}")
+            st.metric("Budget Remaining", f"${result.budget_remaining:,.2f}", help="How much of your original budget hasn't been deployed yet.")
         with b4:
             utilisation = (
                 (result.total_budget - result.budget_remaining)
                 / result.total_budget * 100
                 if result.total_budget > 0 else 0.0
             )
-            st.metric("Budget Utilisation", f"{utilisation:.1f}%")
+            st.metric("Budget Utilisation", f"{utilisation:.1f}%", help="Percentage of your total budget that has been invested so far.")
             st.caption(f"Reserve method: {result.reserve_method}")
 
 
@@ -3902,7 +3947,20 @@ def _render_dca_purchase_log(result: DCAResult) -> None:
         })
         rows.append(row)
     df = pd.DataFrame(rows)
-    st.dataframe(df, width="stretch", hide_index=True, height=400)
+    _purchase_col_config = {
+        "Date": st.column_config.TextColumn("Date", help="Date of this DCA purchase."),
+        "Price": st.column_config.TextColumn("Price", help="Stock price at time of purchase."),
+        "Dip %": st.column_config.TextColumn("Dip %", help="How far the price had fallen from its recent high."),
+        "Tier": st.column_config.TextColumn("Tier", help="Dip severity bucket: Normal, Mild Dip, Strong Dip, or Extreme Dip."),
+        "Multiplier": st.column_config.TextColumn("Multiplier", help="How many times the base amount was invested. 1.0x = normal."),
+        "Amount": st.column_config.TextColumn("Amount", help="Dollar amount invested in this purchase."),
+        "Commission": st.column_config.TextColumn("Commission", help="Trading commission paid for this purchase."),
+        "Shares": st.column_config.TextColumn("Shares", help="Number of shares bought in this purchase."),
+        "Cumulative Shares": st.column_config.TextColumn("Cumulative Shares", help="Total shares owned after this purchase."),
+        "Cumulative Invested": st.column_config.TextColumn("Cumulative Invested", help="Total cash invested so far across all purchases."),
+        "Portfolio Value": st.column_config.TextColumn("Portfolio Value", help="Total value of all shares at this point in time."),
+    }
+    st.dataframe(df, width="stretch", hide_index=True, height=400, column_config=_purchase_col_config)
 
 
 def _render_dca_comparison(dca_result: DCAResult, bt_result: BacktestResult) -> None:
@@ -3928,7 +3986,11 @@ def _render_dca_comparison(dca_result: DCAResult, bt_result: BacktestResult) -> 
          f"{bt_result.total_trades} round-trips"),
     ]
     df = pd.DataFrame(rows, columns=["Metric", "DCA Strategy", "Active Strategy"])
-    st.dataframe(df, width="stretch", hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True, column_config={
+        "Metric": st.column_config.TextColumn("Metric", help="The performance measure being compared."),
+        "DCA Strategy": st.column_config.TextColumn("DCA Strategy", help="Dollar-Cost Averaging result — capital deployed gradually over time."),
+        "Active Strategy": st.column_config.TextColumn("Active Strategy", help="Score-based trading strategy — capital deployed as a lump sum on day one."),
+    })
 
 
 def render_dca_section(
@@ -4001,7 +4063,12 @@ def render_dca_section(
                     "DRIP Shares": f"{d['shares_acquired']:.4f}",
                 })
             df = pd.DataFrame(div_rows)
-            st.dataframe(df, width="stretch", hide_index=True, height=300)
+            st.dataframe(df, width="stretch", hide_index=True, height=300, column_config={
+                "Date": st.column_config.TextColumn("Date", help="Date the dividend was paid."),
+                "Per Share": st.column_config.TextColumn("Per Share", help="Dividend amount paid per share owned."),
+                "Total Amount": st.column_config.TextColumn("Total Amount", help="Total dividend payment based on shares held."),
+                "DRIP Shares": st.column_config.TextColumn("DRIP Shares", help="Shares automatically purchased by reinvesting the dividend (if DRIP is enabled)."),
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -4050,27 +4117,27 @@ def _build_scanner_results_html(
     mt_headers = ""
     if show_mt:
         mt_headers = (
-            "<th style='width:80px;'>MT Score</th>"
-            "<th>MT Signal</th>"
-            "<th>Daily</th>"
-            "<th>Weekly</th>"
-            "<th>Monthly</th>"
-            "<th>Agreement</th>"
+            "<th style='width:80px;' title='Aggregated score across multiple timeframes (daily, weekly, monthly).'>MT Score</th>"
+            "<th title='Combined multi-timeframe signal direction.'>MT Signal</th>"
+            "<th title='Signal from the daily timeframe analysis.'>Daily</th>"
+            "<th title='Signal from the weekly timeframe analysis.'>Weekly</th>"
+            "<th title='Signal from the monthly timeframe analysis.'>Monthly</th>"
+            "<th title='Whether daily, weekly, and monthly signals agree (aligned), partially agree (mixed), or disagree (conflicting).'>Agreement</th>"
         )
 
     header = (
         "<tr>"
         "<th style='width:30px;'>#</th>"
-        "<th>Ticker</th>"
-        "<th>Signal</th>"
-        "<th>Confidence</th>"
-        "<th>Score</th>"
-        "<th style='width:80px;'>Trend</th>"
-        "<th style='width:80px;'>Contrarian</th>"
-        "<th style='width:80px;'>Pattern</th>"
-        "<th style='text-align:right;'>Price</th>"
-        "<th>Regime</th>"
-        "<th>Sub-Type</th>"
+        "<th title='Stock ticker symbol.'>Ticker</th>"
+        "<th title='BUY = bullish, SELL = bearish, HOLD = no action.'>Signal</th>"
+        "<th title='How reliable this signal is: high (3 dots), medium (2), or low (1).'>Confidence</th>"
+        "<th title='Blended indicator + pattern score (0-10). Higher = more bullish.'>Score</th>"
+        "<th style='width:80px;' title='Score from trend-following indicators (e.g. MACD, ADX). Bold if trend is the dominant group.'>Trend</th>"
+        "<th style='width:80px;' title='Score from reversal indicators (e.g. RSI, Stochastics). Bold if contrarian is the dominant group.'>Contrarian</th>"
+        "<th style='width:80px;' title='Score from chart and candlestick pattern recognition.'>Pattern</th>"
+        "<th style='text-align:right;' title='Current stock price.'>Price</th>"
+        "<th title='Detected market environment (e.g. Strong Trend, Mean Reverting).'>Regime</th>"
+        "<th title='More specific market characterisation (e.g. Steady Compounder, Explosive Mover).'>Sub-Type</th>"
         f"{mt_headers}"
         "</tr>"
     )
@@ -4454,20 +4521,20 @@ def _build_dividend_results_html(
     header = (
         "<tr>"
         "<th style='width:30px;'>#</th>"
-        "<th>Ticker</th>"
-        "<th>Name</th>"
-        "<th>Sector</th>"
-        "<th style='text-align:right;'>Price</th>"
-        "<th style='text-align:right;'>Yield</th>"
-        "<th style='text-align:right;'>Annual Dividend</th>"
-        "<th style='text-align:right;'>CAGR</th>"
-        "<th style='text-align:right;'>Consistency</th>"
-        "<th style='text-align:right;'>Streak</th>"
-        "<th>Yield Score</th>"
-        "<th>Growth Score</th>"
-        "<th>Consistency Score</th>"
-        "<th>Streak Score</th>"
-        "<th>Composite Score</th>"
+        "<th title='Stock ticker symbol.' style='cursor:help;'>Ticker</th>"
+        "<th title='Company name.' style='cursor:help;'>Name</th>"
+        "<th title='Industry sector the company belongs to.' style='cursor:help;'>Sector</th>"
+        "<th title='Current share price.' style='text-align:right;cursor:help;'>Price</th>"
+        "<th title='Annual dividend as a percentage of the share price. Higher yield = more income per dollar invested.' style='text-align:right;cursor:help;'>Yield</th>"
+        "<th title='Total dividend paid per share over the past year in dollars.' style='text-align:right;cursor:help;'>Annual Dividend</th>"
+        "<th title='Compound Annual Growth Rate of dividends. Shows how fast dividends have been growing each year.' style='text-align:right;cursor:help;'>CAGR</th>"
+        "<th title='How reliably the company has paid dividends. 100% means no missed payments.' style='text-align:right;cursor:help;'>Consistency</th>"
+        "<th title='Number of consecutive years the company has increased its dividend.' style='text-align:right;cursor:help;'>Streak</th>"
+        "<th title='Score for dividend yield attractiveness (0-10). Higher = more generous yield.' style='cursor:help;'>Yield Score</th>"
+        "<th title='Score for dividend growth rate (0-10). Higher = faster dividend increases over time.' style='cursor:help;'>Growth Score</th>"
+        "<th title='Score for payment reliability (0-10). Higher = fewer missed or cut dividends.' style='cursor:help;'>Consistency Score</th>"
+        "<th title='Score for consecutive years of dividend increases (0-10). Higher = longer streak.' style='cursor:help;'>Streak Score</th>"
+        "<th title='Overall dividend quality score combining yield, growth, consistency, and streak. Higher is better.' style='cursor:help;'>Composite Score</th>"
         "</tr>"
     )
 
@@ -4746,19 +4813,19 @@ def _build_dca_scanner_results_html(
     header = (
         "<tr>"
         "<th style='width:30px;'>#</th>"
-        "<th>Ticker</th>"
-        "<th>DCA Score</th>"
-        "<th>Confidence</th>"
-        "<th style='text-align:right;'>Price</th>"
-        "<th>Dip %</th>"
-        "<th>Dip Sigma</th>"
-        "<th>Tier</th>"
-        "<th>Multiplier</th>"
-        "<th>Regime</th>"
-        "<th>RSI</th>"
-        "<th>Bollinger %B</th>"
-        "<th>Volatility</th>"
-        "<th>Indicator Score</th>"
+        "<th title='Stock ticker symbol.' style='cursor:help;'>Ticker</th>"
+        "<th title='Overall DCA attractiveness score (0-100). Higher means better time to deploy capital.' style='cursor:help;'>DCA Score</th>"
+        "<th title='How reliable the signal is — High, Medium, or Low — based on data quality and indicator agreement.' style='cursor:help;'>Confidence</th>"
+        "<th title='Current share price.' style='text-align:right;cursor:help;'>Price</th>"
+        "<th title='How far the price has fallen from its recent high. Bigger dip = potentially better buying opportunity.' style='cursor:help;'>Dip %</th>"
+        "<th title='The dip expressed in standard deviations of the stock&#39;s own volatility. A 2-sigma dip is unusual; 3+ is extreme.' style='cursor:help;'>Dip Sigma</th>"
+        "<th title='Dip severity bucket: Normal, Mild Dip, Strong Dip, or Extreme Dip. Each tier gets a different buy multiplier.' style='cursor:help;'>Tier</th>"
+        "<th title='How much extra to invest relative to the base amount. 1.0x = normal, 2.0x = double, etc.' style='cursor:help;'>Multiplier</th>"
+        "<th title='Market environment used for DCA context (e.g. Mean Reverting regimes are better for dip-buying).' style='cursor:help;'>Regime</th>"
+        "<th title='Relative Strength Index — below 30 is oversold (potential buy), above 70 is overbought.' style='cursor:help;'>RSI</th>"
+        "<th title='Where price sits relative to Bollinger Bands. Below 0 = below lower band (oversold), above 100 = above upper band.' style='cursor:help;'>Bollinger %B</th>"
+        "<th title='Recent price volatility. Higher volatility means wider dip ranges and more dramatic price swings.' style='cursor:help;'>Volatility</th>"
+        "<th title='Technical indicator composite score (0-10). Combines RSI, MACD, moving averages, and other signals.' style='cursor:help;'>Indicator Score</th>"
         "</tr>"
     )
 
@@ -5716,16 +5783,16 @@ def render_watchlist() -> None:
         width="stretch",
         hide_index=True,
         column_config={
-            "Ticker": st.column_config.TextColumn(width="small"),
-            "Signal": st.column_config.TextColumn(width="small"),
-            "Action": st.column_config.TextColumn(width="medium"),
-            "Score": st.column_config.NumberColumn(format="%.1f", width="small"),
-            "Indicator": st.column_config.NumberColumn(format="%.1f", width="small"),
-            "Pattern": st.column_config.NumberColumn(format="%.1f", width="small"),
-            "Regime": st.column_config.TextColumn(width="medium"),
-            "Price": st.column_config.TextColumn(width="small"),
-            "Position": st.column_config.TextColumn(width="small"),
-            "Notes": st.column_config.TextColumn(width="large"),
+            "Ticker": st.column_config.TextColumn(width="small", help="Stock ticker symbol."),
+            "Signal": st.column_config.TextColumn(width="small", help="BUY = go long, SELL = close or short, HOLD = no action."),
+            "Action": st.column_config.TextColumn(width="medium", help="Specific trade instruction (e.g. Open Long, Close Position)."),
+            "Score": st.column_config.NumberColumn(format="%.1f", width="small", help="Blended indicator + pattern score (0-10) driving this signal."),
+            "Indicator": st.column_config.NumberColumn(format="%.1f", width="small", help="Score from the technical indicator engine alone (0-10)."),
+            "Pattern": st.column_config.NumberColumn(format="%.1f", width="small", help="Score from the pattern recognition engine alone (0-10)."),
+            "Regime": st.column_config.TextColumn(width="medium", help="Current market regime for this stock (affects how the strategy trades)."),
+            "Price": st.column_config.TextColumn(width="small", help="Current stock price."),
+            "Position": st.column_config.TextColumn(width="small", help="Whether the strategy holds a position, and its unrealized P&L."),
+            "Notes": st.column_config.TextColumn(width="large", help="Additional context about why this signal was generated."),
         },
     )
 
@@ -5778,16 +5845,16 @@ def render_watchlist() -> None:
             width="stretch",
             hide_index=True,
             column_config={
-                "Ticker": st.column_config.TextColumn(width="small"),
-                "Price": st.column_config.TextColumn(width="small"),
-                "Dip %": st.column_config.TextColumn(width="small"),
-                "Dip σ": st.column_config.TextColumn(width="small"),
-                "Tier": st.column_config.TextColumn(width="small"),
-                "Multiplier": st.column_config.TextColumn(width="small"),
-                "RSI": st.column_config.TextColumn(width="small"),
-                "Regime": st.column_config.TextColumn(width="small"),
-                "Confidence": st.column_config.TextColumn(width="small"),
-                "Guidance": st.column_config.TextColumn(width="medium"),
+                "Ticker": st.column_config.TextColumn(width="small", help="Stock ticker symbol."),
+                "Price": st.column_config.TextColumn(width="small", help="Current stock price."),
+                "Dip %": st.column_config.TextColumn(width="small", help="How far the price has fallen from its recent high."),
+                "Dip σ": st.column_config.TextColumn(width="small", help="Dip in standard deviations — a 2-sigma dip is unusual for this stock."),
+                "Tier": st.column_config.TextColumn(width="small", help="Dip bucket: Normal, Mild Dip, Strong Dip, or Extreme Dip."),
+                "Multiplier": st.column_config.TextColumn(width="small", help="How much extra to buy. 1.0x = normal, 2.0x = double the usual."),
+                "RSI": st.column_config.TextColumn(width="small", help="Relative Strength Index — below 30 is oversold (potential buy)."),
+                "Regime": st.column_config.TextColumn(width="small", help="Market environment influencing DCA decisions."),
+                "Confidence": st.column_config.TextColumn(width="small", help="How reliable the DCA signal is, based on data quality."),
+                "Guidance": st.column_config.TextColumn(width="medium", help="Suggested DCA action: Normal DCA or DCA Buy (with dip tier)."),
             },
         )
 
@@ -5891,7 +5958,15 @@ def render_watchlist() -> None:
             })
 
         df_pos = _pd.DataFrame(pos_rows)
-        st.dataframe(df_pos, width="stretch", hide_index=True)
+        st.dataframe(df_pos, width="stretch", hide_index=True, column_config={
+            "Ticker": st.column_config.TextColumn("Ticker", help="Stock ticker symbol."),
+            "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise."),
+            "Entry Date": st.column_config.TextColumn("Entry Date", help="Date the position was opened."),
+            "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the position was entered."),
+            "Current Price": st.column_config.TextColumn("Current Price", help="Latest market price for this stock."),
+            "Unrealized P&L": st.column_config.TextColumn("Unrealized P&L", help="Profit or loss if you closed this position now, as a percentage."),
+            "Quantity": st.column_config.NumberColumn("Quantity", help="Number of shares held."),
+        })
 
     if wl_state and wl_state.closed_trades:
         with st.expander(f"Closed Trades ({len(wl_state.closed_trades)})"):
@@ -5908,7 +5983,16 @@ def render_watchlist() -> None:
                     "Reason": ct.exit_reason,
                 })
             df_ct = _pd.DataFrame(ct_rows)
-            st.dataframe(df_ct, width="stretch", hide_index=True)
+            st.dataframe(df_ct, width="stretch", hide_index=True, column_config={
+                "Ticker": st.column_config.TextColumn("Ticker", help="Stock ticker symbol."),
+                "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise."),
+                "Entry": st.column_config.TextColumn("Entry", help="Date the trade was opened."),
+                "Exit": st.column_config.TextColumn("Exit", help="Date the trade was closed."),
+                "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the trade was entered."),
+                "Exit Price": st.column_config.TextColumn("Exit Price", help="Price at which the trade was exited."),
+                "P&L": st.column_config.TextColumn("P&L", help="Profit or loss as a percentage of entry price."),
+                "Reason": st.column_config.TextColumn("Reason", help="Why the trade was closed (e.g. signal reversed, stop loss hit)."),
+            })
 
 
 # ---------------------------------------------------------------------------
