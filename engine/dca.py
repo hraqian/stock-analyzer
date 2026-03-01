@@ -33,6 +33,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
     from config import Config
+    from data.provider import DataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ class DCABacktester:
         end: str | None = None,
         *,
         score_df: pd.DataFrame | None = None,
+        provider: "DataProvider | None" = None,
     ) -> DCAResult:
         """Run a DCA backtest on *ticker*.
 
@@ -241,28 +243,34 @@ class DCABacktester:
             Pre-computed score DataFrame with columns like ``composite``,
             ``rsi_raw``, ``bb_pctile``, ``gap_type``.  Required for
             ``score_integrated`` mode.  For other modes, ignored.
+        provider : DataProvider | None
+            Data provider for fetching OHLCV.  When *None*, a default
+            ``YahooFinanceProvider`` is created.
 
         Returns
         -------
         DCAResult
         """
-        import yfinance as yf
+        # Guard: warn loudly if score_integrated mode lacks score data
+        if self.mode == "score_integrated" and score_df is None:
+            import warnings
+            msg = (
+                "DCA mode is 'score_integrated' but no score_df was provided. "
+                "Score-based boosts and suppression will be skipped — "
+                "results will be identical to plain dip_weighted mode. "
+                "Pass score_df from compute_dca_score_df() for full integration."
+            )
+            logger.warning(msg)
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
-        # ── Fetch OHLCV data ─────────────────────────────────────────────
-        tk = yf.Ticker(ticker)
-        if start:
-            ohlcv = tk.history(start=start, end=end, interval=interval,
-                               auto_adjust=False)
-        else:
-            ohlcv = tk.history(period=period, interval=interval,
-                               auto_adjust=False)
-        assert isinstance(ohlcv, pd.DataFrame), f"No data for {ticker}"
+        # ── Fetch OHLCV data via shared DataProvider ─────────────────────
+        if provider is None:
+            from data.yahoo import YahooFinanceProvider
+            provider = YahooFinanceProvider()
 
-        # Normalise columns
-        ohlcv.columns = [c.lower().replace(" ", "_") for c in ohlcv.columns]
-        if hasattr(ohlcv.index, "tz") and ohlcv.index.tz is not None:
-            ohlcv.index = ohlcv.index.tz_localize(None)
-        ohlcv.sort_index(inplace=True)
+        ohlcv = provider.fetch(
+            ticker, period=period, interval=interval, start=start, end=end,
+        )
 
         if len(ohlcv) < 2:
             raise ValueError(f"Insufficient data for {ticker}: {len(ohlcv)} bars")
@@ -272,10 +280,13 @@ class DCABacktester:
         dates = ohlcv.index
 
         # ── Fetch dividends for DRIP ─────────────────────────────────────
+        # Dividends are not part of the DataProvider interface (OHLCV only),
+        # so we fall back to yfinance directly for DRIP reinvestment data.
         div_series: pd.Series | None = None
         if self.drip:
             try:
-                raw_divs = tk.dividends
+                import yfinance as yf
+                raw_divs = yf.Ticker(ticker).dividends
                 if raw_divs is not None and len(raw_divs) > 0:
                     if hasattr(raw_divs.index, "tz") and raw_divs.index.tz is not None:
                         raw_divs.index = raw_divs.index.tz_localize(None)

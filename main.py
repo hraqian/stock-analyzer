@@ -784,6 +784,8 @@ def main() -> None:
         # Compute score_df for score_integrated mode, or for
         # dip_weighted when crisis suppression is enabled (the crisis
         # gate needs composite + RSI data).
+        from data.yahoo import YahooFinanceProvider
+        provider = YahooFinanceProvider()
         score_df = None
         need_scores = (
             dca_bt.mode == "score_integrated"
@@ -791,7 +793,6 @@ def main() -> None:
         )
         if need_scores:
             from analysis.score_timeseries import compute_dca_score_df
-            from data.yahoo import YahooFinanceProvider
 
             label = (
                 "Computing technical scores for score-integrated mode..."
@@ -799,7 +800,6 @@ def main() -> None:
                 else "Computing technical scores for crisis suppression gate..."
             )
             console.print(f"[dim]{label}[/dim]")
-            provider = YahooFinanceProvider()
             score_df = compute_dca_score_df(
                 cfg,
                 provider,
@@ -819,6 +819,7 @@ def main() -> None:
                 start=start_date,
                 end=end_date,
                 score_df=score_df,
+                provider=provider,
             )
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")

@@ -6312,12 +6312,12 @@ def main() -> None:
                         # or for dip_weighted when crisis suppression is on
                         # (the crisis gate needs composite + RSI data).
                         score_df = None
+                        provider = YahooFinanceProvider()
                         need_scores = (
                             dca_bt.mode == "score_integrated"
                             or (dca_bt.mode == "dip_weighted" and dca_bt.crisis_enabled)
                         )
                         if need_scores:
-                            provider = YahooFinanceProvider()
                             score_df = compute_dca_score_df(
                                 cfg,
                                 provider,
@@ -6329,6 +6329,7 @@ def main() -> None:
 
                         dca_result = dca_bt.run(
                             ticker, period=dca_period, score_df=score_df,
+                            provider=provider,
                         )
                     except Exception as e:
                         st.error(f"DCA backtest failed: {e}")
