@@ -155,8 +155,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "strategy": {
         "threshold_mode": "fixed",
         "score_thresholds": {
-            "short_below": 3.5,
-            "hold_below": 6.0,
+            "short_below": 3.0,
+            "hold_below": 6.5,
         },
         "percentile_thresholds": {
             "short_percentile": 25,
@@ -169,17 +169,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "percent_equity": 1.00,
         "stop_loss_pct": 0.05,
         "take_profit_pct": 0.30,
-        "rebalance_interval": 5,
+        "rebalance_interval": 10,
         "flatten_eod": False,  # force-close all positions at end of each trading day
         # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop
         "atr_stop_enabled": True,       # use ATR-based stop instead of fixed %
-        "atr_stop_multiplier": 4.0,     # stop = N × ATR at entry time
+        "atr_stop_multiplier": 5.0,     # stop = N × ATR at entry time
         "atr_stop_period": 14,          # ATR calculation period
         # Trend confirmation filter
         "trend_confirm_enabled": True,   # require price above/below trend MA for entry
-        "trend_confirm_period": 20,      # EMA period for trend confirmation
+        "trend_confirm_period": 30,      # EMA period for trend confirmation
         "trend_confirm_ma_type": "ema",  # "ema" or "sma" for trend confirmation MA
-        "trend_confirm_tolerance_pct": 0.0,  # tolerance band around MA (0 = exact)
+        "trend_confirm_tolerance_pct": 0.005,  # tolerance band around MA
         # Re-entry grace period: after exiting, skip trend confirmation for N bars
         "reentry_grace_bars": 10,        # bars after exit to allow unfiltered re-entry
         # Consecutive loss cooldown: after N consecutive losses, tighten entry requirements
@@ -195,7 +195,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Extreme score exit: exit strong-trend positions when score is this far beyond thresholds
         "extreme_exit_score_offset": 1.5,  # e.g. 1.5 → exit long if score < short_below - 1.5
         # Breakout confirmation: minimum directional move ratio for a breakout candle
-        "breakout_min_move_ratio": 0.4,   # |close-open|/range >= this for breakout candle
+        "breakout_min_move_ratio": 0.5,   # |close-open|/range >= this for breakout candle
         # Position management
         "allow_pyramiding": False,        # whether to add to existing same-direction positions
         "allow_immediate_reversal": True, # close + reopen in opposite direction on signal flip
@@ -463,10 +463,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "trailing_stop_atr_mult": 8.0,   # trailing stop = N × ATR (wide for volatile names)
                 "ignore_score_entries": True,     # don't use score thresholds for entry
                 "hold_with_trend": True,          # stay in position while trend persists
-                "min_distance": 0.01,            # price must be 1%+ from MA for trend entry
+                "min_distance": 0.015,           # price must be 1.5%+ from MA for trend entry
                 "min_score": 3.5,                # don't enter when indicators are strongly bearish
                 "respect_trend_direction": True,  # only enter in direction of long-term trend
-                "pattern_veto_threshold": 3.0,   # skip entry if pattern score below this (0=disabled)
+                "pattern_veto_threshold": 3.5,   # skip entry if pattern score below this (0=disabled)
                 # Sub-type overrides — sub-type is classified from warmup data at
                 # backtest start and re-evaluated at every rebalance, so it can
                 # change mid-run as more data arrives.
@@ -483,7 +483,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "mean_reverting": {
                 "use_trailing_stop": False,       # use score-based entries/exits
                 "tighten_thresholds": True,       # narrow the HOLD zone for more trades
-                "threshold_adjustment": 0.3,      # narrow by this amount on each side
+                "threshold_adjustment": 0.2,      # narrow by this amount on each side
             },
             "volatile_choppy": {
                 "reduce_position_size": True,     # halve position size
@@ -494,9 +494,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "breakout_transition": {
                 "use_momentum_entry": True,       # enter on breakout confirmation
                 "breakout_atr_mult": 1.5,         # price must move N×ATR from squeeze level
-                "min_bar_range_pct": 0.015,       # bar range must exceed 1.5% of price for expansion
+                "min_bar_range_pct": 0.020,       # bar range must exceed 2% of price for expansion
                 "require_volume_surge": True,      # require above-avg volume for entry
-                "volume_surge_mult": 1.3,         # volume must be N× the average
+                "volume_surge_mult": 1.5,         # volume must be N× the average
                 "avg_volume_window": 20,          # rolling window for average volume baseline
             },
         },

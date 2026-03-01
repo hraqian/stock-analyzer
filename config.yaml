@@ -325,8 +325,8 @@ strategy:
   threshold_mode: "fixed"
 
   score_thresholds:
-    short_below: 3.5      # composite score <= this → SHORT
-    hold_below: 6.0       # composite score <= this → HOLD (optimized from 6.5)
+    short_below: 3.0      # composite score <= this → SHORT (widened from 3.5 for higher conviction entries)
+    hold_below: 6.5       # composite score <= this → HOLD (widened from 6.0 for higher conviction entries)
     # composite score > hold_below → LONG
 
   # Percentile mode settings (only used when threshold_mode = "percentile")
@@ -349,7 +349,7 @@ strategy:
   # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop.
   # The fixed stop_loss_pct is the minimum safety net; ATR can only make it wider.
   atr_stop_enabled: true    # set false to use only the fixed stop_loss_pct
-  atr_stop_multiplier: 4.0  # N in "N × ATR" — higher = wider stop (optimized from 3.0)
+  atr_stop_multiplier: 5.0  # N in "N × ATR" — higher = wider stop (raised from 4.0 for weeks-to-months holding)
   atr_stop_period: 14       # ATR calculation lookback period
 
   # Trend confirmation filter — before entering a new position, check that
@@ -358,10 +358,10 @@ strategy:
   # SHORT requires close < EMA(trend_confirm_period)
   # This prevents buying into active downtrends or shorting into uptrends.
   trend_confirm_enabled: true
-  trend_confirm_period: 20   # EMA period for trend confirmation
+  trend_confirm_period: 30   # EMA period for trend confirmation (raised from 20 for stronger trend filter)
 
   # How often to re-evaluate and potentially change position
-  rebalance_interval: 5     # re-score every N bars (higher = less whipsaw, fewer trades)
+  rebalance_interval: 10    # re-score every N bars (raised from 5 for less whipsaw, fewer trades)
 
   # Re-entry grace period: after exiting a position (stop-loss, take-profit,
   # trailing stop), skip the trend confirmation filter for this many bars.
@@ -392,7 +392,7 @@ strategy:
   extreme_exit_score_offset: 1.5  # e.g. exit long if score < short_below - 1.5
 
   # Breakout confirmation: minimum directional move ratio for a breakout candle
-  breakout_min_move_ratio: 0.4    # |close-open|/range >= this for valid breakout bar
+  breakout_min_move_ratio: 0.50   # |close-open|/range >= this for valid breakout bar (raised from 0.4)
 
   # Position management
   allow_pyramiding: false          # whether to add to existing same-direction positions
@@ -409,7 +409,7 @@ strategy:
 
   # Trend confirmation MA type and tolerance
   trend_confirm_ma_type: "ema"       # "ema" or "sma" for trend confirmation filter
-  trend_confirm_tolerance_pct: 0.0   # tolerance band around MA (0 = exact)
+  trend_confirm_tolerance_pct: 0.005  # tolerance band around MA (raised from 0 to avoid coin-flip entries)
 
   # Consecutive loss cooldown: whether breakeven (0% PnL) resets loss counter
   cooldown_reset_on_breakeven: true
@@ -612,10 +612,10 @@ regime:
       trailing_stop_atr_mult: 8.0   # trailing stop distance = N × ATR (wide default for volatile names)
       ignore_score_entries: true     # don't use score thresholds for entry
       hold_with_trend: true          # stay in position while trend persists
-      min_distance: 0.01            # price must be 1%+ from MA for trend entry
+      min_distance: 0.015           # price must be 1.5%+ from MA for trend entry (raised from 0.01)
       min_score: 3.5                # don't enter when indicators are strongly bearish
       respect_trend_direction: true  # only enter in direction of long-term trend
-      pattern_veto_threshold: 3.0   # skip entry if pattern score below this (0 = disabled)
+      pattern_veto_threshold: 3.5   # skip entry if pattern score below this (raised from 3.0)
       # ── Sub-type overrides (merged on top of base strong_trend params) ──
       # Sub-type is classified from warmup data at backtest start and
       # re-evaluated at every rebalance, so it can change mid-run.
@@ -631,7 +631,7 @@ regime:
     mean_reverting:
       use_trailing_stop: false
       tighten_thresholds: true      # narrow the HOLD zone for more trades
-      threshold_adjustment: 0.3     # narrow SHORT/LONG thresholds by this
+      threshold_adjustment: 0.20    # narrow SHORT/LONG thresholds by this (reduced from 0.3 for fewer low-quality swings)
     volatile_choppy:
       reduce_position_size: true
       position_size_mult: 0.5       # halve position size
@@ -640,9 +640,9 @@ regime:
     breakout_transition:
       use_momentum_entry: true      # enter on breakout confirmation
       breakout_atr_mult: 1.5        # price must move N×ATR from squeeze level
-      min_bar_range_pct: 0.015      # bar range (high-low)/close must exceed 1.5% to confirm volatility expansion
+      min_bar_range_pct: 0.020      # bar range (high-low)/close must exceed 2% to confirm volatility expansion (raised from 0.015)
       require_volume_surge: true
-      volume_surge_mult: 1.3        # volume must exceed avg by this factor
+      volume_surge_mult: 1.5        # volume must exceed avg by this factor (raised from 1.3)
       avg_volume_window: 20         # rolling window (bars) for average volume baseline
 
 # ─────────────────────────────────────────────────────────────────────────────
