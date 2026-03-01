@@ -2828,22 +2828,24 @@ def render_stock_overview(
     st.plotly_chart(price_fig, width="stretch")
 
     # ── Indicator & Pattern breakdown (collapsed by default) ──────────────
-    with st.expander("Indicator Breakdown", help=_help_text({
-        "Score (0-10)": "How bullish (10) or bearish (0) each indicator reads right now. 5 is neutral.",
-        "Weight": "How much influence this indicator has on the overall score. Higher weight = more impact.",
-        "Trend indicators": "Indicators that do well in strong, directional markets (e.g. MACD, ADX). They follow the prevailing move.",
-        "Contrarian indicators": "Indicators that spot reversals — they shine in choppy, range-bound markets (e.g. RSI, Stochastics).",
-        "Neutral indicators": "Indicators that work in any market environment (e.g. volume analysis).",
-        "Dominant group": "Which group (trend or contrarian) is getting more weight right now, based on the detected market regime.",
-        "Pre-spread score": "The raw overall score before the trend/contrarian weighting adjustment is applied.",
-    })):
+    with st.expander("Indicator Breakdown"):
+        st.caption("Term glossary", help=_help_text({
+            "Score (0-10)": "How bullish (10) or bearish (0) each indicator reads right now. 5 is neutral.",
+            "Weight": "How much influence this indicator has on the overall score. Higher weight = more impact.",
+            "Trend indicators": "Indicators that do well in strong, directional markets (e.g. MACD, ADX). They follow the prevailing move.",
+            "Contrarian indicators": "Indicators that spot reversals — they shine in choppy, range-bound markets (e.g. RSI, Stochastics).",
+            "Neutral indicators": "Indicators that work in any market environment (e.g. volume analysis).",
+            "Dominant group": "Which group (trend or contrarian) is getting more weight right now, based on the detected market regime.",
+            "Pre-spread score": "The raw overall score before the trend/contrarian weighting adjustment is applied.",
+        }))
         render_indicator_table(result, cfg)
-    with st.expander("Pattern Signals", help=_help_text({
-        "Pattern": "A recognizable shape or formation in the price chart (e.g. Head & Shoulders, Double Bottom).",
-        "Signal": "Whether the pattern suggests the price will go up (bullish), down (bearish), or is inconclusive (neutral).",
-        "Score (0-10)": "How strongly the pattern points bullish (10) or bearish (0). 5 means the pattern is neutral.",
-        "Weight": "How much this pattern contributes to the overall pattern score. Higher = more influence.",
-    })):
+    with st.expander("Pattern Signals"):
+        st.caption("Term glossary", help=_help_text({
+            "Pattern": "A recognizable shape or formation in the price chart (e.g. Head & Shoulders, Double Bottom).",
+            "Signal": "Whether the pattern suggests the price will go up (bullish), down (bearish), or is inconclusive (neutral).",
+            "Score (0-10)": "How strongly the pattern points bullish (10) or bearish (0). 5 means the pattern is neutral.",
+            "Weight": "How much this pattern contributes to the overall pattern score. Higher = more influence.",
+        }))
         render_pattern_table(result, cfg)
 
 
@@ -3349,24 +3351,26 @@ def render_backtest_section(
 
     # ── Suitability ───────────────────────────────────────────────────────
     if assessment_dict is not None:
-        with st.expander("Suitability Assessment", help=_help_text({
-            "Trading Mode": "What the strategy is allowed to do: LONG SHORT (buy and short-sell), LONG ONLY (buy only, no shorting), or HOLD ONLY (too risky or illiquid to trade).",
-            "ADX": "Average Directional Index — measures how strong the current trend is. Above 25 = strong trend, below 20 = weak/no trend.",
-            "ATR%": "Average True Range as a percentage of price — measures daily volatility. Higher = more price swings.",
-            "Avg Volume": "Average number of shares traded per day. Low volume means it may be hard to buy/sell without moving the price.",
-        })):
+        with st.expander("Suitability Assessment"):
+            st.caption("Term glossary", help=_help_text({
+                "Trading Mode": "What the strategy is allowed to do: LONG SHORT (buy and short-sell), LONG ONLY (buy only, no shorting), or HOLD ONLY (too risky or illiquid to trade).",
+                "ADX": "Average Directional Index — measures how strong the current trend is. Above 25 = strong trend, below 20 = weak/no trend.",
+                "ATR%": "Average True Range as a percentage of price — measures daily volatility. Higher = more price swings.",
+                "Avg Volume": "Average number of shares traded per day. Low volume means it may be hard to buy/sell without moving the price.",
+            }))
             render_suitability(assessment_dict, bt_result.ticker)
 
     # Market regime (from backtest)
     if bt_result.regime is not None:
-        with st.expander("Market Regime (Backtest)", help=_help_text({
-            "Market Regime": "The current market environment. The strategy adapts its behavior depending on which regime is detected.",
-            "Strong Trend": "Price is moving decisively in one direction. Trend-following indicators get more weight.",
-            "Mean Reverting": "Price bounces between support and resistance. Contrarian indicators (RSI, Stochastics) get more weight.",
-            "Volatile Choppy": "Price swings wildly without a clear direction. The strategy becomes more cautious.",
-            "Breakout Transition": "The market is shifting from one regime to another. Could be the start of a new trend.",
-            "Confidence": "How sure the classifier is about this regime call. Higher = more reliable.",
-        })):
+        with st.expander("Market Regime (Backtest)"):
+            st.caption("Term glossary", help=_help_text({
+                "Market Regime": "The current market environment. The strategy adapts its behavior depending on which regime is detected.",
+                "Strong Trend": "Price is moving decisively in one direction. Trend-following indicators get more weight.",
+                "Mean Reverting": "Price bounces between support and resistance. Contrarian indicators (RSI, Stochastics) get more weight.",
+                "Volatile Choppy": "Price swings wildly without a clear direction. The strategy becomes more cautious.",
+                "Breakout Transition": "The market is shifting from one regime to another. Could be the start of a new trend.",
+                "Confidence": "How sure the classifier is about this regime call. Higher = more reliable.",
+            }))
             render_regime(bt_result.regime)
 
     # Trading mode badge
@@ -3396,38 +3400,41 @@ def render_backtest_section(
     st.plotly_chart(eq_fig, width="stretch")
 
     # ── Strategy config ───────────────────────────────────────────────────
-    with st.expander("Strategy Configuration", help=_help_text({
-        "Threshold Mode": "How the strategy decides when to buy or sell. 'Fixed' uses hard score levels; 'Percentile' adapts to recent history.",
-        "Combination Mode": "How indicator scores and pattern scores are combined. 'Weighted' blends them; 'Boost' lets patterns nudge the indicator score.",
-        "Stop Loss": "Automatically sells if the trade loses this much, to limit damage.",
-        "Take Profit": "Automatically sells if the trade gains this much, to lock in profit.",
-        "ATR Stop": "An adaptive stop loss that widens in volatile markets and tightens in calm ones, based on Average True Range.",
-        "Trend Filter": "Only allows trades in the direction of the moving average trend. Prevents buying in a downtrend.",
-        "Cooldown": "After consecutive losing trades, the strategy pauses or demands a stronger signal before re-entering.",
-        "Slippage": "Simulates the cost of real-world order execution — price usually moves slightly against you when you trade.",
-        "Warmup Bars": "Bars at the start of data used to compute initial indicator values. No trades happen during warmup.",
-    })):
+    with st.expander("Strategy Configuration"):
+        st.caption("Term glossary", help=_help_text({
+            "Threshold Mode": "How the strategy decides when to buy or sell. 'Fixed' uses hard score levels; 'Percentile' adapts to recent history.",
+            "Combination Mode": "How indicator scores and pattern scores are combined. 'Weighted' blends them; 'Boost' lets patterns nudge the indicator score.",
+            "Stop Loss": "Automatically sells if the trade loses this much, to limit damage.",
+            "Take Profit": "Automatically sells if the trade gains this much, to lock in profit.",
+            "ATR Stop": "An adaptive stop loss that widens in volatile markets and tightens in calm ones, based on Average True Range.",
+            "Trend Filter": "Only allows trades in the direction of the moving average trend. Prevents buying in a downtrend.",
+            "Cooldown": "After consecutive losing trades, the strategy pauses or demands a stronger signal before re-entering.",
+            "Slippage": "Simulates the cost of real-world order execution — price usually moves slightly against you when you trade.",
+            "Warmup Bars": "Bars at the start of data used to compute initial indicator values. No trades happen during warmup.",
+        }))
         render_strategy_config(cfg)
 
     # ── Trade log ─────────────────────────────────────────────────────────
-    with st.expander(f"Trade Log ({bt_result.total_trades} trades)", help=_help_text({
-        "Side": "LONG means the strategy bought expecting the price to go up. SHORT means it sold expecting the price to drop.",
-        "Entry/Exit Reason": "Why the strategy opened or closed the trade (e.g. score crossed threshold, stop loss hit, take profit reached).",
-        "P&L": "Profit or Loss in dollars for that trade.",
-        "P&L %": "Profit or loss as a percentage of the entry price.",
-        "Qty": "Number of shares bought or sold in the trade.",
-    })):
+    with st.expander(f"Trade Log ({bt_result.total_trades} trades)"):
+        st.caption("Term glossary", help=_help_text({
+            "Side": "LONG means the strategy bought expecting the price to go up. SHORT means it sold expecting the price to drop.",
+            "Entry/Exit Reason": "Why the strategy opened or closed the trade (e.g. score crossed threshold, stop loss hit, take profit reached).",
+            "P&L": "Profit or Loss in dollars for that trade.",
+            "P&L %": "Profit or loss as a percentage of the entry price.",
+            "Qty": "Number of shares bought or sold in the trade.",
+        }))
         render_trade_log(bt_result)
 
     # ── Significant patterns ──────────────────────────────────────────────
     sig_count = len(bt_result.significant_patterns)
-    with st.expander(f"Significant Patterns Timeline ({sig_count} patterns)", help=_help_text({
-        "Detector": "Which pattern recognition engine spotted this pattern (e.g. candlestick detector, chart pattern detector).",
-        "Pattern": "The specific formation detected (e.g. Hammer, Double Bottom, Head & Shoulders).",
-        "Signal": "Bullish (price likely to rise), Bearish (price likely to fall), or Neutral (no clear direction).",
-        "Strength (0-1)": "How pronounced the pattern is. 1.0 = textbook perfect, closer to 0 = weak/ambiguous.",
-        "Confidence": "How reliable this type of pattern historically is. Higher confidence patterns are weighted more by the strategy.",
-    })):
+    with st.expander(f"Significant Patterns Timeline ({sig_count} patterns)"):
+        st.caption("Term glossary", help=_help_text({
+            "Detector": "Which pattern recognition engine spotted this pattern (e.g. candlestick detector, chart pattern detector).",
+            "Pattern": "The specific formation detected (e.g. Hammer, Double Bottom, Head & Shoulders).",
+            "Signal": "Bullish (price likely to rise), Bearish (price likely to fall), or Neutral (no clear direction).",
+            "Strength (0-1)": "How pronounced the pattern is. 1.0 = textbook perfect, closer to 0 = weak/ambiguous.",
+            "Confidence": "How reliable this type of pattern historically is. Higher confidence patterns are weighted more by the strategy.",
+        }))
         render_significant_patterns(bt_result)
 
 
@@ -3967,13 +3974,14 @@ def render_dca_section(
 
     # ── Comparison vs active strategy ────────────────────────────────────
     if bt_result is not None:
-        with st.expander("DCA vs Active Strategy Comparison", help=_help_text({
-            "DCA Strategy": "Dollar-Cost Averaging — investing fixed amounts at regular intervals. Capital is deployed gradually over time.",
-            "Active Strategy": "The score-based trading strategy that buys and sells based on indicator/pattern signals. Capital is deployed as a lump sum on day one.",
-            "Starting Capital": "DCA accumulates capital over time (each purchase adds more). Active starts with the full amount.",
-            "Total Return": "Overall profit/loss as a percentage. DCA return is relative to total cash invested; Active is relative to starting capital.",
-            "Max Drawdown": "Worst peak-to-trough decline. DCA typically has lower drawdowns because not all capital is at risk from day one.",
-        })):
+        with st.expander("DCA vs Active Strategy Comparison"):
+            st.caption("Term glossary", help=_help_text({
+                "DCA Strategy": "Dollar-Cost Averaging — investing fixed amounts at regular intervals. Capital is deployed gradually over time.",
+                "Active Strategy": "The score-based trading strategy that buys and sells based on indicator/pattern signals. Capital is deployed as a lump sum on day one.",
+                "Starting Capital": "DCA accumulates capital over time (each purchase adds more). Active starts with the full amount.",
+                "Total Return": "Overall profit/loss as a percentage. DCA return is relative to total cash invested; Active is relative to starting capital.",
+                "Max Drawdown": "Worst peak-to-trough decline. DCA typically has lower drawdowns because not all capital is at risk from day one.",
+            }))
             _render_dca_comparison(dca_result, bt_result)
 
     # ── Purchase log ─────────────────────────────────────────────────────
