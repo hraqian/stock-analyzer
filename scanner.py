@@ -95,7 +95,7 @@ class ScanResult:
 
 REGIME_LABELS = {
     "strong_trend": "Strong Trend",
-    "mean_reverting": "Mean Reverting",
+    "mean_reverting": "Mean-Reverting / Range-Bound",
     "volatile_choppy": "Volatile / Choppy",
     "breakout_transition": "Breakout / Transition",
 }
