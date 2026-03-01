@@ -897,6 +897,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
 
+        # DCA scanner — ranks entire universe by DCA attractiveness.
+        # The composite score (0-100) is a weighted average of
+        # normalised sub-scores.
+        "scanner": {
+            "score_weights": {
+                "dip_sigma": 0.30,           # volatility-normalised dip severity
+                "tier_multiplier": 0.25,     # allocation multiplier tier
+                "technical": 0.20,           # inverse composite (lower = more attractive)
+                "confidence": 0.10,          # DCA confidence level
+                "regime": 0.15,              # regime favourability
+            },
+            "min_dca_score": 0,              # minimum score to show in results (0=all)
+        },
+
         # Safety gates
         "safety": {
             "max_multiplier": 3.0,           # absolute cap on any single multiplier

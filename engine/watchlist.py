@@ -198,6 +198,317 @@ class WatchlistState:
 
 
 # ---------------------------------------------------------------------------
+# Standalone DCA context helpers (importable by scanner & watchlist)
+# ---------------------------------------------------------------------------
+
+
+def map_dca_regime(
+    regime_type: RegimeType | None,
+    regime_trend: str,
+    total_return: float,
+    wl_ctx: dict,
+) -> str:
+    """Map technical regime classification to investor-friendly DCA labels.
+
+    Returns one of: ``"bull"``, ``"bear"``, ``"crisis"``, ``"sideways"``,
+    ``"recovery"``.
+
+    Parameters
+    ----------
+    regime_type : RegimeType | None
+        Technical regime classification.
+    regime_trend : str
+        ``"bullish"``, ``"bearish"``, or ``"neutral"``.
+    total_return : float
+        Cumulative return over the classification window (e.g. 0.20 = +20%).
+    wl_ctx : dict
+        ``dca.watchlist_context`` config section (needs
+        ``crisis_return_threshold``).
+    """
+    crisis_threshold = float(wl_ctx.get("crisis_return_threshold", -0.20))
+
+    if regime_type is None:
+        return "sideways"
+
+    # Crisis: volatile/choppy + bearish + deeply negative return
+    if (
+        regime_type == RegimeType.VOLATILE_CHOPPY
+        and regime_trend == "bearish"
+        and total_return <= crisis_threshold
+    ):
+        return "crisis"
+
+    # Bear: bearish trend with negative return
+    if regime_trend == "bearish" and total_return < 0:
+        return "bear"
+
+    # Bull: bullish trend with positive return
+    if regime_trend == "bullish" and total_return > 0:
+        return "bull"
+
+    # Recovery: breakout/transition or mean-reverting turning bullish
+    if regime_type == RegimeType.BREAKOUT_TRANSITION and regime_trend == "bullish":
+        return "recovery"
+    if regime_type == RegimeType.MEAN_REVERTING and regime_trend == "bullish":
+        return "recovery"
+
+    # Sideways: everything else
+    return "sideways"
+
+
+def compute_dca_context(
+    df: pd.DataFrame,
+    *,
+    ind_composite: float,
+    ind_results: list,
+    regime_type: RegimeType | None,
+    regime_trend: str,
+    regime_total_return: float,
+    dca_cfg: dict,
+) -> DCAContext:
+    """Compute enhanced DCA context for a ticker.
+
+    This is the standalone version of the DCA context computation.  It
+    combines four signals to produce a nuanced DCA recommendation:
+
+    1. **Price dip** — rolling high lookback → dip % → base tier.
+    2. **Volatility normalisation** — express the dip in standard
+       deviations.
+    3. **Score integration** — composite score, RSI, and BB %B can
+       upgrade the tier.
+    4. **Regime adjustment** — investor-friendly regime labels with
+       multiplier caps/boosts.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame (must have ``"close"`` column).
+    ind_composite : float
+        Composite indicator score (0-10).
+    ind_results : list
+        List of ``IndicatorResult`` objects from the analysis pipeline.
+    regime_type : RegimeType | None
+        Technical regime classification.
+    regime_trend : str
+        ``"bullish"``, ``"bearish"``, or ``"neutral"``.
+    regime_total_return : float
+        Cumulative return over the regime classification window.
+    dca_cfg : dict
+        The full ``dca`` config section (``cfg.section("dca")`` as a dict).
+    """
+    notes: list[str] = []
+
+    # ── 1. Price dip detection ───────────────────────────────────────
+    dt = dca_cfg.get("dip_thresholds", {})
+    lookback_days = int(dt.get("lookback_days", 30))
+    mild_drop_pct = float(dt.get("mild_drop_pct", 5.0))
+    strong_drop_pct = float(dt.get("strong_drop_pct", 10.0))
+    extreme_drop_pct = float(dt.get("extreme_drop_pct", 20.0))
+
+    ml = dca_cfg.get("multipliers", {})
+    mult_normal = float(ml.get("normal", 1.0))
+    mult_mild = float(ml.get("mild_dip", 1.5))
+    mult_strong = float(ml.get("strong_dip", 2.0))
+    mult_extreme = float(ml.get("extreme_dip", 3.0))
+
+    safety = dca_cfg.get("safety", {})
+    max_multiplier = float(safety.get("max_multiplier", 3.0))
+
+    close = df["close"].values
+    current_price = float(close[-1])
+    rolling_high_val = float(
+        pd.Series(close).rolling(window=lookback_days, min_periods=1).max().iloc[-1]
+    )
+
+    if rolling_high_val > 0:
+        dip_pct = max(0.0, (rolling_high_val - current_price) / rolling_high_val * 100.0)
+    else:
+        dip_pct = 0.0
+
+    # Base tier from price dip
+    tier_order = [
+        ("extreme_dip", extreme_drop_pct, mult_extreme),
+        ("strong_dip",  strong_drop_pct,  mult_strong),
+        ("mild_dip",    mild_drop_pct,    mult_mild),
+    ]
+    tier, multiplier = "normal", mult_normal
+    for t_name, t_threshold, t_mult in tier_order:
+        if dip_pct >= t_threshold:
+            tier, multiplier = t_name, t_mult
+            break
+
+    raw_tier = tier  # save pre-adjustment tier
+
+    if dip_pct < mild_drop_pct:
+        notes.append(f"Price is {dip_pct:.1f}% below {lookback_days}-day high — no significant dip.")
+    else:
+        notes.append(
+            f"Price is {dip_pct:.1f}% below {lookback_days}-day high "
+            f"(${rolling_high_val:,.2f}) — {tier.replace('_', ' ')}."
+        )
+
+    # ── 2. Volatility normalisation ──────────────────────────────────
+    wl_ctx = dca_cfg.get("watchlist_context", {})
+    vol_window = int(wl_ctx.get("volatility_window", 60))
+
+    returns = pd.Series(close).pct_change().dropna()
+    if len(returns) >= 20:
+        daily_vol = float(returns.iloc[-vol_window:].std()) if len(returns) >= vol_window else float(returns.std())
+        annual_vol = daily_vol * (252 ** 0.5) * 100  # annualised %
+        daily_vol_pct = daily_vol * 100
+        dip_sigma = (dip_pct / daily_vol_pct) if daily_vol_pct > 0 else 0.0
+    else:
+        annual_vol = 0.0
+        dip_sigma = 0.0
+
+    # Interpret volatility context
+    vol_severe_sigma = float(wl_ctx.get("vol_severe_sigma", 2.5))
+    vol_notable_sigma = float(wl_ctx.get("vol_notable_sigma", 1.5))
+
+    if annual_vol > 0:
+        if dip_sigma >= vol_severe_sigma:
+            notes.append(
+                f"Dip is {dip_sigma:.1f} daily std devs — statistically severe "
+                f"for this stock (annualised vol {annual_vol:.0f}%)."
+            )
+        elif dip_sigma >= vol_notable_sigma:
+            notes.append(
+                f"Dip is {dip_sigma:.1f} daily std devs — notable "
+                f"(annualised vol {annual_vol:.0f}%)."
+            )
+        elif dip_pct >= mild_drop_pct:
+            notes.append(
+                f"Dip is only {dip_sigma:.1f} daily std devs — routine "
+                f"for this stock's volatility ({annual_vol:.0f}% annualised)."
+            )
+
+    # ── 3. Score integration ─────────────────────────────────────────
+    # Extract raw RSI and BB %B from indicator results
+    rsi_val = 50.0
+    bb_pctile_val = 50.0
+    for r in ind_results:
+        if r.error:
+            continue
+        if r.config_key == "rsi":
+            rsi_val = float(r.values.get("rsi", 50.0))
+        elif r.config_key == "bollinger_bands":
+            # pct_b is 0.0-1.0, convert to 0-100
+            bb_pctile_val = float(r.values.get("pct_b", 0.5)) * 100
+
+    st_cfg = dca_cfg.get("score_thresholds", {})
+    buy_zone_below = float(st_cfg.get("buy_zone_below", 3.5))
+    oversold_rsi = float(st_cfg.get("oversold_rsi", 30.0))
+    bb_pctile_low = float(st_cfg.get("bb_percentile_low", 10.0))
+
+    # Score-based tier upgrades (never downgrades, same as DCA backtester)
+    score_upgraded = False
+    if ind_composite < buy_zone_below:
+        if tier == "normal":
+            tier, multiplier = "mild_dip", mult_mild
+            score_upgraded = True
+        elif tier == "mild_dip":
+            tier, multiplier = "strong_dip", mult_strong
+            score_upgraded = True
+        notes.append(
+            f"Composite score {ind_composite:.1f} is below buy zone "
+            f"({buy_zone_below}) — indicators suggest undervaluation."
+        )
+    else:
+        notes.append(f"Composite score {ind_composite:.1f} — neutral to positive.")
+
+    if rsi_val < oversold_rsi:
+        if tier in ("normal", "mild_dip"):
+            if tier == "normal":
+                tier, multiplier = "mild_dip", mult_mild
+            else:
+                tier, multiplier = "strong_dip", mult_strong
+            score_upgraded = True
+        notes.append(f"RSI {rsi_val:.0f} is oversold (below {oversold_rsi:.0f}).")
+    elif rsi_val > 70:
+        notes.append(f"RSI {rsi_val:.0f} is overbought — caution on increasing allocation.")
+
+    if bb_pctile_val < bb_pctile_low:
+        if tier == "mild_dip":
+            tier, multiplier = "strong_dip", mult_strong
+            score_upgraded = True
+        elif tier == "strong_dip":
+            tier, multiplier = "extreme_dip", mult_extreme
+            score_upgraded = True
+        notes.append(
+            f"BB %B at {bb_pctile_val:.0f}% — price near lower Bollinger Band."
+        )
+
+    if score_upgraded:
+        notes.append(f"Tier upgraded from {raw_tier.replace('_',' ')} to {tier.replace('_',' ')} by technical signals.")
+
+    # ── 4. Regime adjustment ─────────────────────────────────────────
+    dca_regime = map_dca_regime(regime_type, regime_trend, regime_total_return, wl_ctx)
+    regime_adj = wl_ctx.get("regime_adjustment", {})
+    bear_max_mult = float(regime_adj.get("bear_max_multiplier", 1.5))
+    bull_pullback_bonus = float(regime_adj.get("bull_pullback_bonus", 0.5))
+
+    if dca_regime == "crisis":
+        if multiplier > bear_max_mult:
+            multiplier = bear_max_mult
+        notes.append(
+            f"Market regime: crisis — "
+            f"multiplier capped at {bear_max_mult:.1f}x (high risk of continued decline)."
+        )
+    elif dca_regime == "bear":
+        if multiplier > bear_max_mult:
+            multiplier = bear_max_mult
+        notes.append(
+            f"Market regime: bear — "
+            f"multiplier capped at {bear_max_mult:.1f}x (elevated downside risk)."
+        )
+    elif dca_regime == "bull" and dip_pct >= mild_drop_pct:
+        multiplier = min(multiplier + bull_pullback_bonus, max_multiplier)
+        notes.append(
+            f"Market regime: bull pullback — good DCA entry point, "
+            f"multiplier boosted by {bull_pullback_bonus:.1f}x."
+        )
+    elif dca_regime == "bull":
+        notes.append("Market regime: bull — steady accumulation recommended.")
+    elif dca_regime == "recovery":
+        notes.append("Market regime: recovery — conditions improving, standard DCA allocation.")
+    else:
+        # sideways
+        notes.append("Market regime: sideways — range-bound, standard DCA allocation.")
+
+    # Clamp final multiplier
+    multiplier = min(multiplier, max_multiplier)
+
+    # ── 5. Confidence assessment ─────────────────────────────────────
+    is_dca_buy = dip_pct >= mild_drop_pct or ind_composite < buy_zone_below
+    if is_dca_buy and dca_regime in ("bull", "recovery") and rsi_val < 50:
+        confidence = "high"
+    elif is_dca_buy and dca_regime in ("bear", "crisis"):
+        confidence = "low"
+    elif is_dca_buy:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return DCAContext(
+        dip_pct=round(dip_pct, 1),
+        rolling_high=round(rolling_high_val, 2),
+        raw_tier=raw_tier,
+        volatility=round(annual_vol, 1),
+        dip_sigma=round(dip_sigma, 1),
+        rsi=round(rsi_val, 1),
+        bb_pctile=round(bb_pctile_val, 1),
+        composite_score=round(ind_composite, 1),
+        regime=dca_regime,
+        regime_trend=regime_trend,
+        tier=tier,
+        multiplier=round(multiplier, 2),
+        is_dca_buy=is_dca_buy,
+        confidence=confidence,
+        explanation=notes,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Monitor engine
 # ---------------------------------------------------------------------------
 
@@ -647,240 +958,16 @@ class WatchlistMonitor:
         regime_trend: str,
         regime_total_return: float,
     ) -> DCAContext:
-        """Compute enhanced DCA context for a ticker.
-
-        Combines four signals to produce a nuanced DCA recommendation:
-
-        1. **Price dip** — rolling high lookback → dip % → base tier
-           (same as DCA backtester).
-        2. **Volatility normalisation** — express the dip in standard
-           deviations so a 10% dip on a volatile stock is weighted
-           differently from a 10% dip on a stable stock.
-        3. **Score integration** — composite score, RSI, and BB %B can
-           upgrade the tier (reuses logic from DCA backtester's
-           score_integrated mode).
-        4. **Regime adjustment** — uses investor-friendly regime labels
-           (bull/bear/crisis/sideways/recovery) mapped from the
-           technical regime classifier.  Bear/crisis caps the multiplier;
-           bull pullback boosts it.
-
-        All thresholds are configurable via config → dca section.
-        """
-        dca_cfg = self._cfg.section("dca")
-        notes: list[str] = []
-
-        # ── 1. Price dip detection ───────────────────────────────────────
-        dt = dca_cfg.get("dip_thresholds", {})
-        lookback_days = int(dt.get("lookback_days", 30))
-        mild_drop_pct = float(dt.get("mild_drop_pct", 5.0))
-        strong_drop_pct = float(dt.get("strong_drop_pct", 10.0))
-        extreme_drop_pct = float(dt.get("extreme_drop_pct", 20.0))
-
-        ml = dca_cfg.get("multipliers", {})
-        mult_normal = float(ml.get("normal", 1.0))
-        mult_mild = float(ml.get("mild_dip", 1.5))
-        mult_strong = float(ml.get("strong_dip", 2.0))
-        mult_extreme = float(ml.get("extreme_dip", 3.0))
-
-        safety = dca_cfg.get("safety", {})
-        max_multiplier = float(safety.get("max_multiplier", 3.0))
-
-        close = df["close"].values
-        current_price = float(close[-1])
-        rolling_high_val = float(
-            pd.Series(close).rolling(window=lookback_days, min_periods=1).max().iloc[-1]
-        )
-
-        if rolling_high_val > 0:
-            dip_pct = max(0.0, (rolling_high_val - current_price) / rolling_high_val * 100.0)
-        else:
-            dip_pct = 0.0
-
-        # Base tier from price dip
-        tier_order = [
-            ("extreme_dip", extreme_drop_pct, mult_extreme),
-            ("strong_dip",  strong_drop_pct,  mult_strong),
-            ("mild_dip",    mild_drop_pct,    mult_mild),
-        ]
-        tier, multiplier = "normal", mult_normal
-        for t_name, t_threshold, t_mult in tier_order:
-            if dip_pct >= t_threshold:
-                tier, multiplier = t_name, t_mult
-                break
-
-        raw_tier = tier  # save pre-adjustment tier
-
-        if dip_pct < mild_drop_pct:
-            notes.append(f"Price is {dip_pct:.1f}% below {lookback_days}-day high — no significant dip.")
-        else:
-            notes.append(
-                f"Price is {dip_pct:.1f}% below {lookback_days}-day high "
-                f"(${rolling_high_val:,.2f}) — {tier.replace('_', ' ')}."
-            )
-
-        # ── 2. Volatility normalisation ──────────────────────────────────
-        wl_ctx = dca_cfg.get("watchlist_context", {})
-        vol_window = int(wl_ctx.get("volatility_window", 60))
-
-        returns = pd.Series(close).pct_change().dropna()
-        if len(returns) >= 20:
-            daily_vol = float(returns.iloc[-vol_window:].std()) if len(returns) >= vol_window else float(returns.std())
-            annual_vol = daily_vol * (252 ** 0.5) * 100  # annualised %
-            daily_vol_pct = daily_vol * 100
-            dip_sigma = (dip_pct / daily_vol_pct) if daily_vol_pct > 0 else 0.0
-        else:
-            annual_vol = 0.0
-            dip_sigma = 0.0
-
-        # Interpret volatility context
-        vol_severe_sigma = float(wl_ctx.get("vol_severe_sigma", 2.5))
-        vol_notable_sigma = float(wl_ctx.get("vol_notable_sigma", 1.5))
-
-        if annual_vol > 0:
-            if dip_sigma >= vol_severe_sigma:
-                notes.append(
-                    f"Dip is {dip_sigma:.1f} daily std devs — statistically severe "
-                    f"for this stock (annualised vol {annual_vol:.0f}%)."
-                )
-            elif dip_sigma >= vol_notable_sigma:
-                notes.append(
-                    f"Dip is {dip_sigma:.1f} daily std devs — notable "
-                    f"(annualised vol {annual_vol:.0f}%)."
-                )
-            elif dip_pct >= mild_drop_pct:
-                notes.append(
-                    f"Dip is only {dip_sigma:.1f} daily std devs — routine "
-                    f"for this stock's volatility ({annual_vol:.0f}% annualised)."
-                )
-
-        # ── 3. Score integration ─────────────────────────────────────────
-        # Extract raw RSI and BB %B from indicator results
-        rsi_val = 50.0
-        bb_pctile_val = 50.0
-        for r in ind_results:
-            if r.error:
-                continue
-            if r.config_key == "rsi":
-                rsi_val = float(r.values.get("rsi", 50.0))
-            elif r.config_key == "bollinger_bands":
-                # pct_b is 0.0-1.0, convert to 0-100
-                bb_pctile_val = float(r.values.get("pct_b", 0.5)) * 100
-
-        st_cfg = dca_cfg.get("score_thresholds", {})
-        buy_zone_below = float(st_cfg.get("buy_zone_below", 3.5))
-        oversold_rsi = float(st_cfg.get("oversold_rsi", 30.0))
-        bb_pctile_low = float(st_cfg.get("bb_percentile_low", 10.0))
-
-        # Score-based tier upgrades (never downgrades, same as DCA backtester)
-        score_upgraded = False
-        if ind_composite < buy_zone_below:
-            if tier == "normal":
-                tier, multiplier = "mild_dip", mult_mild
-                score_upgraded = True
-            elif tier == "mild_dip":
-                tier, multiplier = "strong_dip", mult_strong
-                score_upgraded = True
-            notes.append(
-                f"Composite score {ind_composite:.1f} is below buy zone "
-                f"({buy_zone_below}) — indicators suggest undervaluation."
-            )
-        else:
-            notes.append(f"Composite score {ind_composite:.1f} — neutral to positive.")
-
-        if rsi_val < oversold_rsi:
-            if tier in ("normal", "mild_dip"):
-                if tier == "normal":
-                    tier, multiplier = "mild_dip", mult_mild
-                else:
-                    tier, multiplier = "strong_dip", mult_strong
-                score_upgraded = True
-            notes.append(f"RSI {rsi_val:.0f} is oversold (below {oversold_rsi:.0f}).")
-        elif rsi_val > 70:
-            notes.append(f"RSI {rsi_val:.0f} is overbought — caution on increasing allocation.")
-
-        if bb_pctile_val < bb_pctile_low:
-            if tier == "mild_dip":
-                tier, multiplier = "strong_dip", mult_strong
-                score_upgraded = True
-            elif tier == "strong_dip":
-                tier, multiplier = "extreme_dip", mult_extreme
-                score_upgraded = True
-            notes.append(
-                f"BB %B at {bb_pctile_val:.0f}% — price near lower Bollinger Band."
-            )
-
-        if score_upgraded:
-            notes.append(f"Tier upgraded from {raw_tier.replace('_',' ')} to {tier.replace('_',' ')} by technical signals.")
-
-        # ── 4. Regime adjustment ─────────────────────────────────────────
-        # Map technical regime → investor-friendly DCA regime label
-        dca_regime = self._map_dca_regime(
-            regime_type, regime_trend, regime_total_return, wl_ctx,
-        )
-        regime_adj = wl_ctx.get("regime_adjustment", {})
-        bear_max_mult = float(regime_adj.get("bear_max_multiplier", 1.5))
-        bull_pullback_bonus = float(regime_adj.get("bull_pullback_bonus", 0.5))
-
-        if dca_regime == "crisis":
-            if multiplier > bear_max_mult:
-                multiplier = bear_max_mult
-            notes.append(
-                f"Market regime: crisis — "
-                f"multiplier capped at {bear_max_mult:.1f}x (high risk of continued decline)."
-            )
-        elif dca_regime == "bear":
-            if multiplier > bear_max_mult:
-                multiplier = bear_max_mult
-            notes.append(
-                f"Market regime: bear — "
-                f"multiplier capped at {bear_max_mult:.1f}x (elevated downside risk)."
-            )
-        elif dca_regime == "bull" and dip_pct >= mild_drop_pct:
-            multiplier = min(multiplier + bull_pullback_bonus, max_multiplier)
-            notes.append(
-                f"Market regime: bull pullback — good DCA entry point, "
-                f"multiplier boosted by {bull_pullback_bonus:.1f}x."
-            )
-        elif dca_regime == "bull":
-            notes.append("Market regime: bull — steady accumulation recommended.")
-        elif dca_regime == "recovery":
-            notes.append("Market regime: recovery — conditions improving, standard DCA allocation.")
-        else:
-            # sideways
-            notes.append("Market regime: sideways — range-bound, standard DCA allocation.")
-
-        # Clamp final multiplier
-        multiplier = min(multiplier, max_multiplier)
-
-        # ── 5. Confidence assessment ─────────────────────────────────────
-        # High: dip + bull/recovery regime + supportive technicals
-        # Low:  bear/crisis regime, or no meaningful dip signal
-        is_dca_buy = dip_pct >= mild_drop_pct or ind_composite < buy_zone_below
-        if is_dca_buy and dca_regime in ("bull", "recovery") and rsi_val < 50:
-            confidence = "high"
-        elif is_dca_buy and dca_regime in ("bear", "crisis"):
-            confidence = "low"
-        elif is_dca_buy:
-            confidence = "medium"
-        else:
-            confidence = "low"
-
-        return DCAContext(
-            dip_pct=round(dip_pct, 1),
-            rolling_high=round(rolling_high_val, 2),
-            raw_tier=raw_tier,
-            volatility=round(annual_vol, 1),
-            dip_sigma=round(dip_sigma, 1),
-            rsi=round(rsi_val, 1),
-            bb_pctile=round(bb_pctile_val, 1),
-            composite_score=round(ind_composite, 1),
-            regime=dca_regime,
+        """Delegate to the standalone ``compute_dca_context()`` function."""
+        dca_cfg = dict(self._cfg.section("dca"))
+        return compute_dca_context(
+            df,
+            ind_composite=ind_composite,
+            ind_results=ind_results,
+            regime_type=regime_type,
             regime_trend=regime_trend,
-            tier=tier,
-            multiplier=round(multiplier, 2),
-            is_dca_buy=is_dca_buy,
-            confidence=confidence,
-            explanation=notes,
+            regime_total_return=regime_total_return,
+            dca_cfg=dca_cfg,
         )
 
     @staticmethod
@@ -890,51 +977,8 @@ class WatchlistMonitor:
         total_return: float,
         wl_ctx: dict,
     ) -> str:
-        """Map technical regime classification to investor-friendly DCA labels.
-
-        Returns one of: "bull", "bear", "crisis", "sideways", "recovery".
-
-        The mapping combines three signals:
-        - ``regime_type`` — the technical price-behavior regime
-        - ``regime_trend`` — "bullish", "bearish", or "neutral"
-        - ``total_return`` — cumulative return over the classification
-          window (e.g. 0.20 = +20%)
-
-        Crisis threshold is configurable via
-        ``dca.watchlist_context.crisis_return_threshold`` (default −0.20).
-        """
-        crisis_threshold = float(wl_ctx.get("crisis_return_threshold", -0.20))
-
-        if regime_type is None:
-            return "sideways"
-
-        # Crisis: volatile/choppy + bearish + deeply negative return
-        if (
-            regime_type == RegimeType.VOLATILE_CHOPPY
-            and regime_trend == "bearish"
-            and total_return <= crisis_threshold
-        ):
-            return "crisis"
-
-        # Bear: bearish trend with negative return (strong downtrend or
-        # volatile choppy without hitting crisis depth)
-        if regime_trend == "bearish" and total_return < 0:
-            return "bear"
-
-        # Bull: strong trend + bullish, or any regime with bullish trend
-        # and meaningfully positive return
-        if regime_trend == "bullish" and total_return > 0:
-            return "bull"
-
-        # Recovery: breakout/transition + bullish trend (emerging from
-        # range-bound or choppy), or mean-reverting turning bullish
-        if regime_type == RegimeType.BREAKOUT_TRANSITION and regime_trend == "bullish":
-            return "recovery"
-        if regime_type == RegimeType.MEAN_REVERTING and regime_trend == "bullish":
-            return "recovery"
-
-        # Sideways: everything else (neutral trend, mean-reverting, etc.)
-        return "sideways"
+        """Delegate to the standalone ``map_dca_regime()`` function."""
+        return map_dca_regime(regime_type, regime_trend, total_return, wl_ctx)
 
     def _determine_action(
         self, signal: Signal, position: WatchlistPosition | None,

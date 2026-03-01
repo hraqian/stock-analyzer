@@ -3,15 +3,22 @@
 Scans a list of tickers in parallel, runs the full analysis + recommendation
 pipeline on each, and ranks them to surface the top BUY and SELL candidates.
 
+Also provides a **DCA scanner** mode that ranks tickers by Dollar-Cost
+Averaging attractiveness — answering "where should I allocate my next DCA
+dollar?"
+
 Designed to be used from both the CLI (``scan.py``) and the Streamlit dashboard.
 
 Usage (programmatic)::
 
-    from scanner import Scanner
+    from scanner import Scanner, DCAScanner
     scanner = Scanner(universe="dow30", period="2y", max_workers=8)
     results = scanner.run()          # list[ScanResult]
     buys  = scanner.top_buys(10)     # top 10 BUY signals by score
-    sells = scanner.top_sells(10)    # top 10 SELL signals by score
+
+    dca = DCAScanner(universe="dow30", period="2y", max_workers=8)
+    dca_results = dca.run()          # list[DCAScanResult]
+    top_dca = dca.top_dca(10)        # top 10 DCA opportunities
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from engine.regime import RegimeSubType, RegimeType
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.strategy import StrategyContext
+from engine.watchlist import DCAContext, compute_dca_context
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +99,55 @@ REGIME_LABELS = {
     "volatile_choppy": "Volatile / Choppy",
     "breakout_transition": "Breakout / Transition",
 }
+
+DCA_TIER_LABELS = {
+    "normal": "Normal",
+    "mild_dip": "Mild Dip",
+    "strong_dip": "Strong Dip",
+    "extreme_dip": "Extreme Dip",
+}
+
+DCA_REGIME_LABELS = {
+    "bull": "Bull",
+    "bear": "Bear",
+    "crisis": "Crisis",
+    "sideways": "Sideways",
+    "recovery": "Recovery",
+}
+
+
+@dataclass
+class DCAScanResult:
+    """Result of DCA-scanning a single ticker.
+
+    Produced by :class:`DCAScanner` — ranks tickers by DCA attractiveness
+    rather than active trading signals.
+    """
+
+    ticker: str
+    price: float
+    # ── DCA context fields ──
+    dca_score: float          # 0-100 composite DCA attractiveness score
+    dip_pct: float            # percentage drop from rolling high
+    dip_sigma: float          # dip expressed in standard deviations
+    tier: str                 # final tier after all adjustments
+    tier_label: str           # human-readable tier label
+    multiplier: float         # DCA allocation multiplier
+    is_dca_buy: bool          # True if this is a good DCA buy opportunity
+    confidence: str           # "high", "medium", "low"
+    regime: str               # investor-friendly: bull/bear/crisis/sideways/recovery
+    regime_label: str         # human-readable regime label
+    rsi: float                # raw RSI value (0-100)
+    bb_pctile: float          # Bollinger Band %B (0-100 scale)
+    volatility: float         # annualised volatility (%)
+    composite_score: float    # composite indicator score (0-10)
+    explanation: list[str] = field(default_factory=list)
+    error: str = ""           # non-empty if the ticker failed
+
+    @property
+    def sort_key(self) -> float:
+        """Higher is better for DCA ranking."""
+        return self.dca_score
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -474,4 +531,282 @@ class Scanner:
             "buy_count": sum(1 for r in ok if r.signal == "BUY"),
             "sell_count": sum(1 for r in ok if r.signal == "SELL"),
             "hold_count": sum(1 for r in ok if r.signal == "HOLD"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DCA Scanner engine
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _compute_dca_score(ctx: DCAContext, weights: dict) -> float:
+    """Compute a 0-100 DCA attractiveness score from a DCAContext.
+
+    The score is a weighted combination of normalised sub-scores:
+
+    * **dip_sigma** — dip severity normalised by volatility (0-100).
+    * **tier_multiplier** — allocation multiplier mapped to 0-100.
+    * **technical** — inverse of composite indicator score (lower
+      composite = more attractive for DCA, since that means oversold).
+    * **confidence** — high=100, medium=60, low=20.
+    * **regime** — regime favourability for DCA: bull pullback and
+      recovery are best; bear/crisis are penalised.
+
+    Weights are configurable via ``dca.scanner.score_weights``.
+    """
+    w_dip = float(weights.get("dip_sigma", 0.30))
+    w_tier = float(weights.get("tier_multiplier", 0.25))
+    w_tech = float(weights.get("technical", 0.20))
+    w_conf = float(weights.get("confidence", 0.10))
+    w_regime = float(weights.get("regime", 0.15))
+
+    # Normalise dip_sigma to 0-100 (cap at 5 sigma = 100)
+    dip_sigma_score = min(ctx.dip_sigma / 5.0, 1.0) * 100
+
+    # Tier multiplier: 1.0=0, 1.5=33, 2.0=67, 3.0=100
+    tier_score = min((ctx.multiplier - 1.0) / 2.0, 1.0) * 100
+
+    # Technical: lower composite = more DCA attractive.
+    # Score 0 → 100, score 10 → 0.
+    tech_score = max(0.0, (10.0 - ctx.composite_score) / 10.0) * 100
+
+    # Confidence: high=100, medium=60, low=20
+    conf_map = {"high": 100.0, "medium": 60.0, "low": 20.0}
+    conf_score = conf_map.get(ctx.confidence, 20.0)
+
+    # Regime: bull pullback is ideal, recovery good, sideways neutral,
+    # bear/crisis penalised.
+    regime_map = {
+        "bull": 70.0,       # bull without dip is ok but not great
+        "recovery": 80.0,
+        "sideways": 50.0,
+        "bear": 25.0,
+        "crisis": 10.0,
+    }
+    regime_score = regime_map.get(ctx.regime, 50.0)
+    # Bull + dip = best (already captured by high dip_sigma_score & tier)
+
+    total_weight = w_dip + w_tier + w_tech + w_conf + w_regime
+    if total_weight <= 0:
+        return 0.0
+
+    raw = (
+        w_dip * dip_sigma_score
+        + w_tier * tier_score
+        + w_tech * tech_score
+        + w_conf * conf_score
+        + w_regime * regime_score
+    ) / total_weight
+
+    return round(max(0.0, min(100.0, raw)), 1)
+
+
+class DCAScanner:
+    """Parallel DCA attractiveness scanner.
+
+    Scans a universe of tickers and ranks them by DCA (Dollar-Cost Averaging)
+    attractiveness — answering "where should I allocate my next DCA dollar?"
+
+    Unlike the :class:`Scanner` which ranks by active trading signal strength,
+    this scanner looks for: deep dips, high volatility-normalised dip severity,
+    oversold technicals, and favourable regime context.
+
+    Parameters
+    ----------
+    universe : str | list[str]
+        Built-in universe name or explicit list of tickers.
+    period : str
+        Analysis period (default ``"2y"``).
+    max_workers : int
+        Thread pool size for parallel fetching (default ``8``).
+    cfg : Config | None
+        Optional pre-built Config.
+    on_progress : callable | None
+        ``(completed: int, total: int, ticker: str, result: DCAScanResult | None) -> None``
+    """
+
+    def __init__(
+        self,
+        universe: str | list[str] = "dow30",
+        period: str = "2y",
+        max_workers: int = 8,
+        cfg: Config | None = None,
+        on_progress: Callable[[int, int, str, DCAScanResult | None], None] | None = None,
+    ) -> None:
+        self._period = period
+        self._max_workers = max_workers
+        self._cfg = cfg or Config.load()
+        self._on_progress = on_progress
+
+        # Resolve tickers
+        if isinstance(universe, list):
+            self._tickers = [t.upper() for t in universe]
+            self._universe_name = "custom"
+        else:
+            self._tickers = load_universe(universe)
+            self._universe_name = universe
+
+        self._results: list[DCAScanResult] = []
+
+    @property
+    def universe_name(self) -> str:
+        return self._universe_name
+
+    @property
+    def tickers(self) -> list[str]:
+        return list(self._tickers)
+
+    @property
+    def results(self) -> list[DCAScanResult]:
+        return list(self._results)
+
+    # ── Core scan ────────────────────────────────────────────────────────
+
+    def run(self) -> list[DCAScanResult]:
+        """Run the full DCA scan.  Returns list of DCAScanResult (one per ticker)."""
+        self._results = []
+        total = len(self._tickers)
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+            futures = {
+                pool.submit(self._scan_one, ticker): ticker
+                for ticker in self._tickers
+            }
+
+            for future in as_completed(futures):
+                ticker = futures[future]
+                completed += 1
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = DCAScanResult(
+                        ticker=ticker,
+                        price=0.0,
+                        dca_score=0.0,
+                        dip_pct=0.0,
+                        dip_sigma=0.0,
+                        tier="normal",
+                        tier_label="Normal",
+                        multiplier=1.0,
+                        is_dca_buy=False,
+                        confidence="low",
+                        regime="sideways",
+                        regime_label="Sideways",
+                        rsi=50.0,
+                        bb_pctile=50.0,
+                        volatility=0.0,
+                        composite_score=5.0,
+                        error=str(exc),
+                    )
+                self._results.append(result)
+                if self._on_progress:
+                    self._on_progress(completed, total, ticker, result)
+
+        return list(self._results)
+
+    def _scan_one(self, ticker: str) -> DCAScanResult:
+        """Analyse a single ticker for DCA attractiveness."""
+        provider = YahooFinanceProvider()
+        analyzer = Analyzer(self._cfg, provider)
+
+        result = analyzer.run(ticker, self._period, "1d")
+
+        df = result.df
+        if df is None or df.empty:
+            raise ValueError(f"No data returned for {ticker}")
+
+        last_row = df.iloc[-1]
+        price = float(last_row["close"])
+
+        # ── Indicator composite & results ────────────────────────────────
+        ind_composite = result.composite.get("overall", 5.0)
+        ind_results = result.indicator_results or []
+
+        # ── Regime ───────────────────────────────────────────────────────
+        regime_type: RegimeType | None = None
+        regime_trend: str = "neutral"
+        regime_total_return: float = 0.0
+
+        if result.regime is not None:
+            regime_type = result.regime.regime
+            regime_trend = result.regime.metrics.trend_direction
+            regime_total_return = result.regime.metrics.total_return
+
+        # ── Compute DCA context ──────────────────────────────────────────
+        dca_cfg = dict(self._cfg.section("dca"))
+        dca_ctx = compute_dca_context(
+            df,
+            ind_composite=ind_composite,
+            ind_results=ind_results,
+            regime_type=regime_type,
+            regime_trend=regime_trend,
+            regime_total_return=regime_total_return,
+            dca_cfg=dca_cfg,
+        )
+
+        # ── Compute DCA attractiveness score ─────────────────────────────
+        scanner_cfg = dca_cfg.get("scanner", {})
+        score_weights = scanner_cfg.get("score_weights", {})
+        dca_score = _compute_dca_score(dca_ctx, score_weights)
+
+        return DCAScanResult(
+            ticker=ticker,
+            price=price,
+            dca_score=dca_score,
+            dip_pct=dca_ctx.dip_pct,
+            dip_sigma=dca_ctx.dip_sigma,
+            tier=dca_ctx.tier,
+            tier_label=DCA_TIER_LABELS.get(dca_ctx.tier, dca_ctx.tier),
+            multiplier=dca_ctx.multiplier,
+            is_dca_buy=dca_ctx.is_dca_buy,
+            confidence=dca_ctx.confidence,
+            regime=dca_ctx.regime,
+            regime_label=DCA_REGIME_LABELS.get(dca_ctx.regime, dca_ctx.regime),
+            rsi=dca_ctx.rsi,
+            bb_pctile=dca_ctx.bb_pctile,
+            volatility=dca_ctx.volatility,
+            composite_score=dca_ctx.composite_score,
+            explanation=dca_ctx.explanation,
+        )
+
+    # ── Ranking helpers ──────────────────────────────────────────────────
+
+    def top_dca(self, n: int = 10) -> list[DCAScanResult]:
+        """Return top *n* DCA opportunities, ranked by DCA score descending.
+
+        Only includes tickers where ``is_dca_buy`` is True.
+        """
+        candidates = [r for r in self._results if r.is_dca_buy and not r.error]
+        candidates.sort(key=lambda r: r.sort_key, reverse=True)
+        return candidates[:n]
+
+    def all_ranked(self, n: int | None = None) -> list[DCAScanResult]:
+        """Return all results ranked by DCA score descending (including non-buys)."""
+        ranked = [r for r in self._results if not r.error]
+        ranked.sort(key=lambda r: r.sort_key, reverse=True)
+        if n is not None:
+            return ranked[:n]
+        return ranked
+
+    def errors(self) -> list[DCAScanResult]:
+        """Return all tickers that failed during scan."""
+        return [r for r in self._results if r.error]
+
+    def summary(self) -> dict:
+        """Return a quick summary dict."""
+        ok = [r for r in self._results if not r.error]
+        buys = [r for r in ok if r.is_dca_buy]
+        return {
+            "universe": self._universe_name,
+            "period": self._period,
+            "total_tickers": len(self._tickers),
+            "scanned": len(ok),
+            "errors": len(self._results) - len(ok),
+            "dca_buy_count": len(buys),
+            "non_buy_count": len(ok) - len(buys),
+            "avg_dca_score": round(sum(r.dca_score for r in ok) / len(ok), 1) if ok else 0.0,
+            "high_conf_count": sum(1 for r in buys if r.confidence == "high"),
+            "medium_conf_count": sum(1 for r in buys if r.confidence == "medium"),
+            "low_conf_count": sum(1 for r in buys if r.confidence == "low"),
         }

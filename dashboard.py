@@ -53,7 +53,7 @@ from engine.strategy import Signal, StrategyContext
 from engine.watchlist import WatchlistMonitor, WatchlistSignal, WatchlistState, DCAContext
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
-from scanner import Scanner, ScanResult
+from scanner import Scanner, ScanResult, DCAScanner, DCAScanResult
 from analysis.dividend import DividendScanner, DividendScanResult
 from data.universes import available as available_universes, load as load_universe
 
@@ -4058,16 +4058,19 @@ def render_scanner() -> None:
     # ── Scan mode selector ────────────────────────────────────────────────
     scan_mode = st.radio(
         "Scan Mode",
-        ["Technical", "Dividend"],
+        ["Technical", "Dividend", "DCA"],
         index=0,
         horizontal=True,
         key="scan_mode",
         help="**Technical**: full indicator + pattern analysis with BUY/SELL/HOLD signals. "
-             "**Dividend**: rank stocks by dividend quality (yield, growth, consistency, streak).",
+             "**Dividend**: rank stocks by dividend quality (yield, growth, consistency, streak). "
+             "**DCA**: rank stocks by Dollar-Cost Averaging attractiveness (dip severity, regime, technicals).",
     )
 
     if scan_mode == "Dividend":
         _render_dividend_scanner()
+    elif scan_mode == "DCA":
+        _render_dca_scanner()
     else:
         _render_technical_scanner()
 
@@ -4416,6 +4419,301 @@ def _build_dividend_results_html(
         f"<thead>{header}</thead>"
         f"<tbody>{''.join(rows_html)}</tbody>"
         f"</table></div>"
+    )
+
+
+def _render_dca_scanner() -> None:
+    """Render the DCA (Dollar-Cost Averaging) scanner UI."""
+    st.markdown(
+        "Scan a stock universe to rank tickers by **DCA attractiveness** — "
+        "answering *\"where should I allocate my next DCA dollar?\"* "
+        "Combines dip severity, volatility-normalised sigma, technical "
+        "oversold signals, and regime context."
+    )
+
+    cfg = _get_config()
+
+    # ── Controls row: universe, period, top N, workers ────────────────────
+    col_univ, col_period, col_top, col_workers = st.columns([2, 1, 1, 1])
+
+    with col_univ:
+        universe_options = SCANNER_UNIVERSES
+        universe_labels = [
+            f"{SCANNER_UNIVERSE_LABELS[u]} ({len(load_universe(u))} tickers)"
+            for u in universe_options
+        ]
+        universe_idx = st.selectbox(
+            "Universe",
+            range(len(universe_options)),
+            format_func=lambda i: universe_labels[i],
+            index=0,
+            key="dca_scanner_universe",
+        )
+        universe = universe_options[universe_idx]
+
+    with col_period:
+        period = st.selectbox(
+            "Period",
+            ["1y", "2y", "5y"],
+            index=1,
+            key="dca_scanner_period",
+        )
+
+    with col_top:
+        top_n = st.number_input(
+            "Top N",
+            min_value=1,
+            max_value=200,
+            value=20,
+            step=1,
+            key="dca_scanner_top_n",
+        )
+
+    with col_workers:
+        workers = st.number_input(
+            "Workers",
+            min_value=1,
+            max_value=16,
+            value=8,
+            step=1,
+            key="dca_scanner_workers",
+        )
+
+    # ── Score weights (expandable) ────────────────────────────────────────
+    dca_cfg = dict(cfg.section("dca"))
+    scanner_cfg = dca_cfg.get("scanner", {})
+    default_weights = scanner_cfg.get("score_weights", {})
+
+    with st.expander("DCA Score Weights", expanded=False):
+        wc1, wc2, wc3, wc4, wc5 = st.columns(5)
+        with wc1:
+            w_dip = st.slider("Dip Sigma", 0.0, 1.0, float(default_weights.get("dip_sigma", 0.30)), 0.05, key="dca_w_dip")
+        with wc2:
+            w_tier = st.slider("Tier Multiplier", 0.0, 1.0, float(default_weights.get("tier_multiplier", 0.25)), 0.05, key="dca_w_tier")
+        with wc3:
+            w_tech = st.slider("Technical", 0.0, 1.0, float(default_weights.get("technical", 0.20)), 0.05, key="dca_w_tech")
+        with wc4:
+            w_conf = st.slider("Confidence", 0.0, 1.0, float(default_weights.get("confidence", 0.10)), 0.05, key="dca_w_conf")
+        with wc5:
+            w_regime = st.slider("Regime", 0.0, 1.0, float(default_weights.get("regime", 0.15)), 0.05, key="dca_w_regime")
+
+    # ── Show only DCA buys toggle ─────────────────────────────────────────
+    show_only_buys = st.checkbox(
+        "Show only DCA buy opportunities",
+        value=True,
+        key="dca_scanner_only_buys",
+        help="When checked, only tickers flagged as DCA buy opportunities are shown.",
+    )
+
+    # ── Run button ────────────────────────────────────────────────────────
+    if st.button("Scan for DCA Opportunities", type="primary", key="dca_scan_btn"):
+        progress_bar = st.progress(0, text="Initialising DCA scan...")
+        status_text = st.empty()
+
+        def _dca_progress(completed: int, total: int, ticker: str, result: DCAScanResult | None) -> None:
+            pct = completed / total
+            lbl = f"Scanning {ticker}..."
+            if result and not result.error:
+                lbl = f"{ticker}: DCA score {result.dca_score:.0f}"
+            elif result and result.error:
+                lbl = f"{ticker}: error"
+            progress_bar.progress(pct, text=f"[{completed}/{total}] {lbl}")
+
+        # Build scanner with custom weights from sliders
+        custom_cfg_data = dict(st.session_state.get("config_data", {}))
+        dca_section = dict(custom_cfg_data.get("dca", {}))
+        scanner_section = dict(dca_section.get("scanner", {}))
+        scanner_section["score_weights"] = {
+            "dip_sigma": w_dip,
+            "tier_multiplier": w_tier,
+            "technical": w_tech,
+            "confidence": w_conf,
+            "regime": w_regime,
+        }
+        dca_section["scanner"] = scanner_section
+        custom_cfg_data["dca"] = dca_section
+
+        from config import Config
+        scan_cfg = Config(custom_cfg_data)
+
+        scanner = DCAScanner(
+            universe=universe,
+            period=period,
+            max_workers=int(workers),
+            cfg=scan_cfg,
+            on_progress=_dca_progress,
+        )
+
+        import time as _time
+        t0 = _time.time()
+        scanner.run()
+        elapsed = _time.time() - t0
+
+        progress_bar.empty()
+        status_text.empty()
+
+        # Store results in session state
+        st.session_state["dca_scan_results"] = scanner.results
+        st.session_state["dca_scan_summary"] = scanner.summary()
+        st.session_state["dca_scan_elapsed"] = elapsed
+        st.session_state["dca_scan_errors"] = scanner.errors()
+        st.session_state["dca_scan_show_only_buys"] = show_only_buys
+        st.session_state["dca_scan_top_n"] = int(top_n)
+
+    # ── Display results ───────────────────────────────────────────────────
+    if "dca_scan_results" not in st.session_state:
+        st.info("Click **Scan for DCA Opportunities** to start scanning.")
+        return
+
+    results = st.session_state["dca_scan_results"]
+    summary = st.session_state["dca_scan_summary"]
+    elapsed = st.session_state.get("dca_scan_elapsed", 0)
+    errors = st.session_state.get("dca_scan_errors", [])
+    only_buys = st.session_state.get("dca_scan_show_only_buys", True)
+    display_n = st.session_state.get("dca_scan_top_n", 20)
+
+    # Summary metrics
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+    mc1.metric("Scanned", summary["scanned"])
+    mc2.metric("DCA Buy Opportunities", summary["dca_buy_count"])
+    mc3.metric("Avg DCA Score", f"{summary['avg_dca_score']:.0f}")
+    mc4.metric("High Confidence", summary["high_conf_count"])
+    mc5.metric("Elapsed", f"{elapsed:.1f}s")
+
+    # Rank and filter
+    ok_results = [r for r in results if not r.error]
+    ok_results.sort(key=lambda r: r.dca_score, reverse=True)
+
+    if only_buys:
+        display_results = [r for r in ok_results if r.is_dca_buy][:display_n]
+        table_title = f"Top {len(display_results)} DCA Buy Opportunities"
+    else:
+        display_results = ok_results[:display_n]
+        table_title = f"Top {len(display_results)} by DCA Attractiveness"
+
+    # Build HTML table
+    html = _build_dca_scanner_results_html(display_results, table_title)
+    st.markdown(html, unsafe_allow_html=True)
+
+    # Errors
+    if errors:
+        with st.expander(f"Errors ({len(errors)} tickers)", expanded=False):
+            for r in errors:
+                st.text(f"  {r.ticker}: {r.error[:100]}")
+
+
+def _build_dca_scanner_results_html(
+    results: list[DCAScanResult],
+    title: str,
+) -> str:
+    """Build an HTML table for DCA scanner results."""
+    if not results:
+        return "<p style='color:#666;padding:8px 0;'>No DCA opportunities found.</p>"
+
+    header = (
+        "<tr>"
+        "<th style='width:30px;'>#</th>"
+        "<th>Ticker</th>"
+        "<th>DCA Score</th>"
+        "<th>Confidence</th>"
+        "<th style='text-align:right;'>Price</th>"
+        "<th>Dip %</th>"
+        "<th>Dip Sigma</th>"
+        "<th>Tier</th>"
+        "<th>Multiplier</th>"
+        "<th>Regime</th>"
+        "<th>RSI</th>"
+        "<th>BB %B</th>"
+        "<th>Volatility</th>"
+        "<th>Indicator Score</th>"
+        "</tr>"
+    )
+
+    rows_html = []
+    for i, r in enumerate(results, 1):
+        # DCA score color: green for high, yellow for mid, dim for low
+        if r.dca_score >= 60:
+            score_color = COLOR_BULLISH
+        elif r.dca_score >= 35:
+            score_color = COLOR_NEUTRAL
+        else:
+            score_color = "#888"
+
+        # Confidence color
+        conf_color = {
+            "high": COLOR_BULLISH, "medium": COLOR_NEUTRAL, "low": "#666",
+        }.get(r.confidence, "#666")
+
+        # DCA score bar (0-100 scale, not 0-10)
+        score_pct = min(100, r.dca_score)
+        score_bar = (
+            f'<div style="display:flex;align-items:center;gap:6px;">'
+            f'<span style="color:{score_color};font-weight:600;min-width:28px;">{r.dca_score:.0f}</span>'
+            f'<div style="background:#333;border-radius:3px;width:60px;height:12px;flex-shrink:0;">'
+            f'<div style="background:{score_color};border-radius:3px;width:{score_pct:.0f}%;height:100%;"></div>'
+            f'</div></div>'
+        )
+
+        # Tier styling
+        tier_colors = {
+            "extreme_dip": COLOR_BEARISH,
+            "strong_dip": "#ff9800",
+            "mild_dip": COLOR_NEUTRAL,
+            "normal": "#888",
+        }
+        tier_color = tier_colors.get(r.tier, "#888")
+
+        # Regime styling
+        regime_colors = {
+            "bull": COLOR_BULLISH,
+            "recovery": "#66bb6a",
+            "sideways": COLOR_NEUTRAL,
+            "bear": "#ff9800",
+            "crisis": COLOR_BEARISH,
+        }
+        regime_color = regime_colors.get(r.regime, "#888")
+
+        # RSI color
+        rsi_color = COLOR_BULLISH if r.rsi < 30 else (COLOR_BEARISH if r.rsi > 70 else "#ccc")
+
+        # Dip % — more dip = more green
+        dip_color = COLOR_BULLISH if r.dip_pct >= 10 else (COLOR_NEUTRAL if r.dip_pct >= 5 else "#888")
+
+        row = (
+            f"<tr>"
+            f"<td style='color:#888;'>{i}</td>"
+            f"<td style='font-weight:700;'>{r.ticker}</td>"
+            f"<td>{score_bar}</td>"
+            f"<td style='color:{conf_color};'>{_confidence_dots(r.confidence)} {r.confidence}</td>"
+            f"<td style='text-align:right;'>${r.price:,.2f}</td>"
+            f"<td style='color:{dip_color};font-weight:600;'>{r.dip_pct:.1f}%</td>"
+            f"<td>{r.dip_sigma:.1f}σ</td>"
+            f"<td style='color:{tier_color};'>{r.tier_label}</td>"
+            f"<td style='font-weight:600;'>{r.multiplier:.1f}x</td>"
+            f"<td style='color:{regime_color};'>{r.regime_label}</td>"
+            f"<td style='color:{rsi_color};'>{r.rsi:.0f}</td>"
+            f"<td>{r.bb_pctile:.0f}%</td>"
+            f"<td>{r.volatility:.0f}%</td>"
+            f"<td>{score_bar_html(r.composite_score, width=50)}</td>"
+            f"</tr>"
+        )
+        rows_html.append(row)
+
+    return (
+        f'<div style="overflow-x:auto;">'
+        f'<h4 style="color:{COLOR_BULLISH};margin:16px 0 8px 0;">{title}</h4>'
+        f'<table style="'
+        f"width:100%;border-collapse:collapse;font-size:0.85rem;"
+        f"background:#1a1a2e;border-radius:8px;overflow:hidden;"
+        f'">'
+        f"<thead style='background:#16213e;'>{header}</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        f"</table></div>"
+        f"<style>"
+        f".stMarkdown table th, .stMarkdown table td {{"
+        f"  padding: 8px 10px; text-align: left; border-bottom: 1px solid #333;"
+        f"}}"
+        f"</style>"
     )
 
 
