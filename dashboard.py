@@ -4185,7 +4185,7 @@ def _build_scanner_results_html(
         "<th style='width:80px;' title='Score from reversal indicators (e.g. RSI, Stochastics). Bold if contrarian is the dominant group.'>Contrarian</th>"
         "<th style='width:80px;' title='Score from chart and candlestick pattern recognition.'>Pattern</th>"
         "<th style='text-align:right;' title='Current stock price.'>Price</th>"
-        "<th title='Current market regime: Bull, Recovery, Sideways, Bear, or Crisis.'>Regime</th>"
+        "<th title='Detected market regime (e.g. Strong Trend, Mean Reverting, Volatile Choppy).'>Regime</th>"
         "<th title='More specific market characterisation (e.g. Steady Compounder, Explosive Mover).'>Sub-Type</th>"
         f"{mt_headers}"
         "</tr>"
