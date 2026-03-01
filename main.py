@@ -506,11 +506,14 @@ def main() -> None:
             )
             dca_table.add_column("Ticker", style="bold white", no_wrap=True)
             dca_table.add_column("Price", justify="right", no_wrap=True)
-            dca_table.add_column("Rolling High", justify="right", no_wrap=True)
             dca_table.add_column("Dip %", justify="right", no_wrap=True)
+            dca_table.add_column("Dip σ", justify="right", no_wrap=True)
             dca_table.add_column("Tier", no_wrap=True)
             dca_table.add_column("Multiplier", justify="right", no_wrap=True)
-            dca_table.add_column("DCA Guidance", no_wrap=True)
+            dca_table.add_column("RSI", justify="right", no_wrap=True)
+            dca_table.add_column("Regime", no_wrap=True)
+            dca_table.add_column("Confidence", no_wrap=True)
+            dca_table.add_column("Guidance", no_wrap=True)
 
             for sig in dca_signals:
                 dca = sig.dca
@@ -538,18 +541,41 @@ def main() -> None:
                 else:
                     dip_str = f"[dim]{dca.dip_pct:.1f}%[/dim]"
 
+                # Color confidence
+                if dca.confidence == "high":
+                    conf_str = f"[bold green]{dca.confidence.title()}[/bold green]"
+                elif dca.confidence == "medium":
+                    conf_str = f"[yellow]{dca.confidence.title()}[/yellow]"
+                else:
+                    conf_str = f"[dim]{dca.confidence.title()}[/dim]"
+
+                # Dip sigma
+                sigma_str = f"{dca.dip_sigma:.1f}" if dca.volatility > 0 else "—"
+
                 dca_table.add_row(
                     sig.ticker,
                     f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
-                    f"${dca.rolling_high:,.2f}",
                     dip_str,
+                    sigma_str,
                     tier_str,
                     f"{dca.multiplier:.1f}x",
+                    f"{dca.rsi:.0f}",
+                    dca.regime.replace("_", " ").title(),
+                    conf_str,
                     guidance,
                 )
 
             console.print()
             console.print(dca_table)
+
+            # Print DCA explanation for tickers with dip opportunities
+            dca_buy_signals = [s for s in dca_signals if s.dca and s.dca.is_dca_buy]
+            if dca_buy_signals:
+                console.print()
+                for sig in dca_buy_signals:
+                    console.print(f"  [bold]{sig.ticker}[/bold] DCA analysis:")
+                    for line in sig.dca.explanation:
+                        console.print(f"    [dim]• {line}[/dim]")
 
         # Show signal notes for actionable signals
         actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
@@ -569,7 +595,8 @@ def main() -> None:
                     console.print(
                         f"    [dim]DCA: {tier_display} "
                         f"({sig.dca.dip_pct:.1f}% dip, "
-                        f"{sig.dca.multiplier:.1f}x multiplier)[/dim]"
+                        f"{sig.dca.multiplier:.1f}x multiplier, "
+                        f"{sig.dca.confidence} confidence)[/dim]"
                     )
 
         # Save state

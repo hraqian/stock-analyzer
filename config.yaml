@@ -1072,6 +1072,17 @@ dca:
     oversold_rsi: 30.0         # RSI below this = oversold
     bb_percentile_low: 10.0    # BB percentile below this = near lower band
 
+  # Watchlist DCA context — enhanced dip analysis for the live
+  # watchlist monitor.  Augments raw dip-detection tiers with
+  # volatility normalisation and regime awareness.
+  watchlist_context:
+    volatility_window: 60          # trailing days for daily vol calculation
+    vol_severe_sigma: 2.5          # dip ≥ this many σ → statistically severe
+    vol_notable_sigma: 1.5         # dip ≥ this many σ → notable
+    regime_adjustment:
+      bear_max_multiplier: 1.5     # cap multiplier in bear/crisis regime
+      bull_pullback_bonus: 0.5     # boost multiplier for bull-regime pullback
+
   # Safety gates
   safety:
     max_multiplier: 3.0              # absolute cap on any single multiplier
@@ -1093,7 +1104,7 @@ dca:
 # ─────────────────────────────────────────────────────────────────────────────
 
 watchlist:
-  tickers: []                    # tickers to monitor, e.g. ["AAPL", "MSFT", "SPY"]
+  tickers: ["CSCO", "AAPL", "AMZN"]
   data_period: "1y"              # how much history to fetch for indicator warmup
   interval: "1d"                 # data interval
   trading_mode: "long_only"      # "long_only" or "long_short"

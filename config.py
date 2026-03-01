@@ -883,6 +883,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "bb_percentile_low": 10.0,  # BB percentile below this = near lower band
         },
 
+        # Watchlist DCA context — enhanced dip analysis for the live
+        # watchlist monitor.  These settings augment the raw dip-detection
+        # tiers with volatility normalisation and regime awareness.
+        "watchlist_context": {
+            "volatility_window": 60,         # trailing days for daily vol calc
+            "vol_severe_sigma": 2.5,         # dip ≥ this many σ → statistically severe
+            "vol_notable_sigma": 1.5,        # dip ≥ this many σ → notable
+            "regime_adjustment": {
+                "bear_max_multiplier": 1.5,  # cap multiplier in bear/crisis
+                "bull_pullback_bonus": 0.5,  # boost multiplier for bull pullback
+            },
+        },
+
         # Safety gates
         "safety": {
             "max_multiplier": 3.0,           # absolute cap on any single multiplier

@@ -5287,9 +5287,9 @@ def render_watchlist() -> None:
     if dca_signals:
         st.subheader("DCA Context")
         st.caption(
-            "Dollar-cost averaging guidance based on dip detection. "
-            "Shows how far each ticker has dropped from its rolling high "
-            "and the recommended DCA allocation multiplier."
+            "Enhanced dollar-cost averaging guidance combining price dip "
+            "detection, volatility normalisation, technical scores, and "
+            "regime awareness."
         )
 
         dca_rows = []
@@ -5298,6 +5298,7 @@ def render_watchlist() -> None:
             assert dca is not None  # guarded by filter above
 
             tier_display = dca.tier.replace("_", " ").title()
+            conf_display = dca.confidence.title()
             if dca.is_dca_buy:
                 guidance = f"DCA Buy ({tier_display})"
             else:
@@ -5306,11 +5307,14 @@ def render_watchlist() -> None:
             dca_rows.append({
                 "Ticker": sig.ticker,
                 "Price": f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
-                "Rolling High": f"${dca.rolling_high:,.2f}",
                 "Dip %": f"{dca.dip_pct:.1f}%",
+                "Dip σ": f"{dca.dip_sigma:.1f}" if dca.volatility > 0 else "—",
                 "Tier": tier_display,
                 "Multiplier": f"{dca.multiplier:.1f}x",
-                "DCA Guidance": guidance,
+                "RSI": f"{dca.rsi:.0f}",
+                "Regime": dca.regime.replace("_", " ").title(),
+                "Confidence": conf_display,
+                "Guidance": guidance,
             })
 
         df_dca = _pd.DataFrame(dca_rows)
@@ -5321,13 +5325,31 @@ def render_watchlist() -> None:
             column_config={
                 "Ticker": st.column_config.TextColumn(width="small"),
                 "Price": st.column_config.TextColumn(width="small"),
-                "Rolling High": st.column_config.TextColumn(width="small"),
                 "Dip %": st.column_config.TextColumn(width="small"),
+                "Dip σ": st.column_config.TextColumn(width="small"),
                 "Tier": st.column_config.TextColumn(width="small"),
                 "Multiplier": st.column_config.TextColumn(width="small"),
-                "DCA Guidance": st.column_config.TextColumn(width="medium"),
+                "RSI": st.column_config.TextColumn(width="small"),
+                "Regime": st.column_config.TextColumn(width="small"),
+                "Confidence": st.column_config.TextColumn(width="small"),
+                "Guidance": st.column_config.TextColumn(width="medium"),
             },
         )
+
+        # Per-ticker DCA explanation expanders
+        for sig in dca_signals:
+            dca = sig.dca
+            assert dca is not None
+            if dca.explanation:
+                with st.expander(f"{sig.ticker} — DCA Analysis Details"):
+                    for line in dca.explanation:
+                        st.markdown(f"- {line}")
+                    st.caption(
+                        f"Volatility: {dca.volatility:.0f}% annualised · "
+                        f"BB %B: {dca.bb_pctile:.0f}% · "
+                        f"Composite Score: {dca.composite_score:.1f} · "
+                        f"Rolling High: ${dca.rolling_high:,.2f}"
+                    )
 
     # ── Actionable signals detail ─────────────────────────────────────────
     actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
@@ -5363,15 +5385,25 @@ def render_watchlist() -> None:
                     d1.metric("Dip from High", f"{sig.dca.dip_pct:.1f}%")
                     d2.metric("Tier", sig.dca.tier.replace("_", " ").title())
                     d3.metric("Multiplier", f"{sig.dca.multiplier:.1f}x")
-                    d4.metric(
-                        "Rolling High",
-                        f"${sig.dca.rolling_high:,.2f}",
-                    )
+                    d4.metric("Confidence", sig.dca.confidence.title())
+
+                    d5, d6, d7, d8 = st.columns(4)
+                    d5.metric("RSI", f"{sig.dca.rsi:.0f}")
+                    d6.metric("BB %B", f"{sig.dca.bb_pctile:.0f}%")
+                    d7.metric("Volatility", f"{sig.dca.volatility:.0f}%")
+                    d8.metric("Regime", sig.dca.regime.replace("_", " ").title())
+
                     if sig.dca.is_dca_buy:
                         st.success(
-                            f"DCA opportunity: {sig.dca.tier.replace('_', ' ')} — "
+                            f"DCA opportunity: {sig.dca.tier.replace('_', ' ')} "
+                            f"({sig.dca.confidence} confidence) — "
                             f"consider allocating {sig.dca.multiplier:.1f}x your normal DCA amount."
                         )
+
+                    if sig.dca.explanation:
+                        with st.expander("Analysis Details"):
+                            for line in sig.dca.explanation:
+                                st.markdown(f"- {line}")
 
                 if sig.position:
                     pnl = sig.position.unrealized_pnl_pct(sig.current_price)

@@ -82,12 +82,36 @@ class WatchlistClosedTrade:
 
 @dataclass
 class DCAContext:
-    """DCA (Dollar-Cost Averaging) context for a single ticker."""
+    """DCA (Dollar-Cost Averaging) context for a single ticker.
+
+    Combines price-dip detection with regime awareness, technical score
+    integration, and volatility normalisation to produce a more nuanced
+    DCA buy recommendation than raw dip percentage alone.
+    """
+    # --- Price dip ---
     dip_pct: float              # percentage drop from rolling high
-    tier: str                   # "normal", "mild_dip", "strong_dip", "extreme_dip"
-    multiplier: float           # DCA allocation multiplier for this tier
     rolling_high: float         # the rolling high price used for dip detection
-    is_dca_buy: bool            # True if this is a good DCA buy opportunity (any dip)
+    raw_tier: str               # tier from price dip alone (before adjustments)
+
+    # --- Volatility ---
+    volatility: float           # annualised volatility (%)
+    dip_sigma: float            # dip expressed in standard deviations
+
+    # --- Score integration ---
+    rsi: float                  # raw RSI value (0-100)
+    bb_pctile: float            # Bollinger Band %B (0-100 scale)
+    composite_score: float      # composite indicator score (0-10)
+
+    # --- Regime ---
+    regime: str                 # regime type used for adjustment
+    regime_trend: str           # trend direction (bullish/bearish/neutral)
+
+    # --- Final assessment ---
+    tier: str                   # final tier after all adjustments
+    multiplier: float           # final DCA allocation multiplier
+    is_dca_buy: bool            # True if this is a good DCA buy opportunity
+    confidence: str             # "high", "medium", "low"
+    explanation: list[str]      # human-readable reasoning lines
 
 
 @dataclass
@@ -329,7 +353,9 @@ class WatchlistMonitor:
             current_price = float(df["close"].iloc[-1])
 
             # 2. Compute scores on full available data
-            ind_scores, ind_composite, pat_composite = self._compute_scores(df)
+            ind_scores, ind_composite, pat_composite, ind_results = (
+                self._compute_scores(df)
+            )
 
             # 3. Classify regime
             regime_type, regime_sub_type, regime_trend, regime_total_return = (
@@ -405,7 +431,13 @@ class WatchlistMonitor:
 
             # 12. Compute DCA context (dip tier, multiplier, buy guidance)
             try:
-                dca_ctx = self._compute_dca_context(df)
+                dca_ctx = self._compute_dca_context(
+                    df,
+                    ind_composite=ind_composite,
+                    ind_results=ind_results,
+                    regime_type=regime_type,
+                    regime_trend=regime_trend,
+                )
             except Exception:
                 logger.warning("DCA context failed for %s", ticker, exc_info=True)
                 dca_ctx = None
@@ -438,8 +470,12 @@ class WatchlistMonitor:
 
     def _compute_scores(
         self, df: pd.DataFrame,
-    ) -> tuple[dict[str, float], float, float]:
-        """Compute indicator and pattern scores — same as BacktestEngine."""
+    ) -> tuple[dict[str, float], float, float, list]:
+        """Compute indicator and pattern scores — same as BacktestEngine.
+
+        Returns (scores_dict, indicator_composite, pattern_composite,
+        raw_indicator_results).
+        """
         registry = IndicatorRegistry(self._cfg)
         results = registry.run_all(df)
 
@@ -453,7 +489,7 @@ class WatchlistMonitor:
         pat_scorer = PatternCompositeScorer(self._cfg)
         pat_composite = pat_scorer.score(pat_results)
 
-        return scores, composite["overall"], pat_composite["overall"]
+        return scores, composite["overall"], pat_composite["overall"], results
 
     def _classify_regime(
         self, df: pd.DataFrame,
@@ -544,7 +580,7 @@ class WatchlistMonitor:
         for i in range(start_idx, len(df) - 1, rebalance_interval):
             trailing = df.iloc[: i + 1]
             try:
-                scores, ind_comp, pat_comp = self._compute_scores(trailing)
+                scores, ind_comp, pat_comp, _ = self._compute_scores(trailing)
             except Exception:
                 continue
 
@@ -600,67 +636,236 @@ class WatchlistMonitor:
             # gate mode — just return indicator composite
             return ind_composite
 
-    def _compute_dca_context(self, df: pd.DataFrame) -> DCAContext:
-        """Compute DCA dip-detection context for a ticker.
+    def _compute_dca_context(
+        self,
+        df: pd.DataFrame,
+        *,
+        ind_composite: float,
+        ind_results: list,
+        regime_type: RegimeType | None,
+        regime_trend: str,
+    ) -> DCAContext:
+        """Compute enhanced DCA context for a ticker.
 
-        Reuses the same dip-detection logic as the DCA backtester:
-        rolling high over a configurable lookback window, dip percentage,
-        and tier classification with multipliers.
+        Combines four signals to produce a nuanced DCA recommendation:
 
-        All thresholds and multipliers are read from config → dca section.
+        1. **Price dip** — rolling high lookback → dip % → base tier
+           (same as DCA backtester).
+        2. **Volatility normalisation** — express the dip in standard
+           deviations so a 10% dip on a volatile stock is weighted
+           differently from a 10% dip on a stable stock.
+        3. **Score integration** — composite score, RSI, and BB %B can
+           upgrade the tier (reuses logic from DCA backtester's
+           score_integrated mode).
+        4. **Regime adjustment** — bear regime caps the multiplier and
+           lowers confidence; bull regime with pullback boosts confidence.
+
+        All thresholds are configurable via config → dca section.
         """
         dca_cfg = self._cfg.section("dca")
+        notes: list[str] = []
 
-        # Dip thresholds
+        # ── 1. Price dip detection ───────────────────────────────────────
         dt = dca_cfg.get("dip_thresholds", {})
         lookback_days = int(dt.get("lookback_days", 30))
         mild_drop_pct = float(dt.get("mild_drop_pct", 5.0))
         strong_drop_pct = float(dt.get("strong_drop_pct", 10.0))
         extreme_drop_pct = float(dt.get("extreme_drop_pct", 20.0))
 
-        # Multipliers
         ml = dca_cfg.get("multipliers", {})
         mult_normal = float(ml.get("normal", 1.0))
         mult_mild = float(ml.get("mild_dip", 1.5))
         mult_strong = float(ml.get("strong_dip", 2.0))
         mult_extreme = float(ml.get("extreme_dip", 3.0))
 
-        # Safety
         safety = dca_cfg.get("safety", {})
         max_multiplier = float(safety.get("max_multiplier", 3.0))
 
-        # Compute rolling high
         close = df["close"].values
-        rolling_high = float(
+        current_price = float(close[-1])
+        rolling_high_val = float(
             pd.Series(close).rolling(window=lookback_days, min_periods=1).max().iloc[-1]
         )
 
-        # Compute dip percentage
-        current_price = float(close[-1])
-        if rolling_high > 0:
-            dip_pct = max(0.0, (rolling_high - current_price) / rolling_high * 100.0)
+        if rolling_high_val > 0:
+            dip_pct = max(0.0, (rolling_high_val - current_price) / rolling_high_val * 100.0)
         else:
             dip_pct = 0.0
 
-        # Classify tier
-        if dip_pct >= extreme_drop_pct:
-            tier, multiplier = "extreme_dip", mult_extreme
-        elif dip_pct >= strong_drop_pct:
-            tier, multiplier = "strong_dip", mult_strong
-        elif dip_pct >= mild_drop_pct:
-            tier, multiplier = "mild_dip", mult_mild
-        else:
-            tier, multiplier = "normal", mult_normal
+        # Base tier from price dip
+        tier_order = [
+            ("extreme_dip", extreme_drop_pct, mult_extreme),
+            ("strong_dip",  strong_drop_pct,  mult_strong),
+            ("mild_dip",    mild_drop_pct,    mult_mild),
+        ]
+        tier, multiplier = "normal", mult_normal
+        for t_name, t_threshold, t_mult in tier_order:
+            if dip_pct >= t_threshold:
+                tier, multiplier = t_name, t_mult
+                break
 
-        # Clamp multiplier
+        raw_tier = tier  # save pre-adjustment tier
+
+        if dip_pct < mild_drop_pct:
+            notes.append(f"Price is {dip_pct:.1f}% below {lookback_days}-day high — no significant dip.")
+        else:
+            notes.append(
+                f"Price is {dip_pct:.1f}% below {lookback_days}-day high "
+                f"(${rolling_high_val:,.2f}) — {tier.replace('_', ' ')}."
+            )
+
+        # ── 2. Volatility normalisation ──────────────────────────────────
+        wl_ctx = dca_cfg.get("watchlist_context", {})
+        vol_window = int(wl_ctx.get("volatility_window", 60))
+
+        returns = pd.Series(close).pct_change().dropna()
+        if len(returns) >= 20:
+            daily_vol = float(returns.iloc[-vol_window:].std()) if len(returns) >= vol_window else float(returns.std())
+            annual_vol = daily_vol * (252 ** 0.5) * 100  # annualised %
+            daily_vol_pct = daily_vol * 100
+            dip_sigma = (dip_pct / daily_vol_pct) if daily_vol_pct > 0 else 0.0
+        else:
+            annual_vol = 0.0
+            dip_sigma = 0.0
+
+        # Interpret volatility context
+        vol_severe_sigma = float(wl_ctx.get("vol_severe_sigma", 2.5))
+        vol_notable_sigma = float(wl_ctx.get("vol_notable_sigma", 1.5))
+
+        if annual_vol > 0:
+            if dip_sigma >= vol_severe_sigma:
+                notes.append(
+                    f"Dip is {dip_sigma:.1f} daily std devs — statistically severe "
+                    f"for this stock (annualised vol {annual_vol:.0f}%)."
+                )
+            elif dip_sigma >= vol_notable_sigma:
+                notes.append(
+                    f"Dip is {dip_sigma:.1f} daily std devs — notable "
+                    f"(annualised vol {annual_vol:.0f}%)."
+                )
+            elif dip_pct >= mild_drop_pct:
+                notes.append(
+                    f"Dip is only {dip_sigma:.1f} daily std devs — routine "
+                    f"for this stock's volatility ({annual_vol:.0f}% annualised)."
+                )
+
+        # ── 3. Score integration ─────────────────────────────────────────
+        # Extract raw RSI and BB %B from indicator results
+        rsi_val = 50.0
+        bb_pctile_val = 50.0
+        for r in ind_results:
+            if r.error:
+                continue
+            if r.config_key == "rsi":
+                rsi_val = float(r.values.get("rsi", 50.0))
+            elif r.config_key == "bollinger_bands":
+                # pct_b is 0.0-1.0, convert to 0-100
+                bb_pctile_val = float(r.values.get("pct_b", 0.5)) * 100
+
+        st_cfg = dca_cfg.get("score_thresholds", {})
+        buy_zone_below = float(st_cfg.get("buy_zone_below", 3.5))
+        oversold_rsi = float(st_cfg.get("oversold_rsi", 30.0))
+        bb_pctile_low = float(st_cfg.get("bb_percentile_low", 10.0))
+
+        # Score-based tier upgrades (never downgrades, same as DCA backtester)
+        score_upgraded = False
+        if ind_composite < buy_zone_below:
+            if tier == "normal":
+                tier, multiplier = "mild_dip", mult_mild
+                score_upgraded = True
+            elif tier == "mild_dip":
+                tier, multiplier = "strong_dip", mult_strong
+                score_upgraded = True
+            notes.append(
+                f"Composite score {ind_composite:.1f} is below buy zone "
+                f"({buy_zone_below}) — indicators suggest undervaluation."
+            )
+        else:
+            notes.append(f"Composite score {ind_composite:.1f} — neutral to positive.")
+
+        if rsi_val < oversold_rsi:
+            if tier in ("normal", "mild_dip"):
+                if tier == "normal":
+                    tier, multiplier = "mild_dip", mult_mild
+                else:
+                    tier, multiplier = "strong_dip", mult_strong
+                score_upgraded = True
+            notes.append(f"RSI {rsi_val:.0f} is oversold (below {oversold_rsi:.0f}).")
+        elif rsi_val > 70:
+            notes.append(f"RSI {rsi_val:.0f} is overbought — caution on increasing allocation.")
+
+        if bb_pctile_val < bb_pctile_low:
+            if tier == "mild_dip":
+                tier, multiplier = "strong_dip", mult_strong
+                score_upgraded = True
+            elif tier == "strong_dip":
+                tier, multiplier = "extreme_dip", mult_extreme
+                score_upgraded = True
+            notes.append(
+                f"BB %B at {bb_pctile_val:.0f}% — price near lower Bollinger Band."
+            )
+
+        if score_upgraded:
+            notes.append(f"Tier upgraded from {raw_tier.replace('_',' ')} to {tier.replace('_',' ')} by technical signals.")
+
+        # ── 4. Regime adjustment ─────────────────────────────────────────
+        regime_str = regime_type.value if regime_type else "unknown"
+        regime_adj = wl_ctx.get("regime_adjustment", {})
+        bear_max_mult = float(regime_adj.get("bear_max_multiplier", 1.5))
+        bull_pullback_bonus = float(regime_adj.get("bull_pullback_bonus", 0.5))
+
+        regime_capped = False
+        if regime_type in (RegimeType.BEAR, RegimeType.CRISIS):
+            if multiplier > bear_max_mult:
+                multiplier = bear_max_mult
+                regime_capped = True
+            notes.append(
+                f"Regime is {regime_str.replace('_', ' ')} — "
+                f"multiplier capped at {bear_max_mult:.1f}x (higher risk of continued decline)."
+            )
+        elif regime_type == RegimeType.BULL and dip_pct >= mild_drop_pct:
+            multiplier = min(multiplier + bull_pullback_bonus, max_multiplier)
+            notes.append(
+                f"Bull regime pullback — good DCA entry point, "
+                f"multiplier boosted by {bull_pullback_bonus:.1f}x."
+            )
+        elif regime_type == RegimeType.BULL:
+            notes.append("Bull regime — steady accumulation recommended.")
+        elif regime_type in (RegimeType.SIDEWAYS, RegimeType.RECOVERY):
+            notes.append(f"Regime is {regime_str.replace('_', ' ')} — standard DCA allocation.")
+
+        # Clamp final multiplier
         multiplier = min(multiplier, max_multiplier)
+
+        # ── 5. Confidence assessment ─────────────────────────────────────
+        # High: dip + bullish/neutral regime + supportive technicals
+        # Low:  bear/crisis regime, or overbought RSI during dip
+        is_dca_buy = dip_pct >= mild_drop_pct or ind_composite < buy_zone_below
+        if is_dca_buy and regime_type in (RegimeType.BULL, RegimeType.RECOVERY) and rsi_val < 50:
+            confidence = "high"
+        elif is_dca_buy and regime_type in (RegimeType.BEAR, RegimeType.CRISIS):
+            confidence = "low"
+        elif is_dca_buy:
+            confidence = "medium"
+        else:
+            confidence = "low"
 
         return DCAContext(
             dip_pct=round(dip_pct, 1),
+            rolling_high=round(rolling_high_val, 2),
+            raw_tier=raw_tier,
+            volatility=round(annual_vol, 1),
+            dip_sigma=round(dip_sigma, 1),
+            rsi=round(rsi_val, 1),
+            bb_pctile=round(bb_pctile_val, 1),
+            composite_score=round(ind_composite, 1),
+            regime=regime_str,
+            regime_trend=regime_trend,
             tier=tier,
-            multiplier=multiplier,
-            rolling_high=round(rolling_high, 2),
-            is_dca_buy=dip_pct >= mild_drop_pct,
+            multiplier=round(multiplier, 2),
+            is_dca_buy=is_dca_buy,
+            confidence=confidence,
+            explanation=notes,
         )
 
     def _determine_action(
