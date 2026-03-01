@@ -470,6 +470,17 @@ class DCABacktester:
         if self.mode == "pure":
             return self.mult_normal, "normal"
 
+        # ── Resolve the nearest score row (if available) ─────────────────
+        # score_df is sampled every N bars, so a buy date may fall between
+        # samples.  Use asof() to find the most recent score on or before
+        # the buy date, avoiding silent misses when step > 1.
+        score_row: pd.Series | None = None
+        if score_df is not None and len(score_df) > 0:
+            date = dates[bar_idx]
+            nearest = score_df.index.asof(date)
+            if nearest is not pd.NaT:
+                score_row = score_df.loc[nearest]
+
         # ── Dip-weighted tier assignment ─────────────────────────────────
         if dip_pct >= self.extreme_drop_pct:
             mult, tier = self.mult_extreme, "extreme_dip"
@@ -487,68 +498,62 @@ class DCABacktester:
         if (
             self.crisis_enabled
             and mult > self.mult_normal
-            and score_df is not None
+            and score_row is not None
         ):
-            date = dates[bar_idx]
-            if date in score_df.index:
-                row = score_df.loc[date]
-                crisis_signals = 0
+            crisis_signals = 0
 
-                # Signal 1: composite score extremely low
-                composite_val = float(row.get("composite", 5.0))
-                if composite_val < self.crisis_composite_below:
+            # Signal 1: composite score extremely low
+            composite_val = float(score_row.get("composite", 5.0))
+            if composite_val < self.crisis_composite_below:
+                crisis_signals += 1
+
+            # Signal 2: RSI in panic territory
+            rsi_val = float(score_row.get("rsi_raw", 50.0))
+            if rsi_val < self.crisis_panic_rsi:
+                crisis_signals += 1
+
+            # Signal 3: volume spike (confirms the move has conviction)
+            if volume is not None and avg_vol is not None:
+                cur_vol = float(volume[bar_idx])
+                avg = float(avg_vol[bar_idx])
+                if avg > 0 and (cur_vol / avg) > self.crisis_vol_spike:
                     crisis_signals += 1
 
-                # Signal 2: RSI in panic territory
-                rsi_val = float(row.get("rsi_raw", 50.0))
-                if rsi_val < self.crisis_panic_rsi:
-                    crisis_signals += 1
-
-                # Signal 3: volume spike (confirms the move has conviction)
-                if volume is not None and avg_vol is not None:
-                    cur_vol = float(volume[bar_idx])
-                    avg = float(avg_vol[bar_idx])
-                    if avg > 0 and (cur_vol / avg) > self.crisis_vol_spike:
-                        crisis_signals += 1
-
-                if crisis_signals >= self.crisis_min_signals:
-                    mult, tier = self.mult_normal, "normal"
+            if crisis_signals >= self.crisis_min_signals:
+                mult, tier = self.mult_normal, "normal"
 
         # ── Score-integrated adjustments ─────────────────────────────────
-        if self.mode == "score_integrated" and score_df is not None:
-            date = dates[bar_idx]
-            if date in score_df.index:
-                row = score_df.loc[date]
-                composite = float(row.get("composite", 5.0))
-                rsi = float(row.get("rsi_raw", 50.0))
-                bb_pctile = float(row.get("bb_pctile", 50.0))
-                gap_type = str(row.get("gap_type", ""))
+        if self.mode == "score_integrated" and score_row is not None:
+            composite = float(score_row.get("composite", 5.0))
+            rsi = float(score_row.get("rsi_raw", 50.0))
+            bb_pctile = float(score_row.get("bb_pctile", 50.0))
+            gap_type = str(score_row.get("gap_type", ""))
 
-                # Breakaway-down safety gate: suppress overweight
-                if self.skip_breakaway and gap_type == "breakaway":
-                    direction = str(row.get("gap_direction", ""))
-                    if direction == "down":
-                        return self.mult_normal, "normal"
+            # Breakaway-down safety gate: suppress overweight
+            if self.skip_breakaway and gap_type == "breakaway":
+                direction = str(score_row.get("gap_direction", ""))
+                if direction == "down":
+                    return self.mult_normal, "normal"
 
-                # Score-based boost: bump up one tier if in buy zone
-                if composite < self.buy_zone_below and tier == "normal":
+            # Score-based boost: bump up one tier if in buy zone
+            if composite < self.buy_zone_below and tier == "normal":
+                mult, tier = self.mult_mild, "mild_dip"
+            elif composite < self.buy_zone_below and tier == "mild_dip":
+                mult, tier = self.mult_strong, "strong_dip"
+
+            # RSI oversold boost: bump up one more tier
+            if rsi < self.oversold_rsi and tier in ("mild_dip", "normal"):
+                if tier == "normal":
                     mult, tier = self.mult_mild, "mild_dip"
-                elif composite < self.buy_zone_below and tier == "mild_dip":
+                else:
                     mult, tier = self.mult_strong, "strong_dip"
 
-                # RSI oversold boost: bump up one more tier
-                if rsi < self.oversold_rsi and tier in ("mild_dip", "normal"):
-                    if tier == "normal":
-                        mult, tier = self.mult_mild, "mild_dip"
-                    else:
-                        mult, tier = self.mult_strong, "strong_dip"
-
-                # BB percentile boost
-                if bb_pctile < self.bb_pctile_low and tier in ("mild_dip", "strong_dip"):
-                    if tier == "mild_dip":
-                        mult, tier = self.mult_strong, "strong_dip"
-                    elif tier == "strong_dip":
-                        mult, tier = self.mult_extreme, "extreme_dip"
+            # BB percentile boost
+            if bb_pctile < self.bb_pctile_low and tier in ("mild_dip", "strong_dip"):
+                if tier == "mild_dip":
+                    mult, tier = self.mult_strong, "strong_dip"
+                elif tier == "strong_dip":
+                    mult, tier = self.mult_extreme, "extreme_dip"
 
         # ── Volume safety gate ───────────────────────────────────────────
         if volume is not None and avg_vol is not None and mult > self.mult_normal:
