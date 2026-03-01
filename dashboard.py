@@ -5746,18 +5746,18 @@ def render_watchlist() -> None:
     # Top 3 indicators by weight
     weights = overall.get("weights", {})
     if weights:
-        sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:3]
-        top_text = ", ".join(
+        sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)
+        ind_text = ", ".join(
             f"{name.replace('_', ' ').title()} ({w:.0%})"
             for name, w in sorted_w
         )
     else:
-        top_text = "default indicators"
+        ind_text = "default indicators"
 
     st.info(
         f"**Active strategy:** {thr_text}  \n"
         f"**Score blending:** {combo_text}  \n"
-        f"**Top indicators:** {top_text}",
+        f"**Indicator weights:** {ind_text}",
         icon="ℹ️",
     )
     data = st.session_state.get("config_data", {})
