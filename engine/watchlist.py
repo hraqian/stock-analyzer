@@ -437,6 +437,7 @@ class WatchlistMonitor:
                     ind_results=ind_results,
                     regime_type=regime_type,
                     regime_trend=regime_trend,
+                    regime_total_return=regime_total_return,
                 )
             except Exception:
                 logger.warning("DCA context failed for %s", ticker, exc_info=True)
@@ -644,6 +645,7 @@ class WatchlistMonitor:
         ind_results: list,
         regime_type: RegimeType | None,
         regime_trend: str,
+        regime_total_return: float,
     ) -> DCAContext:
         """Compute enhanced DCA context for a ticker.
 
@@ -657,8 +659,10 @@ class WatchlistMonitor:
         3. **Score integration** — composite score, RSI, and BB %B can
            upgrade the tier (reuses logic from DCA backtester's
            score_integrated mode).
-        4. **Regime adjustment** — bear regime caps the multiplier and
-           lowers confidence; bull regime with pullback boosts confidence.
+        4. **Regime adjustment** — uses investor-friendly regime labels
+           (bull/bear/crisis/sideways/recovery) mapped from the
+           technical regime classifier.  Bear/crisis caps the multiplier;
+           bull pullback boosts it.
 
         All thresholds are configurable via config → dca section.
         """
@@ -809,43 +813,52 @@ class WatchlistMonitor:
             notes.append(f"Tier upgraded from {raw_tier.replace('_',' ')} to {tier.replace('_',' ')} by technical signals.")
 
         # ── 4. Regime adjustment ─────────────────────────────────────────
-        # RegimeType members: STRONG_TREND, MEAN_REVERTING,
-        #                     VOLATILE_CHOPPY, BREAKOUT_TRANSITION
-        regime_str = regime_type.value if regime_type else "unknown"
+        # Map technical regime → investor-friendly DCA regime label
+        dca_regime = self._map_dca_regime(
+            regime_type, regime_trend, regime_total_return, wl_ctx,
+        )
         regime_adj = wl_ctx.get("regime_adjustment", {})
         bear_max_mult = float(regime_adj.get("bear_max_multiplier", 1.5))
         bull_pullback_bonus = float(regime_adj.get("bull_pullback_bonus", 0.5))
 
-        regime_capped = False
-        if regime_type == RegimeType.VOLATILE_CHOPPY:
+        if dca_regime == "crisis":
             if multiplier > bear_max_mult:
                 multiplier = bear_max_mult
-                regime_capped = True
             notes.append(
-                f"Regime is {regime_str.replace('_', ' ')} — "
-                f"multiplier capped at {bear_max_mult:.1f}x (higher risk of continued decline)."
+                f"Market regime: crisis — "
+                f"multiplier capped at {bear_max_mult:.1f}x (high risk of continued decline)."
             )
-        elif regime_type == RegimeType.STRONG_TREND and dip_pct >= mild_drop_pct:
+        elif dca_regime == "bear":
+            if multiplier > bear_max_mult:
+                multiplier = bear_max_mult
+            notes.append(
+                f"Market regime: bear — "
+                f"multiplier capped at {bear_max_mult:.1f}x (elevated downside risk)."
+            )
+        elif dca_regime == "bull" and dip_pct >= mild_drop_pct:
             multiplier = min(multiplier + bull_pullback_bonus, max_multiplier)
             notes.append(
-                f"Strong trend pullback — good DCA entry point, "
+                f"Market regime: bull pullback — good DCA entry point, "
                 f"multiplier boosted by {bull_pullback_bonus:.1f}x."
             )
-        elif regime_type == RegimeType.STRONG_TREND:
-            notes.append("Strong trend regime — steady accumulation recommended.")
-        elif regime_type in (RegimeType.MEAN_REVERTING, RegimeType.BREAKOUT_TRANSITION):
-            notes.append(f"Regime is {regime_str.replace('_', ' ')} — standard DCA allocation.")
+        elif dca_regime == "bull":
+            notes.append("Market regime: bull — steady accumulation recommended.")
+        elif dca_regime == "recovery":
+            notes.append("Market regime: recovery — conditions improving, standard DCA allocation.")
+        else:
+            # sideways
+            notes.append("Market regime: sideways — range-bound, standard DCA allocation.")
 
         # Clamp final multiplier
         multiplier = min(multiplier, max_multiplier)
 
         # ── 5. Confidence assessment ─────────────────────────────────────
-        # High: dip + trending/transitioning regime + supportive technicals
-        # Low:  volatile choppy regime, or overbought RSI during dip
+        # High: dip + bull/recovery regime + supportive technicals
+        # Low:  bear/crisis regime, or no meaningful dip signal
         is_dca_buy = dip_pct >= mild_drop_pct or ind_composite < buy_zone_below
-        if is_dca_buy and regime_type in (RegimeType.STRONG_TREND, RegimeType.BREAKOUT_TRANSITION) and rsi_val < 50:
+        if is_dca_buy and dca_regime in ("bull", "recovery") and rsi_val < 50:
             confidence = "high"
-        elif is_dca_buy and regime_type == RegimeType.VOLATILE_CHOPPY:
+        elif is_dca_buy and dca_regime in ("bear", "crisis"):
             confidence = "low"
         elif is_dca_buy:
             confidence = "medium"
@@ -861,7 +874,7 @@ class WatchlistMonitor:
             rsi=round(rsi_val, 1),
             bb_pctile=round(bb_pctile_val, 1),
             composite_score=round(ind_composite, 1),
-            regime=regime_str,
+            regime=dca_regime,
             regime_trend=regime_trend,
             tier=tier,
             multiplier=round(multiplier, 2),
@@ -869,6 +882,59 @@ class WatchlistMonitor:
             confidence=confidence,
             explanation=notes,
         )
+
+    @staticmethod
+    def _map_dca_regime(
+        regime_type: RegimeType | None,
+        regime_trend: str,
+        total_return: float,
+        wl_ctx: dict,
+    ) -> str:
+        """Map technical regime classification to investor-friendly DCA labels.
+
+        Returns one of: "bull", "bear", "crisis", "sideways", "recovery".
+
+        The mapping combines three signals:
+        - ``regime_type`` — the technical price-behavior regime
+        - ``regime_trend`` — "bullish", "bearish", or "neutral"
+        - ``total_return`` — cumulative return over the classification
+          window (e.g. 0.20 = +20%)
+
+        Crisis threshold is configurable via
+        ``dca.watchlist_context.crisis_return_threshold`` (default −0.20).
+        """
+        crisis_threshold = float(wl_ctx.get("crisis_return_threshold", -0.20))
+
+        if regime_type is None:
+            return "sideways"
+
+        # Crisis: volatile/choppy + bearish + deeply negative return
+        if (
+            regime_type == RegimeType.VOLATILE_CHOPPY
+            and regime_trend == "bearish"
+            and total_return <= crisis_threshold
+        ):
+            return "crisis"
+
+        # Bear: bearish trend with negative return (strong downtrend or
+        # volatile choppy without hitting crisis depth)
+        if regime_trend == "bearish" and total_return < 0:
+            return "bear"
+
+        # Bull: strong trend + bullish, or any regime with bullish trend
+        # and meaningfully positive return
+        if regime_trend == "bullish" and total_return > 0:
+            return "bull"
+
+        # Recovery: breakout/transition + bullish trend (emerging from
+        # range-bound or choppy), or mean-reverting turning bullish
+        if regime_type == RegimeType.BREAKOUT_TRANSITION and regime_trend == "bullish":
+            return "recovery"
+        if regime_type == RegimeType.MEAN_REVERTING and regime_trend == "bullish":
+            return "recovery"
+
+        # Sideways: everything else (neutral trend, mean-reverting, etc.)
+        return "sideways"
 
     def _determine_action(
         self, signal: Signal, position: WatchlistPosition | None,

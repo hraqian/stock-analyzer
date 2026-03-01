@@ -890,6 +890,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "volatility_window": 60,         # trailing days for daily vol calc
             "vol_severe_sigma": 2.5,         # dip ≥ this many σ → statistically severe
             "vol_notable_sigma": 1.5,        # dip ≥ this many σ → notable
+            "crisis_return_threshold": -0.20, # total return ≤ this → crisis regime
             "regime_adjustment": {
                 "bear_max_multiplier": 1.5,  # cap multiplier in bear/crisis
                 "bull_pullback_bonus": 0.5,  # boost multiplier for bull pullback
