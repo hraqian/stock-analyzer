@@ -132,6 +132,36 @@ class WatchlistSignal:
     dca: DCAContext | None = None
 
 
+@dataclass
+class TradeRecommendation:
+    """A concrete trade recommendation derived from a WatchlistSignal.
+
+    Generated after a scan to give the user a specific price, quantity,
+    and estimated cost/proceeds so they can Confirm, Edit, or Skip.
+    """
+    ticker: str
+    side: str                       # "buy" or "sell"
+    recommended_price: float        # current market price at scan time
+    recommended_quantity: float     # computed from position sizing config
+    estimated_cost: float           # price * quantity (positive for buys)
+    cash_before: float              # cash balance before this trade
+    cash_after: float               # projected cash balance after this trade
+    insufficient_cash: bool = False # True if buy would exceed available cash
+    # Sell-specific fields
+    entry_price: float = 0.0       # original entry price (sells only)
+    estimated_pnl_pct: float = 0.0 # projected P&L % (sells only)
+    estimated_pnl_dollar: float = 0.0  # projected P&L $ (sells only)
+    # Sizing breakdown
+    sizing_mode: str = ""           # "percent_equity" or "fixed"
+    equity_used: float = 0.0        # total equity used for sizing calc
+    regime_adjustment: str = ""     # e.g. "0.5x (volatile/choppy)" or ""
+    # DCA adjustment
+    dca_multiplier: float = 1.0     # DCA tier multiplier (1.0 = no DCA boost)
+    dca_tier: str = ""              # DCA tier label if applicable
+    # Reference back to the signal
+    signal: WatchlistSignal | None = None
+
+
 # ---------------------------------------------------------------------------
 # State persistence
 # ---------------------------------------------------------------------------
@@ -754,6 +784,142 @@ class WatchlistMonitor:
             for pos in self.state.positions.values()
         )
         return cash + market_value
+
+    # ------------------------------------------------------------------
+    # Trade recommendations
+    # ------------------------------------------------------------------
+
+    def generate_recommendations(
+        self,
+        signals: list[WatchlistSignal],
+    ) -> list[TradeRecommendation]:
+        """Generate concrete trade recommendations from actionable signals.
+
+        For each BUY or SELL signal, computes the recommended quantity
+        using the same position-sizing logic as the strategy engine
+        (including regime-based adjustments), and returns a
+        ``TradeRecommendation`` with price, quantity, cost/proceeds,
+        and cash-impact projections.
+
+        Args:
+            signals: Signals from a recent ``scan()`` call.
+
+        Returns:
+            List of ``TradeRecommendation`` objects, one per actionable
+            signal.  HOLD and error signals are skipped.
+        """
+        recs: list[TradeRecommendation] = []
+        strat_cfg = self._cfg.section("strategy")
+        sizing_mode = strat_cfg.get("position_sizing", "fixed")
+        fixed_qty = float(strat_cfg.get("fixed_quantity", 100))
+        pct_equity = float(strat_cfg.get("percent_equity", 1.0))
+
+        # Build regime adaptation map (mirrors ScoreBasedStrategy.__init__)
+        ra = strat_cfg.get("regime_adaptation", {})
+        regime_adapt: dict[str, dict] = {
+            "strong_trend": ra.get("strong_trend", {}),
+            "mean_reverting": ra.get("mean_reverting", {}),
+            "volatile_choppy": ra.get("volatile_choppy", {
+                "reduce_position_size": True,
+                "position_size_mult": 0.5,
+            }),
+            "breakout_transition": ra.get("breakout_transition", {}),
+        }
+
+        for sig in signals:
+            if sig.error or sig.signal == Signal.HOLD:
+                continue
+
+            price = sig.current_price
+            if price <= 0:
+                continue
+
+            cash = self.state.cash_balance if self.state.cash_balance is not None else 0.0
+
+            if sig.signal == Signal.BUY and sig.position is None:
+                # --- BUY recommendation ---
+                equity = self._compute_equity()
+
+                # Base quantity from sizing mode
+                if sizing_mode == "fixed":
+                    qty = fixed_qty
+                else:
+                    qty = max(1.0, (equity * pct_equity) // price)
+
+                # Regime-based adjustment
+                regime_adj_label = ""
+                adapt = regime_adapt.get(sig.regime, {})
+                # Also merge sub-type overrides if present
+                sub_types = adapt.get("sub_types", {})
+                if sig.regime_sub_type and sig.regime_sub_type in sub_types:
+                    merged = dict(adapt)
+                    merged.pop("sub_types", None)
+                    merged.update(sub_types[sig.regime_sub_type])
+                    adapt = merged
+
+                if adapt.get("reduce_position_size", False):
+                    mult = float(adapt.get("position_size_mult", 0.5))
+                    qty = max(1.0, qty * mult)
+                    regime_adj_label = f"{mult}x ({sig.regime})"
+
+                # DCA multiplier — scale quantity up for dip tiers
+                dca_mult = 1.0
+                dca_tier = ""
+                if sig.dca and sig.dca.is_dca_buy and sig.dca.multiplier > 1.0:
+                    dca_mult = sig.dca.multiplier
+                    dca_tier = sig.dca.tier
+                    qty = max(1.0, qty * dca_mult)
+
+                qty = float(int(qty))  # whole shares
+                cost = qty * price
+                cash_after = cash - cost
+                insufficient = cash_after < 0
+
+                recs.append(TradeRecommendation(
+                    ticker=sig.ticker,
+                    side="buy",
+                    recommended_price=price,
+                    recommended_quantity=qty,
+                    estimated_cost=cost,
+                    cash_before=cash,
+                    cash_after=cash_after,
+                    insufficient_cash=insufficient,
+                    sizing_mode=sizing_mode,
+                    equity_used=equity,
+                    regime_adjustment=regime_adj_label,
+                    dca_multiplier=dca_mult,
+                    dca_tier=dca_tier,
+                    signal=sig,
+                ))
+
+            elif sig.signal == Signal.SELL and sig.ticker in self.state.positions:
+                # --- SELL recommendation ---
+                pos = self.state.positions[sig.ticker]
+                qty = pos.quantity
+                proceeds = qty * price
+                cash_after = cash + proceeds
+                pnl_pct = pos.unrealized_pnl_pct(price)
+                pnl_dollar = (price - pos.entry_price) * qty
+                if pos.side == "short":
+                    pnl_dollar = (pos.entry_price - price) * qty
+
+                recs.append(TradeRecommendation(
+                    ticker=sig.ticker,
+                    side="sell",
+                    recommended_price=price,
+                    recommended_quantity=qty,
+                    estimated_cost=proceeds,
+                    cash_before=cash,
+                    cash_after=cash_after,
+                    entry_price=pos.entry_price,
+                    estimated_pnl_pct=pnl_pct,
+                    estimated_pnl_dollar=pnl_dollar,
+                    sizing_mode=sizing_mode,
+                    equity_used=self._compute_equity(),
+                    signal=sig,
+                ))
+
+        return recs
 
     # ------------------------------------------------------------------
     # Internal

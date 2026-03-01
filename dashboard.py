@@ -51,7 +51,10 @@ from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import SuitabilityAnalyzer, TradingMode
 from engine.regime import RegimeAssessment, RegimeType, RegimeSubType, REGIME_LABELS
 from engine.strategy import Signal, StrategyContext
-from engine.watchlist import WatchlistMonitor, WatchlistSignal, WatchlistState, DCAContext
+from engine.watchlist import (
+    WatchlistMonitor, WatchlistSignal, WatchlistState, DCAContext,
+    TradeRecommendation,
+)
 from indicators.registry import IndicatorRegistry
 from patterns.registry import PatternRegistry
 from scanner import Scanner, ScanResult, DCAScanner, DCAScanResult
@@ -5834,6 +5837,12 @@ def render_watchlist() -> None:
             st.session_state["wl_state"] = monitor.state
             st.session_state["wl_state_path"] = monitor._state_path
             st.session_state["wl_ticker_overrides"] = monitor.ticker_overrides
+            # Generate trade recommendations for actionable signals
+            st.session_state["wl_recommendations"] = (
+                monitor.generate_recommendations(signals)
+            )
+            # Track which recommendations have been skipped
+            st.session_state["wl_skipped"] = set()
 
     signals: list[WatchlistSignal] = st.session_state.get("wl_signals", [])
     if not signals:
@@ -6012,6 +6021,314 @@ def _render_watchlist_analysis(signals: list[WatchlistSignal]) -> None:
                     )
 
 
+def _render_recommendation_card(
+    rec: TradeRecommendation,
+    signals: list[WatchlistSignal],
+    wl_state: WatchlistState | None,
+) -> None:
+    """Render a single trade recommendation with Confirm / Edit / Skip."""
+    sig = rec.signal
+    if sig is None:
+        return
+
+    is_buy = rec.side == "buy"
+    signal_icon = "🟢" if is_buy else "🔴"
+    action_label = "BUY" if is_buy else "SELL"
+
+    # Build header text
+    header = (
+        f"{signal_icon} {action_label} {rec.ticker} — "
+        f"{rec.recommended_quantity:.0f} shares @ ${rec.recommended_price:,.2f}"
+    )
+    if is_buy:
+        header += f" (${rec.estimated_cost:,.0f})"
+    else:
+        pnl_sign = "+" if rec.estimated_pnl_pct >= 0 else ""
+        header += f" ({pnl_sign}{rec.estimated_pnl_pct:.1f}%)"
+
+    # Unique key prefix for this recommendation
+    key_prefix = f"rec_{rec.ticker}_{rec.side}"
+
+    with st.expander(header, expanded=True):
+        # ── Row 1: Trade details ──────────────────────────────────────
+        st.markdown("**Trade Details**")
+        if is_buy:
+            t1, t2, t3, t4 = st.columns(4)
+            t1.metric(
+                "Quantity", f"{rec.recommended_quantity:.0f}",
+                help="Number of shares to buy.",
+            )
+            t2.metric(
+                "Price", f"${rec.recommended_price:,.2f}",
+                help="Current market price at scan time.",
+            )
+            t3.metric(
+                "Estimated Cost", f"${rec.estimated_cost:,.0f}",
+                help="Total cost: quantity times price.",
+            )
+            t4.metric(
+                "Cash After", f"${rec.cash_after:,.0f}",
+                delta=f"-${rec.estimated_cost:,.0f}",
+                delta_color="inverse",
+                help="Projected cash balance after this purchase.",
+            )
+
+            if rec.insufficient_cash:
+                st.warning(
+                    f"This trade costs ${rec.estimated_cost:,.0f} but you only "
+                    f"have ${rec.cash_before:,.0f} in cash. You can still "
+                    f"confirm if you want to allow a margin balance, or edit "
+                    f"the quantity to fit your budget."
+                )
+        else:
+            t1, t2, t3, t4 = st.columns(4)
+            t1.metric(
+                "Quantity", f"{rec.recommended_quantity:.0f}",
+                help="Number of shares to sell (full position).",
+            )
+            t2.metric(
+                "Price", f"${rec.recommended_price:,.2f}",
+                help="Current market price at scan time.",
+            )
+            pnl_color = "normal" if rec.estimated_pnl_pct >= 0 else "inverse"
+            t3.metric(
+                "Estimated P&L",
+                f"${rec.estimated_pnl_dollar:+,.0f}",
+                delta=f"{rec.estimated_pnl_pct:+.1f}%",
+                delta_color=pnl_color,
+                help="Projected profit or loss from closing this position.",
+            )
+            t4.metric(
+                "Cash After", f"${rec.cash_after:,.0f}",
+                delta=f"+${rec.estimated_cost:,.0f}",
+                help="Projected cash balance after selling.",
+            )
+
+        # ── Row 2: Sizing breakdown ───────────────────────────────────
+        sizing_parts = [f"Sizing: **{rec.sizing_mode.replace('_', ' ')}**"]
+        if rec.sizing_mode == "percent_equity":
+            sizing_parts.append(f"equity ${rec.equity_used:,.0f}")
+        if rec.regime_adjustment:
+            sizing_parts.append(f"regime adjustment {rec.regime_adjustment}")
+        if rec.dca_multiplier > 1.0:
+            sizing_parts.append(
+                f"DCA boost {rec.dca_multiplier:.1f}x ({rec.dca_tier.replace('_', ' ')})"
+            )
+        st.caption(" · ".join(sizing_parts))
+
+        # ── Row 3: Strategy context ───────────────────────────────────
+        st.markdown("**Strategy Context**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Effective Score", f"{sig.effective_score:.1f}")
+        c2.metric("Indicator Score", f"{sig.indicator_score:.1f}")
+        c3.metric("Pattern Score", f"{sig.pattern_score:.1f}")
+        c4.metric(
+            "Regime",
+            sig.regime.replace("_", " ").title(),
+            help=f"Sub-type: {sig.regime_sub_type.replace('_', ' ').title()}"
+            if sig.regime_sub_type != "none" else None,
+        )
+
+        if sig.signal_notes:
+            st.caption(f"Strategy notes: {sig.signal_notes}")
+
+        # ── Row 4: DCA context (if available) ─────────────────────────
+        if sig.dca:
+            st.markdown("**DCA Context**")
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Dip from High", f"{sig.dca.dip_pct:.1f}%")
+            d2.metric("Tier", sig.dca.tier.replace("_", " ").title())
+            d3.metric("Multiplier", f"{sig.dca.multiplier:.1f}x")
+            d4.metric("Confidence", sig.dca.confidence.title())
+
+            if sig.dca.is_dca_buy:
+                st.success(
+                    f"DCA opportunity: {sig.dca.tier.replace('_', ' ')} "
+                    f"({sig.dca.confidence} confidence) — "
+                    f"quantity includes {sig.dca.multiplier:.1f}x DCA multiplier."
+                )
+
+        # ── Row 5: Current position info (for sells) ─────────────────
+        if sig.position:
+            pnl = sig.position.unrealized_pnl_pct(sig.current_price)
+            st.info(
+                f"Current position: {sig.position.side.upper()} "
+                f"since {sig.position.entry_date} "
+                f"@ ${sig.position.entry_price:,.2f} "
+                f"(P&L: {pnl:+.1f}%)"
+            )
+
+        # ── Edit mode (inline price/quantity override) ────────────────
+        edit_key = f"{key_prefix}_edit"
+        if st.session_state.get(edit_key, False):
+            st.markdown("---")
+            st.markdown("**Edit Trade**")
+            e1, e2 = st.columns(2)
+            with e1:
+                edit_price = st.number_input(
+                    "Execution Price",
+                    value=rec.recommended_price,
+                    min_value=0.01,
+                    step=0.01,
+                    format="%.2f",
+                    key=f"{key_prefix}_price",
+                    help="Adjust the price if your actual fill differs from the scan price.",
+                )
+            with e2:
+                edit_qty = st.number_input(
+                    "Quantity (shares)",
+                    value=int(rec.recommended_quantity),
+                    min_value=1,
+                    step=1,
+                    key=f"{key_prefix}_qty",
+                    help="Adjust the number of shares.",
+                )
+
+            # Show updated estimates
+            edit_cost = edit_price * edit_qty
+            if is_buy:
+                edit_cash_after = rec.cash_before - edit_cost
+                st.caption(
+                    f"Updated cost: ${edit_cost:,.0f} · "
+                    f"Cash after: ${edit_cash_after:,.0f}"
+                )
+                if edit_cash_after < 0:
+                    st.warning("This would result in a negative cash balance.")
+            else:
+                edit_cash_after = rec.cash_before + edit_cost
+                if sig.position:
+                    edit_pnl_pct = sig.position.unrealized_pnl_pct(edit_price)
+                    st.caption(
+                        f"Updated proceeds: ${edit_cost:,.0f} · "
+                        f"P&L: {edit_pnl_pct:+.1f}% · "
+                        f"Cash after: ${edit_cash_after:,.0f}"
+                    )
+
+            # Confirm with edits
+            if st.button(
+                f"Confirm {action_label} (edited)",
+                key=f"{key_prefix}_confirm_edit",
+                type="primary",
+            ):
+                _execute_recommendation(
+                    rec, wl_state,
+                    override_price=edit_price,
+                    override_quantity=float(edit_qty),
+                )
+                st.session_state.pop(edit_key, None)
+                st.rerun()
+
+        # ── Action buttons ────────────────────────────────────────────
+        else:
+            btn1, btn2, btn3 = st.columns(3)
+            with btn1:
+                if st.button(
+                    f"Confirm {action_label}",
+                    key=f"{key_prefix}_confirm",
+                    type="primary",
+                    help=f"Execute this {action_label.lower()} at the recommended price and quantity.",
+                ):
+                    _execute_recommendation(rec, wl_state)
+                    st.rerun()
+            with btn2:
+                if st.button(
+                    "Edit",
+                    key=f"{key_prefix}_edit_btn",
+                    help="Adjust the price or quantity before confirming.",
+                ):
+                    st.session_state[edit_key] = True
+                    st.rerun()
+            with btn3:
+                if st.button(
+                    "Skip",
+                    key=f"{key_prefix}_skip",
+                    help="Dismiss this recommendation without taking action.",
+                ):
+                    skipped = st.session_state.get("wl_skipped", set())
+                    skipped.add(rec.ticker)
+                    st.session_state["wl_skipped"] = skipped
+                    st.rerun()
+
+
+def _execute_recommendation(
+    rec: TradeRecommendation,
+    wl_state: WatchlistState | None,
+    *,
+    override_price: float | None = None,
+    override_quantity: float | None = None,
+) -> None:
+    """Execute a trade recommendation: update portfolio state and persist.
+
+    Rebuilds a minimal WatchlistMonitor to call acknowledge_signal()
+    with the correct config context, then saves updated state.
+    """
+    if wl_state is None or rec.signal is None:
+        return
+
+    sig = rec.signal
+    state_path = st.session_state.get("wl_state_path")
+    if not state_path:
+        return
+
+    # Use acknowledge_signal logic directly on the state to avoid
+    # re-fetching data.  We replicate what the monitor does.
+    from datetime import datetime as _dt
+
+    ticker = rec.ticker.upper()
+    exec_price = override_price if override_price is not None else rec.recommended_price
+    exec_qty = override_quantity if override_quantity is not None else rec.recommended_quantity
+
+    if rec.side == "buy" and ticker not in wl_state.positions:
+        from engine.watchlist import WatchlistPosition
+
+        cost = exec_qty * exec_price
+        pos = WatchlistPosition(
+            ticker=ticker,
+            side="long",
+            entry_date=_dt.now().strftime("%Y-%m-%d"),
+            entry_price=exec_price,
+            quantity=exec_qty,
+            entry_reason=sig.signal_notes,
+        )
+        wl_state.positions[ticker] = pos
+        if wl_state.cash_balance is not None:
+            wl_state.cash_balance -= cost
+
+    elif rec.side == "sell" and ticker in wl_state.positions:
+        from engine.watchlist import WatchlistClosedTrade
+
+        pos = wl_state.positions.pop(ticker)
+        pnl_pct = pos.unrealized_pnl_pct(exec_price)
+        closed = WatchlistClosedTrade(
+            ticker=ticker,
+            side=pos.side,
+            entry_date=pos.entry_date,
+            exit_date=_dt.now().strftime("%Y-%m-%d"),
+            entry_price=pos.entry_price,
+            exit_price=exec_price,
+            quantity=exec_qty,
+            pnl_pct=pnl_pct,
+            exit_reason=sig.signal_notes,
+        )
+        wl_state.closed_trades.append(closed)
+        if wl_state.cash_balance is not None:
+            wl_state.cash_balance += exec_qty * exec_price
+
+        # Update strategy state for consecutive loss tracking
+        ss = wl_state.strategy_state.get(ticker, {})
+        losses = ss.get("consecutive_losses", 0)
+        if pnl_pct < 0:
+            ss["consecutive_losses"] = losses + 1
+        else:
+            ss["consecutive_losses"] = 0
+        ss["bars_since_exit"] = 0
+        wl_state.strategy_state[ticker] = ss
+
+    # Persist
+    wl_state.save(state_path)
+    st.session_state["wl_state"] = wl_state
+
+
 def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
     """Portfolio & Trading sub-tab: portfolio state, actionable signals, positions."""
     import pandas as _pd
@@ -6066,70 +6383,52 @@ def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
             help="Number of stocks currently held.",
         )
 
-    # ── Actionable signals detail ─────────────────────────────────────────
-    actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
-    if actionable:
-        st.subheader("Actionable Signals")
-        for sig in actionable:
-            signal_icon = "🟢" if sig.signal == Signal.BUY else "🔴"
-            with st.expander(
-                f"{signal_icon} {sig.signal.value} {sig.ticker} "
-                f"@ ${sig.current_price:,.2f} — {sig.action}",
-                expanded=True,
-            ):
-                # Active strategy scores
-                st.markdown("**Active Strategy**")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Effective Score", f"{sig.effective_score:.1f}")
-                c2.metric("Indicator Score", f"{sig.indicator_score:.1f}")
-                c3.metric("Pattern Score", f"{sig.pattern_score:.1f}")
-                c4.metric(
-                    "Regime",
-                    sig.regime.replace("_", " ").title(),
-                    help=f"Sub-type: {sig.regime_sub_type.replace('_', ' ').title()}"
-                    if sig.regime_sub_type != "none" else None,
-                )
+    # ── Trade Recommendations ────────────────────────────────────────────
+    recs: list[TradeRecommendation] = st.session_state.get("wl_recommendations", [])
+    skipped: set = st.session_state.get("wl_skipped", set())
+    # Filter out already-skipped and already-executed (position changed)
+    pending_recs = [
+        r for r in recs
+        if r.ticker not in skipped
+        and (
+            (r.side == "buy" and r.ticker not in (wl_state.positions if wl_state else {}))
+            or (r.side == "sell" and r.ticker in (wl_state.positions if wl_state else {}))
+        )
+    ]
 
-                if sig.signal_notes:
-                    st.caption(f"Strategy notes: {sig.signal_notes}")
+    if pending_recs:
+        st.subheader(
+            "Trade Recommendations",
+            help="Specific trade suggestions based on the latest scan. "
+                 "Review each one, then Confirm, Edit, or Skip.",
+        )
 
-                # DCA context
-                if sig.dca:
-                    st.markdown("**DCA Context**")
-                    d1, d2, d3, d4 = st.columns(4)
-                    d1.metric("Dip from High", f"{sig.dca.dip_pct:.1f}%")
-                    d2.metric("Tier", sig.dca.tier.replace("_", " ").title())
-                    d3.metric("Multiplier", f"{sig.dca.multiplier:.1f}x")
-                    d4.metric("Confidence", sig.dca.confidence.title())
+        # Quick summary
+        buy_recs = [r for r in pending_recs if r.side == "buy"]
+        sell_recs = [r for r in pending_recs if r.side == "sell"]
+        summary_parts = []
+        if buy_recs:
+            summary_parts.append(f"{len(buy_recs)} buy")
+        if sell_recs:
+            summary_parts.append(f"{len(sell_recs)} sell")
+        total_cost = sum(r.estimated_cost for r in buy_recs)
+        total_proceeds = sum(r.estimated_cost for r in sell_recs)
+        summary_line = f"**{' and '.join(summary_parts)} recommendation(s) pending.**"
+        if total_cost > 0:
+            summary_line += f"  Total buy cost: ${total_cost:,.0f}."
+        if total_proceeds > 0:
+            summary_line += f"  Total sell proceeds: ${total_proceeds:,.0f}."
+        st.markdown(summary_line)
 
-                    d5, d6, d7, d8 = st.columns(4)
-                    d5.metric("RSI", f"{sig.dca.rsi:.0f}")
-                    d6.metric("Bollinger %B", f"{sig.dca.bb_pctile:.0f}%")
-                    d7.metric("Volatility", f"{sig.dca.volatility:.0f}%")
-                    d8.metric("Regime", sig.dca.regime.replace("_", " ").title())
-
-                    if sig.dca.is_dca_buy:
-                        st.success(
-                            f"DCA opportunity: {sig.dca.tier.replace('_', ' ')} "
-                            f"({sig.dca.confidence} confidence) — "
-                            f"consider allocating {sig.dca.multiplier:.1f}x your normal DCA amount."
-                        )
-
-                    if sig.dca.explanation:
-                        with st.expander("Analysis Details"):
-                            for line in sig.dca.explanation:
-                                st.markdown(f"- {line}")
-
-                if sig.position:
-                    pnl = sig.position.unrealized_pnl_pct(sig.current_price)
-                    st.info(
-                        f"Current position: {sig.position.side.upper()} "
-                        f"since {sig.position.entry_date} "
-                        f"@ ${sig.position.entry_price:,.2f} "
-                        f"(P&L: {pnl:+.1f}%)"
-                    )
+        for rec in pending_recs:
+            _render_recommendation_card(rec, signals, wl_state)
     else:
-        st.info("No actionable signals right now. All tickers are on HOLD.")
+        actionable = [s for s in signals if s.signal != Signal.HOLD and not s.error]
+        if actionable:
+            st.info("All recommendations have been acted on or skipped. "
+                    "Click **Scan Now** to get fresh signals.")
+        else:
+            st.info("No actionable signals right now. All tickers are on HOLD.")
 
     # ── Open Positions ────────────────────────────────────────────────────
     wl_state = st.session_state.get("wl_state")
