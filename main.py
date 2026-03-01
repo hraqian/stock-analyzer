@@ -781,6 +781,25 @@ def main() -> None:
             f"({'DRIP on' if dca_bt.drip else 'DRIP off'})...[/dim]"
         )
 
+        # Compute score_df for score_integrated mode
+        score_df = None
+        if dca_bt.mode == "score_integrated":
+            from analysis.score_timeseries import compute_dca_score_df
+            from data.yahoo import YahooFinanceProvider
+
+            console.print("[dim]Computing technical scores for score-integrated mode...[/dim]")
+            provider = YahooFinanceProvider()
+            score_df = compute_dca_score_df(
+                cfg,
+                provider,
+                ticker=ticker,
+                period=dca_period if not start_date else None,
+                interval=args.interval,
+                start=start_date,
+                end=end_date,
+                step=5,
+            )
+
         try:
             dca_result = dca_bt.run(
                 ticker,
@@ -788,6 +807,7 @@ def main() -> None:
                 interval=args.interval,
                 start=start_date,
                 end=end_date,
+                score_df=score_df,
             )
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")

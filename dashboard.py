@@ -42,6 +42,7 @@ from analysis.analyzer import Analyzer, AnalysisResult
 from analysis.multi_timeframe import _build_percentile_window
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
+from analysis.score_timeseries import compute_dca_score_df
 from config import Config, save_watchlist_tickers, DEFAULT_CONFIG
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
@@ -6209,7 +6210,23 @@ def main() -> None:
                 with st.spinner("Running DCA backtest..."):
                     try:
                         dca_bt = DCABacktester(cfg=cfg, overrides=dca_overrides)
-                        dca_result = dca_bt.run(ticker, period=dca_period)
+
+                        # Compute score_df for score_integrated mode
+                        score_df = None
+                        if dca_bt.mode == "score_integrated":
+                            provider = YahooFinanceProvider()
+                            score_df = compute_dca_score_df(
+                                cfg,
+                                provider,
+                                ticker=ticker,
+                                period=dca_period,
+                                interval="1d",
+                                step=5,
+                            )
+
+                        dca_result = dca_bt.run(
+                            ticker, period=dca_period, score_df=score_df,
+                        )
                     except Exception as e:
                         st.error(f"DCA backtest failed: {e}")
                         return
