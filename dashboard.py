@@ -6341,9 +6341,295 @@ def _execute_recommendation(
     st.session_state["wl_state"] = wl_state
 
 
+def _manual_close_position(
+    ticker: str,
+    current_price: float,
+    wl_state: WatchlistState,
+) -> None:
+    """Manually close an open position at the given price."""
+    from datetime import datetime as _dt
+    from engine.watchlist import WatchlistClosedTrade
+
+    ticker = ticker.upper()
+    if ticker not in wl_state.positions:
+        return
+
+    state_path = st.session_state.get("wl_state_path")
+    if not state_path:
+        return
+
+    pos = wl_state.positions.pop(ticker)
+    exec_price = current_price if current_price > 0 else pos.entry_price
+    pnl_pct = pos.unrealized_pnl_pct(exec_price)
+    closed = WatchlistClosedTrade(
+        ticker=ticker,
+        side=pos.side,
+        entry_date=pos.entry_date,
+        exit_date=_dt.now().strftime("%Y-%m-%d"),
+        entry_price=pos.entry_price,
+        exit_price=exec_price,
+        quantity=pos.quantity,
+        pnl_pct=pnl_pct,
+        exit_reason="Manual close",
+    )
+    wl_state.closed_trades.append(closed)
+
+    # Return proceeds to cash
+    proceeds = pos.quantity * exec_price
+    if wl_state.cash_balance is not None:
+        wl_state.cash_balance += proceeds
+
+    # Update strategy state
+    ss = wl_state.strategy_state.get(ticker, {})
+    losses = ss.get("consecutive_losses", 0)
+    if pnl_pct < 0:
+        ss["consecutive_losses"] = losses + 1
+    else:
+        ss["consecutive_losses"] = 0
+    ss["bars_since_exit"] = 0
+    wl_state.strategy_state[ticker] = ss
+
+    wl_state.save(state_path)
+    st.session_state["wl_state"] = wl_state
+
+
+def _render_pnl_summary(
+    signals: list[WatchlistSignal],
+    wl_state: WatchlistState | None,
+) -> None:
+    """Render aggregate P&L summary metrics."""
+    if wl_state is None:
+        return
+
+    has_positions = bool(wl_state.positions)
+    has_trades = bool(wl_state.closed_trades)
+    if not has_positions and not has_trades:
+        return
+
+    st.subheader(
+        "P&L Summary",
+        help="Overall portfolio performance including both open and closed positions.",
+    )
+
+    # --- Unrealized (open positions) ---
+    unrealized_pnl = 0.0
+    total_cost_basis = 0.0
+    for ticker, pos in wl_state.positions.items():
+        matching = [s for s in signals if s.ticker == ticker]
+        cur_price = matching[0].current_price if matching else pos.entry_price
+        cost = pos.quantity * pos.entry_price
+        mkt_val = pos.quantity * cur_price
+        unrealized_pnl += mkt_val - cost
+        total_cost_basis += cost
+
+    # --- Realized (closed trades) ---
+    realized_pnl = 0.0
+    wins = 0
+    losses = 0
+    total_win_pct = 0.0
+    total_loss_pct = 0.0
+    for ct in wl_state.closed_trades:
+        trade_pnl = (ct.exit_price - ct.entry_price) * ct.quantity
+        if ct.side == "short":
+            trade_pnl = (ct.entry_price - ct.exit_price) * ct.quantity
+        realized_pnl += trade_pnl
+        if ct.pnl_pct >= 0:
+            wins += 1
+            total_win_pct += ct.pnl_pct
+        else:
+            losses += 1
+            total_loss_pct += abs(ct.pnl_pct)
+
+    total_trades = wins + losses
+    combined_pnl = realized_pnl + unrealized_pnl
+
+    # Row 1: headline metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(
+        "Total P&L",
+        f"${combined_pnl:+,.0f}",
+        help="Realized gains from closed trades plus unrealized gains on open positions.",
+    )
+    m2.metric(
+        "Realized P&L",
+        f"${realized_pnl:+,.0f}",
+        help="Total profit or loss from all closed trades.",
+    )
+    m3.metric(
+        "Unrealized P&L",
+        f"${unrealized_pnl:+,.0f}",
+        help="Paper profit or loss on positions you still hold.",
+    )
+    cash = wl_state.cash_balance or 0.0
+    m4.metric(
+        "Available Cash",
+        f"${cash:,.0f}",
+        help="Cash available for new trades.",
+    )
+
+    # Row 2: trade stats (only if there are closed trades)
+    if total_trades > 0:
+        win_rate = wins / total_trades * 100
+        avg_win = total_win_pct / wins if wins > 0 else 0
+        avg_loss = total_loss_pct / losses if losses > 0 else 0
+        profit_factor = (total_win_pct / total_loss_pct) if total_loss_pct > 0 else float("inf")
+
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric(
+            "Total Trades", total_trades,
+            help="Number of completed round-trip trades.",
+        )
+        s2.metric(
+            "Win Rate", f"{win_rate:.0f}%",
+            help=f"{wins} winners out of {total_trades} trades.",
+        )
+        s3.metric(
+            "Avg Win", f"+{avg_win:.1f}%",
+            help="Average return on winning trades.",
+        )
+        s4.metric(
+            "Avg Loss", f"-{avg_loss:.1f}%",
+            help="Average return on losing trades.",
+        )
+        pf_display = f"{profit_factor:.2f}" if profit_factor < 1000 else "—"
+        s5.metric(
+            "Profit Factor", pf_display,
+            help="Total winning percentage divided by total losing percentage. "
+                 "Above 1.0 means winners outweigh losers.",
+        )
+
+
+def _render_manual_position_entry(wl_state: WatchlistState | None) -> None:
+    """Render a form to manually add or remove positions."""
+    if wl_state is None:
+        return
+
+    st.subheader(
+        "Manual Position Entry",
+        help="Add positions you already hold (e.g. from a brokerage) "
+             "or remove positions that were closed outside this tool.",
+    )
+
+    with st.expander("Add a position", expanded=False):
+        from datetime import datetime as _dt, date as _date
+
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            man_ticker = st.text_input(
+                "Ticker",
+                key="man_pos_ticker",
+                placeholder="e.g. AAPL",
+                help="Stock ticker symbol.",
+            ).strip().upper()
+        with fc2:
+            man_side = st.selectbox(
+                "Side",
+                ["long", "short"],
+                key="man_pos_side",
+                help="Long = you bought it. Short = you sold it short.",
+            )
+
+        fc3, fc4 = st.columns(2)
+        with fc3:
+            man_price = st.number_input(
+                "Entry Price",
+                min_value=0.01,
+                value=100.0,
+                step=0.01,
+                format="%.2f",
+                key="man_pos_price",
+                help="Price at which you entered the position.",
+            )
+        with fc4:
+            man_qty = st.number_input(
+                "Quantity",
+                min_value=1,
+                value=10,
+                step=1,
+                key="man_pos_qty",
+                help="Number of shares.",
+            )
+
+        man_date = st.date_input(
+            "Entry Date",
+            value=_date.today(),
+            key="man_pos_date",
+            help="Date the position was opened.",
+        )
+
+        man_reason = st.text_input(
+            "Reason (optional)",
+            key="man_pos_reason",
+            placeholder="e.g. Earnings play, long-term hold",
+            help="Optional note about why you entered this position.",
+        )
+
+        if st.button("Add Position", key="man_pos_add", type="primary"):
+            if not man_ticker:
+                st.error("Please enter a ticker symbol.")
+            elif man_ticker in wl_state.positions:
+                st.error(f"A position for {man_ticker} already exists. "
+                         f"Close it first, then re-add.")
+            else:
+                from engine.watchlist import WatchlistPosition
+
+                pos = WatchlistPosition(
+                    ticker=man_ticker,
+                    side=man_side,
+                    entry_date=man_date.strftime("%Y-%m-%d"),
+                    entry_price=float(man_price),
+                    quantity=float(man_qty),
+                    entry_reason=man_reason,
+                )
+                wl_state.positions[man_ticker] = pos
+
+                # Deduct cost from cash
+                cost = float(man_qty) * float(man_price)
+                if wl_state.cash_balance is not None:
+                    wl_state.cash_balance -= cost
+
+                state_path = st.session_state.get("wl_state_path")
+                if state_path:
+                    wl_state.save(state_path)
+                st.session_state["wl_state"] = wl_state
+                st.toast(f"Added {man_ticker} position: {man_qty} shares @ ${man_price:,.2f}", icon="✅")
+                st.rerun()
+
+    # Remove position section (only if there are positions)
+    if wl_state.positions:
+        with st.expander("Remove a position (without recording a trade)", expanded=False):
+            rm_ticker = st.selectbox(
+                "Select position to remove",
+                list(wl_state.positions.keys()),
+                key="man_pos_rm_select",
+                help="Choose which position to remove from tracking. "
+                     "This does NOT record a closed trade. Use the Close buttons "
+                     "in the positions table to properly close a position.",
+            )
+            st.warning(
+                "Removing a position deletes it from tracking without recording "
+                "it as a closed trade. The cost will be returned to your cash balance. "
+                "Use this only for positions entered by mistake."
+            )
+            if st.button("Remove Position", key="man_pos_rm", type="secondary"):
+                if rm_ticker and rm_ticker in wl_state.positions:
+                    pos = wl_state.positions.pop(rm_ticker)
+                    # Return cost to cash
+                    refund = pos.quantity * pos.entry_price
+                    if wl_state.cash_balance is not None:
+                        wl_state.cash_balance += refund
+                    state_path = st.session_state.get("wl_state_path")
+                    if state_path:
+                        wl_state.save(state_path)
+                    st.session_state["wl_state"] = wl_state
+                    st.toast(f"Removed {rm_ticker} position.", icon="🗑️")
+                    st.rerun()
+
+
 def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
     """Portfolio & Trading sub-tab: portfolio state, actionable signals, positions."""
     import pandas as _pd
+    from datetime import datetime as _dt, date as _date
 
     # ── Portfolio summary ─────────────────────────────────────────────────
     wl_state: WatchlistState | None = st.session_state.get("wl_state")
@@ -6452,64 +6738,153 @@ def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
     # ── Open Positions ────────────────────────────────────────────────────
     wl_state = st.session_state.get("wl_state")
     if wl_state and wl_state.positions:
-        st.subheader("Open Positions")
-        pos_rows = []
+        st.subheader(
+            "Open Positions",
+            help="All stocks you currently hold, with live P&L and portfolio weight.",
+        )
+
+        # Build enriched position data
+        cash_bal = wl_state.cash_balance or 0.0
+        total_equity = 0.0
+        pos_data = []
         for ticker, pos in wl_state.positions.items():
-            # Find matching signal for current price
             matching = [s for s in signals if s.ticker == ticker]
             cur_price = matching[0].current_price if matching else 0
-            pnl = pos.unrealized_pnl_pct(cur_price) if cur_price > 0 else 0
+            pnl_pct = pos.unrealized_pnl_pct(cur_price) if cur_price > 0 else 0
             mkt_val = pos.quantity * cur_price if cur_price > 0 else 0
+            cost_basis = pos.quantity * pos.entry_price
+            pnl_dollar = mkt_val - cost_basis if cur_price > 0 else 0
+            # Days held
+            try:
+                entry_dt = _dt.strptime(pos.entry_date, "%Y-%m-%d").date()
+                days_held = (_date.today() - entry_dt).days
+            except (ValueError, TypeError):
+                days_held = 0
+            pos_data.append({
+                "ticker": ticker, "pos": pos, "cur_price": cur_price,
+                "pnl_pct": pnl_pct, "pnl_dollar": pnl_dollar,
+                "mkt_val": mkt_val, "cost_basis": cost_basis,
+                "days_held": days_held,
+            })
+            total_equity += mkt_val
+        total_equity += cash_bal
 
+        # Table rows
+        pos_rows = []
+        for pd_item in pos_data:
+            pos = pd_item["pos"]
+            weight = (pd_item["mkt_val"] / total_equity * 100) if total_equity > 0 else 0
             pos_rows.append({
-                "Ticker": ticker,
+                "Ticker": pd_item["ticker"],
                 "Side": pos.side.upper(),
                 "Entry Date": pos.entry_date,
+                "Days": pd_item["days_held"],
                 "Entry Price": f"${pos.entry_price:,.2f}",
-                "Current Price": f"${cur_price:,.2f}" if cur_price > 0 else "—",
-                "Quantity": pos.quantity,
-                "Market Value": f"${mkt_val:,.0f}" if mkt_val > 0 else "—",
-                "Unrealized P&L": f"{pnl:+.1f}%",
+                "Current Price": f"${pd_item['cur_price']:,.2f}" if pd_item["cur_price"] > 0 else "—",
+                "Qty": pos.quantity,
+                "Cost Basis": f"${pd_item['cost_basis']:,.0f}",
+                "Mkt Value": f"${pd_item['mkt_val']:,.0f}" if pd_item["mkt_val"] > 0 else "—",
+                "P&L %": f"{pd_item['pnl_pct']:+.1f}%",
+                "P&L $": f"${pd_item['pnl_dollar']:+,.0f}" if pd_item["cur_price"] > 0 else "—",
+                "Weight": f"{weight:.1f}%",
             })
 
         df_pos = _pd.DataFrame(pos_rows)
         st.dataframe(df_pos, width="stretch", hide_index=True, column_config={
             "Ticker": st.column_config.TextColumn("Ticker", help="Stock ticker symbol."),
             "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise."),
-            "Entry Date": st.column_config.TextColumn("Entry Date", help="Date the position was opened."),
+            "Entry Date": st.column_config.TextColumn("Entry", help="Date the position was opened."),
+            "Days": st.column_config.NumberColumn("Days", help="Number of days this position has been held."),
             "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the position was entered."),
-            "Current Price": st.column_config.TextColumn("Current Price", help="Latest market price for this stock."),
-            "Quantity": st.column_config.NumberColumn("Quantity", help="Number of shares held."),
-            "Market Value": st.column_config.TextColumn("Market Value", help="Current value of this position (shares x current price)."),
-            "Unrealized P&L": st.column_config.TextColumn("Unrealized P&L", help="Profit or loss if you closed this position now, as a percentage."),
+            "Current Price": st.column_config.TextColumn("Price", help="Latest market price."),
+            "Qty": st.column_config.NumberColumn("Qty", help="Number of shares held."),
+            "Cost Basis": st.column_config.TextColumn("Cost Basis", help="Total amount invested (entry price times quantity)."),
+            "Mkt Value": st.column_config.TextColumn("Mkt Value", help="Current value (current price times quantity)."),
+            "P&L %": st.column_config.TextColumn("P&L %", help="Unrealized profit or loss as a percentage."),
+            "P&L $": st.column_config.TextColumn("P&L $", help="Unrealized profit or loss in dollars."),
+            "Weight": st.column_config.TextColumn("Weight", help="This position as a percentage of total portfolio equity."),
         })
+
+        # Totals row
+        total_cost = sum(d["cost_basis"] for d in pos_data)
+        total_mkt = sum(d["mkt_val"] for d in pos_data)
+        total_pnl_dollar = sum(d["pnl_dollar"] for d in pos_data)
+        total_pnl_pct = (total_pnl_dollar / total_cost * 100) if total_cost > 0 else 0
+        st.caption(
+            f"**Totals:** Cost basis ${total_cost:,.0f} · "
+            f"Market value ${total_mkt:,.0f} · "
+            f"P&L {total_pnl_pct:+.1f}% (${total_pnl_dollar:+,.0f})"
+        )
+
+        # Per-position close buttons
+        st.markdown("---")
+        close_cols = st.columns(min(len(pos_data), 4))
+        for i, pd_item in enumerate(pos_data):
+            col = close_cols[i % len(close_cols)]
+            ticker = pd_item["ticker"]
+            with col:
+                if st.button(
+                    f"Close {ticker}",
+                    key=f"close_pos_{ticker}",
+                    help=f"Manually close your {ticker} position at the current scan price.",
+                ):
+                    _manual_close_position(
+                        ticker, pd_item["cur_price"], wl_state,
+                    )
+                    st.toast(f"Closed {ticker} position.", icon="✅")
+                    st.rerun()
+
+    # ── P&L Summary ───────────────────────────────────────────────────────
+    _render_pnl_summary(signals, wl_state)
 
     # ── Closed Trades ─────────────────────────────────────────────────────
     if wl_state and wl_state.closed_trades:
-        with st.expander(f"Closed Trades ({len(wl_state.closed_trades)})"):
-            ct_rows = []
-            for ct in reversed(wl_state.closed_trades[-20:]):
-                ct_rows.append({
-                    "Ticker": ct.ticker,
-                    "Side": ct.side.upper(),
-                    "Entry": ct.entry_date,
-                    "Exit": ct.exit_date,
-                    "Entry Price": f"${ct.entry_price:,.2f}",
-                    "Exit Price": f"${ct.exit_price:,.2f}",
-                    "P&L": f"{ct.pnl_pct:+.1f}%",
-                    "Reason": ct.exit_reason,
-                })
-            df_ct = _pd.DataFrame(ct_rows)
-            st.dataframe(df_ct, width="stretch", hide_index=True, column_config={
-                "Ticker": st.column_config.TextColumn("Ticker", help="Stock ticker symbol."),
-                "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise."),
-                "Entry": st.column_config.TextColumn("Entry", help="Date the trade was opened."),
-                "Exit": st.column_config.TextColumn("Exit", help="Date the trade was closed."),
-                "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the trade was entered."),
-                "Exit Price": st.column_config.TextColumn("Exit Price", help="Price at which the trade was exited."),
-                "P&L": st.column_config.TextColumn("P&L", help="Profit or loss as a percentage of entry price."),
-                "Reason": st.column_config.TextColumn("Reason", help="Why the trade was closed (e.g. signal reversed, stop loss hit)."),
+        st.subheader(
+            f"Trade History ({len(wl_state.closed_trades)} trades)",
+            help="All completed round-trip trades, most recent first.",
+        )
+        ct_rows = []
+        for ct in reversed(wl_state.closed_trades):
+            # Holding period
+            try:
+                entry_dt = _dt.strptime(ct.entry_date, "%Y-%m-%d").date()
+                exit_dt = _dt.strptime(ct.exit_date, "%Y-%m-%d").date()
+                hold_days = (exit_dt - entry_dt).days
+            except (ValueError, TypeError):
+                hold_days = 0
+            pnl_dollar = (ct.exit_price - ct.entry_price) * ct.quantity
+            if ct.side == "short":
+                pnl_dollar = (ct.entry_price - ct.exit_price) * ct.quantity
+            ct_rows.append({
+                "Ticker": ct.ticker,
+                "Side": ct.side.upper(),
+                "Entry": ct.entry_date,
+                "Exit": ct.exit_date,
+                "Days": hold_days,
+                "Entry Price": f"${ct.entry_price:,.2f}",
+                "Exit Price": f"${ct.exit_price:,.2f}",
+                "Qty": ct.quantity,
+                "P&L %": f"{ct.pnl_pct:+.1f}%",
+                "P&L $": f"${pnl_dollar:+,.0f}",
+                "Reason": ct.exit_reason,
             })
+        df_ct = _pd.DataFrame(ct_rows)
+        st.dataframe(df_ct, width="stretch", hide_index=True, column_config={
+            "Ticker": st.column_config.TextColumn("Ticker", help="Stock ticker symbol."),
+            "Side": st.column_config.TextColumn("Side", help="LONG = bought expecting price to rise."),
+            "Entry": st.column_config.TextColumn("Entry", help="Date the trade was opened."),
+            "Exit": st.column_config.TextColumn("Exit", help="Date the trade was closed."),
+            "Days": st.column_config.NumberColumn("Days", help="How many days the position was held."),
+            "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at entry."),
+            "Exit Price": st.column_config.TextColumn("Exit Price", help="Price at exit."),
+            "Qty": st.column_config.NumberColumn("Qty", help="Number of shares traded."),
+            "P&L %": st.column_config.TextColumn("P&L %", help="Profit or loss as a percentage."),
+            "P&L $": st.column_config.TextColumn("P&L $", help="Profit or loss in dollars."),
+            "Reason": st.column_config.TextColumn("Reason", help="Why the trade was closed."),
+        })
+
+    # ── Manual Position Entry ─────────────────────────────────────────────
+    _render_manual_position_entry(wl_state)
 
 
 # ---------------------------------------------------------------------------
