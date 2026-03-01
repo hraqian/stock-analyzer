@@ -1135,3 +1135,4 @@ watchlist:
   interval: "1d"                 # data interval
   trading_mode: "long_only"      # "long_only" or "long_short"
   state_file: "watchlist_state.json"  # portfolio state persistence file
+  initial_cash: 100000.0         # starting cash for portfolio tracking (used on first run only)

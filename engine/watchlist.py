@@ -144,6 +144,10 @@ class WatchlistState:
     # Per-ticker strategy state for warm-restart
     strategy_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_updated: str = ""
+    # Portfolio cash balance — tracks available cash after opening/closing positions.
+    # Initialised from config (backtest.initial_cash) on first use; updated by
+    # acknowledge_signal() when positions are opened or closed.
+    cash_balance: float | None = None
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -154,12 +158,15 @@ class WatchlistState:
             t: asdict(p) for t, p in self.positions.items()
         }
         closed = [asdict(ct) for ct in self.closed_trades]
-        return {
+        d: dict[str, Any] = {
             "positions": positions,
             "closed_trades": closed,
             "strategy_state": self.strategy_state,
             "last_updated": self.last_updated,
         }
+        if self.cash_balance is not None:
+            d["cash_balance"] = self.cash_balance
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "WatchlistState":
@@ -167,11 +174,13 @@ class WatchlistState:
         for t, p in d.get("positions", {}).items():
             positions[t] = WatchlistPosition(**p)
         closed = [WatchlistClosedTrade(**ct) for ct in d.get("closed_trades", [])]
+        cash = d.get("cash_balance")  # None if not present (legacy state files)
         return cls(
             positions=positions,
             closed_trades=closed,
             strategy_state=d.get("strategy_state", {}),
             last_updated=d.get("last_updated", ""),
+            cash_balance=float(cash) if cash is not None else None,
         )
 
     # ------------------------------------------------------------------
@@ -195,6 +204,33 @@ class WatchlistState:
         except (json.JSONDecodeError, TypeError, KeyError) as exc:
             logger.warning("Failed to load watchlist state from %s: %s", path, exc)
             return cls()
+
+    def ensure_cash(self, initial_cash: float) -> None:
+        """Initialise cash_balance from config if not yet set.
+
+        Called once when the monitor starts, using the configured initial
+        cash value (e.g. ``backtest.initial_cash``).  If the state file
+        already has a cash balance (from a previous session), it is
+        preserved — we never overwrite a tracked balance with the default.
+        """
+        if self.cash_balance is None:
+            self.cash_balance = initial_cash
+
+    def portfolio_value(self, prices: dict[str, float]) -> float:
+        """Compute total portfolio value: cash + market value of open positions.
+
+        Args:
+            prices: dict mapping ticker → current price.
+
+        Returns:
+            Total portfolio value (cash + sum of position market values).
+        """
+        cash = self.cash_balance if self.cash_balance is not None else 0.0
+        market_value = 0.0
+        for ticker, pos in self.positions.items():
+            price = prices.get(ticker, pos.entry_price)
+            market_value += pos.quantity * price
+        return cash + market_value
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +587,13 @@ class WatchlistMonitor:
         # Load persisted state
         self.state = WatchlistState.load(self._state_path)
 
+        # Initialise cash balance from config if this is a fresh state file
+        initial_cash = float(wl_cfg.get(
+            "initial_cash",
+            cfg.section("backtest").get("initial_cash", 100_000.0),
+        ))
+        self.state.ensure_cash(initial_cash)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -587,48 +630,80 @@ class WatchlistMonitor:
         """Persist current state to disk."""
         self.state.save(self._state_path)
 
-    def acknowledge_signal(self, ticker: str, signal: WatchlistSignal) -> None:
+    def acknowledge_signal(
+        self,
+        ticker: str,
+        signal: WatchlistSignal,
+        *,
+        override_price: float | None = None,
+        override_quantity: float | None = None,
+    ) -> None:
         """Update portfolio state after the user acts on a signal.
 
         Call this when the user confirms they executed the recommended trade.
+        The user may optionally override the execution price and/or quantity
+        (e.g. if the actual fill differed from the recommendation).
+
+        Args:
+            ticker: Stock ticker symbol.
+            signal: The signal that was acted on.
+            override_price: Actual execution price (defaults to signal's current_price).
+            override_quantity: Actual share count (defaults to computed quantity).
         """
         ticker = ticker.upper()
+        exec_price = override_price if override_price is not None else signal.current_price
 
         if signal.signal == Signal.BUY and signal.position is None:
-            # Open new long position
-            strat_cfg = self._cfg.section("strategy")
-            sizing = strat_cfg.get("position_sizing", "fixed")
-            if sizing == "fixed":
-                qty = float(strat_cfg.get("fixed_quantity", 100))
+            # Compute quantity from portfolio equity if not overridden
+            if override_quantity is not None:
+                qty = float(override_quantity)
             else:
-                pct = float(strat_cfg.get("percent_equity", 1.0))
-                qty = int(pct * 100_000 / signal.current_price) if signal.current_price > 0 else 0
+                strat_cfg = self._cfg.section("strategy")
+                sizing = strat_cfg.get("position_sizing", "fixed")
+                if sizing == "fixed":
+                    qty = float(strat_cfg.get("fixed_quantity", 100))
+                else:
+                    pct = float(strat_cfg.get("percent_equity", 1.0))
+                    # Use real portfolio equity: cash + market value of positions
+                    equity = self._compute_equity()
+                    qty = int(pct * equity / exec_price) if exec_price > 0 else 0
+
+            cost = qty * exec_price
             pos = WatchlistPosition(
                 ticker=ticker,
                 side="long",
                 entry_date=datetime.now().strftime("%Y-%m-%d"),
-                entry_price=signal.current_price,
+                entry_price=exec_price,
                 quantity=qty,
                 entry_reason=signal.signal_notes,
             )
             self.state.positions[ticker] = pos
 
+            # Deduct cost from cash balance
+            if self.state.cash_balance is not None:
+                self.state.cash_balance -= cost
+
         elif signal.signal == Signal.SELL and ticker in self.state.positions:
             # Close existing position
             pos = self.state.positions.pop(ticker)
-            pnl_pct = pos.unrealized_pnl_pct(signal.current_price)
+            pnl_pct = pos.unrealized_pnl_pct(exec_price)
             closed = WatchlistClosedTrade(
                 ticker=ticker,
                 side=pos.side,
                 entry_date=pos.entry_date,
                 exit_date=datetime.now().strftime("%Y-%m-%d"),
                 entry_price=pos.entry_price,
-                exit_price=signal.current_price,
-                quantity=pos.quantity,
+                exit_price=exec_price,
+                quantity=override_quantity if override_quantity is not None else pos.quantity,
                 pnl_pct=pnl_pct,
                 exit_reason=signal.signal_notes,
             )
             self.state.closed_trades.append(closed)
+
+            # Return proceeds to cash balance
+            proceeds = closed.quantity * exec_price
+            if self.state.cash_balance is not None:
+                self.state.cash_balance += proceeds
 
             # Notify strategy state of trade close
             ss = self.state.strategy_state.get(ticker, {})
@@ -639,6 +714,21 @@ class WatchlistMonitor:
                 ss["consecutive_losses"] = 0
             ss["bars_since_exit"] = 0
             self.state.strategy_state[ticker] = ss
+
+    def _compute_equity(self) -> float:
+        """Compute total portfolio equity (cash + estimated position value).
+
+        Uses entry prices for position valuation since we may not have
+        live prices at the time of the acknowledge call.  The scan()
+        method provides accurate live-price equity via
+        ``state.portfolio_value()``.
+        """
+        cash = self.state.cash_balance if self.state.cash_balance is not None else 0.0
+        market_value = sum(
+            pos.quantity * pos.entry_price
+            for pos in self.state.positions.values()
+        )
+        return cash + market_value
 
     # ------------------------------------------------------------------
     # Internal
@@ -719,8 +809,8 @@ class WatchlistMonitor:
                 overall_score=ind_composite,
                 pattern_score=pat_composite,
                 position=position_qty,
-                cash=100_000.0,       # nominal — not used for signal logic
-                portfolio_value=100_000.0,
+                cash=self.state.cash_balance or 0.0,
+                portfolio_value=self._compute_equity(),
                 trend_ma=trend_ma,
                 regime=regime_type,
                 regime_sub_type=regime_sub_type,
