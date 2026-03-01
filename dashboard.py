@@ -43,7 +43,7 @@ from analysis.multi_timeframe import _build_percentile_window
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
 from analysis.score_timeseries import compute_dca_score_df
-from config import Config, save_watchlist_tickers, DEFAULT_CONFIG
+from config import Config, save_watchlist_tickers, parse_watchlist_tickers, DEFAULT_CONFIG
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.dca import DCABacktester, DCAResult
@@ -1811,7 +1811,9 @@ def render_sidebar() -> dict:
     st.sidebar.markdown("#### Watchlist")
 
     wl = data.setdefault("watchlist", {})
-    wl_tickers: list[str] = [t.upper() for t in wl.get("tickers", []) if t.strip()]
+    # Parse ticker entries (supports both legacy string and new dict format)
+    wl_entries = parse_watchlist_tickers(wl.get("tickers", []))
+    wl_ticker_names: list[str] = [e["ticker"] for e in wl_entries if e["ticker"]]
 
     # Add ticker via form (Enter key submits)
     # Hide the default "Press Enter to submit form" hint that overlaps placeholder
@@ -1828,15 +1830,23 @@ def render_sidebar() -> dict:
             "Add to Watchlist", width="stretch",
         )
         if submitted and new_wl_ticker:
-            if new_wl_ticker not in wl_tickers:
-                wl_tickers.append(new_wl_ticker)
-                wl["tickers"] = wl_tickers
+            if new_wl_ticker not in wl_ticker_names:
+                wl_entries.append({
+                    "ticker": new_wl_ticker,
+                    "regime_override": None,
+                    "sub_type_override": None,
+                })
+                # Store as list of dicts in session state
+                wl["tickers"] = [
+                    {k: v for k, v in e.items() if v is not None}
+                    for e in wl_entries
+                ]
                 st.session_state["config_data"] = data
                 # Persist to config.yaml
                 cfg_path = st.session_state.get("config_path")
                 if cfg_path:
                     try:
-                        save_watchlist_tickers(cfg_path, wl_tickers)
+                        save_watchlist_tickers(cfg_path, wl_entries)
                     except Exception:
                         pass  # best-effort; session state is still updated
                 # Clear stale scan results so the tab shows the updated list
@@ -1847,20 +1857,24 @@ def render_sidebar() -> dict:
                 st.toast(f"{new_wl_ticker} is already in the watchlist")
 
     # Display current watchlist with remove buttons
-    if wl_tickers:
-        st.sidebar.caption(f"Monitoring: {', '.join(wl_tickers)}")
-        for t in wl_tickers:
+    if wl_ticker_names:
+        st.sidebar.caption(f"Monitoring: {', '.join(wl_ticker_names)}")
+        for t in wl_ticker_names:
             if st.sidebar.button(
                 f"Remove {t}", key=f"sidebar_wl_rm_{t}",
-                width="stretch",            ):
-                wl_tickers.remove(t)
-                wl["tickers"] = wl_tickers
+                width="stretch",
+            ):
+                wl_entries = [e for e in wl_entries if e["ticker"] != t]
+                wl["tickers"] = [
+                    {k: v for k, v in e.items() if v is not None}
+                    for e in wl_entries
+                ]
                 st.session_state["config_data"] = data
                 # Persist to config.yaml
                 cfg_path = st.session_state.get("config_path")
                 if cfg_path:
                     try:
-                        save_watchlist_tickers(cfg_path, wl_tickers)
+                        save_watchlist_tickers(cfg_path, wl_entries)
                     except Exception:
                         pass  # best-effort
                 st.session_state.pop("wl_signals", None)
@@ -5761,9 +5775,8 @@ def render_watchlist() -> None:
         icon="ℹ️",
     )
     data = st.session_state.get("config_data", {})
-    wl_tickers: list[str] = [
-        t.upper() for t in data.get("watchlist", {}).get("tickers", []) if t.strip()
-    ]
+    wl_entries = parse_watchlist_tickers(data.get("watchlist", {}).get("tickers", []))
+    wl_tickers: list[str] = [str(e["ticker"]) for e in wl_entries]
 
     if not wl_tickers:
         st.info(
@@ -5819,11 +5832,46 @@ def render_watchlist() -> None:
 
             st.session_state["wl_signals"] = signals
             st.session_state["wl_state"] = monitor.state
+            st.session_state["wl_ticker_overrides"] = monitor.ticker_overrides
 
     signals: list[WatchlistSignal] = st.session_state.get("wl_signals", [])
     if not signals:
         st.info("Click **Scan Now** to fetch signals for your watchlist.")
         return
+
+    # ── Portfolio summary ─────────────────────────────────────────────────
+    wl_state: WatchlistState | None = st.session_state.get("wl_state")
+    if wl_state:
+        # Compute portfolio value using latest prices from scan
+        prices = {
+            s.ticker: s.current_price
+            for s in signals if s.current_price > 0
+        }
+        cash = wl_state.cash_balance or 0.0
+        positions_value = sum(
+            pos.quantity * prices.get(ticker, pos.entry_price)
+            for ticker, pos in wl_state.positions.items()
+        )
+        total_equity = cash + positions_value
+        num_positions = len(wl_state.positions)
+
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric(
+            "Cash", f"${cash:,.0f}",
+            help="Available cash for new positions.",
+        )
+        p2.metric(
+            "Positions Value", f"${positions_value:,.0f}",
+            help="Total market value of all open positions.",
+        )
+        p3.metric(
+            "Total Equity", f"${total_equity:,.0f}",
+            help="Cash plus the market value of all open positions.",
+        )
+        p4.metric(
+            "Open Positions", num_positions,
+            help="Number of stocks currently held.",
+        )
 
     # ── Signal summary metrics ────────────────────────────────────────────
     buy_count = sum(1 for s in signals if s.signal == Signal.BUY)
@@ -5852,12 +5900,22 @@ def render_watchlist() -> None:
     )
 
     # Build DataFrame for display
+    ticker_overrides = st.session_state.get("wl_ticker_overrides", {})
     rows = []
     for sig in signals:
         pos_str = "—"
         if sig.position:
             pnl = sig.position.unrealized_pnl_pct(sig.current_price)
             pos_str = f"{sig.position.side.upper()} ({pnl:+.1f}%)"
+
+        # Mark overridden regimes with a star
+        ovr = ticker_overrides.get(sig.ticker, {})
+        regime_display = sig.regime.replace("_", " ").title()
+        sub_type_display = sig.regime_sub_type.replace("_", " ").title() if sig.regime_sub_type != "none" else "—"
+        if ovr.get("regime_override"):
+            regime_display += " *"
+        if ovr.get("sub_type_override"):
+            sub_type_display += " *"
 
         rows.append({
             "Ticker": sig.ticker,
@@ -5866,7 +5924,8 @@ def render_watchlist() -> None:
             "Score": round(sig.effective_score, 1),
             "Indicator": round(sig.indicator_score, 1),
             "Pattern": round(sig.pattern_score, 1),
-            "Regime": sig.regime.replace("_", " ").title(),
+            "Regime": regime_display,
+            "Sub-Type": sub_type_display,
             "Price": f"${sig.current_price:,.2f}" if sig.current_price > 0 else "—",
             "Position": pos_str,
             "Notes": sig.signal_notes or (sig.error or ""),
@@ -5887,7 +5946,8 @@ def render_watchlist() -> None:
             "Score": st.column_config.NumberColumn(format="%.1f", width="small", help="Blended indicator + pattern score (0-10) driving this signal."),
             "Indicator": st.column_config.NumberColumn(format="%.1f", width="small", help="Score from the technical indicator engine alone (0-10)."),
             "Pattern": st.column_config.NumberColumn(format="%.1f", width="small", help="Score from the pattern recognition engine alone (0-10)."),
-            "Regime": st.column_config.TextColumn(width="medium", help="Current market regime for this stock (affects how the strategy trades)."),
+            "Regime": st.column_config.TextColumn(width="medium", help="Current market regime. A star (*) means you overrode the auto-detected value."),
+            "Sub-Type": st.column_config.TextColumn(width="medium", help="Volatility/momentum profile. A star (*) means you overrode the auto-detected value."),
             "Price": st.column_config.TextColumn(width="small", help="Current stock price."),
             "Position": st.column_config.TextColumn(width="small", help="Whether the strategy holds a position, and its unrealized P&L."),
             "Notes": st.column_config.TextColumn(width="large", help="Additional context about why this signal was generated."),
@@ -6035,7 +6095,7 @@ def render_watchlist() -> None:
                     )
 
     # ── Position tracking ─────────────────────────────────────────────────
-    wl_state: WatchlistState | None = st.session_state.get("wl_state")
+    wl_state = st.session_state.get("wl_state")
     if wl_state and wl_state.positions:
         st.subheader("Open Positions")
         pos_rows = []
@@ -6044,6 +6104,7 @@ def render_watchlist() -> None:
             matching = [s for s in signals if s.ticker == ticker]
             cur_price = matching[0].current_price if matching else 0
             pnl = pos.unrealized_pnl_pct(cur_price) if cur_price > 0 else 0
+            mkt_val = pos.quantity * cur_price if cur_price > 0 else 0
 
             pos_rows.append({
                 "Ticker": ticker,
@@ -6051,8 +6112,9 @@ def render_watchlist() -> None:
                 "Entry Date": pos.entry_date,
                 "Entry Price": f"${pos.entry_price:,.2f}",
                 "Current Price": f"${cur_price:,.2f}" if cur_price > 0 else "—",
-                "Unrealized P&L": f"{pnl:+.1f}%",
                 "Quantity": pos.quantity,
+                "Market Value": f"${mkt_val:,.0f}" if mkt_val > 0 else "—",
+                "Unrealized P&L": f"{pnl:+.1f}%",
             })
 
         df_pos = _pd.DataFrame(pos_rows)
@@ -6062,8 +6124,9 @@ def render_watchlist() -> None:
             "Entry Date": st.column_config.TextColumn("Entry Date", help="Date the position was opened."),
             "Entry Price": st.column_config.TextColumn("Entry Price", help="Price at which the position was entered."),
             "Current Price": st.column_config.TextColumn("Current Price", help="Latest market price for this stock."),
-            "Unrealized P&L": st.column_config.TextColumn("Unrealized P&L", help="Profit or loss if you closed this position now, as a percentage."),
             "Quantity": st.column_config.NumberColumn("Quantity", help="Number of shares held."),
+            "Market Value": st.column_config.TextColumn("Market Value", help="Current value of this position (shares x current price)."),
+            "Unrealized P&L": st.column_config.TextColumn("Unrealized P&L", help="Profit or loss if you closed this position now, as a percentage."),
         })
 
     if wl_state and wl_state.closed_trades:

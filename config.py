@@ -11,7 +11,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import yaml
 
@@ -943,11 +943,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Watchlist — live signal monitor
     # ------------------------------------------------------------------
     "watchlist": {
-        "tickers": [],                      # tickers to monitor, e.g. ["AAPL", "MSFT"]
+        # Each entry: plain string "AAPL" or dict {"ticker": "AAPL",
+        # "regime_override": "strong_trend", "sub_type_override": "steady_compounder"}
+        "tickers": [],
         "data_period": "1y",                # history to fetch for indicator warmup
         "interval": "1d",                   # data interval
         "trading_mode": "long_only",        # "long_only" or "long_short"
         "state_file": "watchlist_state.json",  # portfolio state persistence file
+        "initial_cash": 100_000.0,          # starting cash (first run only)
     },
 }
 
@@ -1448,26 +1451,99 @@ class Config:
 # Utility — persist watchlist tickers to config.yaml
 # ---------------------------------------------------------------------------
 
-def save_watchlist_tickers(config_path: str | Path, tickers: list[str]) -> None:
-    """Write the watchlist ticker list to config.yaml using targeted regex
-    replacement so that comments and formatting are preserved.
+# Type alias: each ticker entry is either a plain string or a dict with
+# at least a "ticker" key, and optional "regime_override" / "sub_type_override".
+WatchlistTickerEntry = str | dict[str, str | None]
+
+
+def _normalise_ticker_entry(entry: WatchlistTickerEntry) -> dict[str, str | None]:
+    """Ensure a ticker entry is in dict form."""
+    if isinstance(entry, str):
+        return {
+            "ticker": entry.upper().strip(),
+            "regime_override": None,
+            "sub_type_override": None,
+        }
+    return {
+        "ticker": str(entry.get("ticker", "")).upper().strip(),
+        "regime_override": entry.get("regime_override"),
+        "sub_type_override": entry.get("sub_type_override"),
+    }
+
+
+def save_watchlist_tickers(
+    config_path: str | Path,
+    tickers: Sequence[WatchlistTickerEntry],
+) -> None:
+    """Write the watchlist ticker list to config.yaml.
+
+    Supports both the legacy inline array format (``["AAPL", "MSFT"]``)
+    and the new block-list format with per-ticker overrides::
+
+        tickers:
+          - ticker: AAPL
+            regime_override: strong_trend
+          - ticker: MSFT
+
+    The function replaces the ``tickers:`` block inside the ``watchlist:``
+    section while preserving the rest of the file.
 
     Raises ``FileNotFoundError`` if *config_path* does not exist.
     """
     config_path = Path(config_path)
     content = config_path.read_text()
 
-    if tickers:
-        ticker_list = ", ".join(f'"{t.upper()}"' for t in tickers)
-        new_line = f"  tickers: [{ticker_list}]"
+    # Build replacement YAML block
+    if not tickers:
+        new_block = "  tickers: []"
     else:
-        new_line = "  tickers: []"
+        lines: list[str] = ["  tickers:"]
+        for raw in tickers:
+            entry = _normalise_ticker_entry(raw)
+            tk = entry["ticker"]
+            if not tk:
+                continue
+            regime = entry.get("regime_override")
+            sub = entry.get("sub_type_override")
+            lines.append(f"    - ticker: {tk}")
+            if regime:
+                lines.append(f"      regime_override: {regime}")
+            if sub:
+                lines.append(f"      sub_type_override: {sub}")
+        new_block = "\n".join(lines)
 
+    # Replace the tickers block.  Match either:
+    #   tickers: [...]                    (legacy inline)
+    #   tickers:\n    - ...\n    - ...    (new block list)
+    # We capture everything up to and including the tickers key, then
+    # consume all continuation lines (indented deeper than the key).
     content = re.sub(
-        r"(^watchlist:\s*\n(?:.*\n)*?)  tickers:.*",
-        rf"\g<1>{new_line}",
+        r"(^watchlist:\s*\n(?:.*\n)*?)"   # preamble up to tickers
+        r"  tickers:.*?"                   # tickers key line
+        r"(?:\n    [ -].*)*",             # optional continuation lines
+        rf"\g<1>{new_block}",
         content,
         count=1,
         flags=re.MULTILINE,
     )
     config_path.write_text(content)
+
+
+def parse_watchlist_tickers(
+    raw_tickers: list,
+) -> list[dict[str, str | None]]:
+    """Parse watchlist tickers from config (supports both formats).
+
+    Handles both legacy plain-string lists (``["AAPL", "MSFT"]``) and the
+    new dict format (``[{ticker: "AAPL", regime_override: "strong_trend"}]``).
+
+    Returns a list of normalised dicts with keys:
+        ``ticker``, ``regime_override``, ``sub_type_override``
+    (override values are ``None`` when not set).
+    """
+    result: list[dict[str, str | None]] = []
+    for entry in raw_tickers:
+        norm = _normalise_ticker_entry(entry)
+        if norm["ticker"]:
+            result.append(norm)
+    return result

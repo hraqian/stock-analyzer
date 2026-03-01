@@ -567,9 +567,23 @@ class WatchlistMonitor:
         self._cfg = cfg
 
         wl_cfg = cfg.section("watchlist")
-        self._tickers: list[str] = [
-            t.strip().upper() for t in wl_cfg.get("tickers", []) if t.strip()
-        ]
+
+        # Parse tickers — supports both plain strings and dicts with overrides
+        from config import parse_watchlist_tickers
+        raw_tickers = wl_cfg.get("tickers", [])
+        parsed = parse_watchlist_tickers(raw_tickers)
+
+        self._tickers: list[str] = [str(e["ticker"]) for e in parsed]
+
+        # Per-ticker overrides: {ticker: {regime_override, sub_type_override}}
+        self._ticker_overrides: dict[str, dict[str, str | None]] = {
+            str(e["ticker"]): {
+                "regime_override": e.get("regime_override"),
+                "sub_type_override": e.get("sub_type_override"),
+            }
+            for e in parsed
+        }
+
         self._data_period: str = wl_cfg.get("data_period", "1y")
         self._interval: str = wl_cfg.get("interval", "1d")
 
@@ -605,6 +619,18 @@ class WatchlistMonitor:
     @tickers.setter
     def tickers(self, value: list[str]) -> None:
         self._tickers = [t.strip().upper() for t in value if t.strip()]
+
+    @property
+    def ticker_overrides(self) -> dict[str, dict[str, str | None]]:
+        """Per-ticker regime/sub-type overrides (read-only copy)."""
+        return dict(self._ticker_overrides)
+
+    def get_ticker_override(self, ticker: str) -> dict[str, str | None]:
+        """Return overrides for a specific ticker (empty dict if none)."""
+        return self._ticker_overrides.get(ticker.upper(), {
+            "regime_override": None,
+            "sub_type_override": None,
+        })
 
     def scan(self, tickers: list[str] | None = None) -> list[WatchlistSignal]:
         """Scan all watchlist tickers and return current signals.
@@ -762,6 +788,34 @@ class WatchlistMonitor:
             regime_type, regime_sub_type, regime_trend, regime_total_return = (
                 self._classify_regime(df)
             )
+
+            # 3b. Apply per-ticker regime/sub-type overrides if configured
+            overrides = self._ticker_overrides.get(ticker, {})
+            regime_override_str = overrides.get("regime_override")
+            sub_type_override_str = overrides.get("sub_type_override")
+
+            if regime_override_str:
+                try:
+                    regime_type = RegimeType(regime_override_str)
+                    logger.info(
+                        "%s: regime overridden to %s", ticker, regime_type.value,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "%s: invalid regime_override '%s' — using auto-detected",
+                        ticker, regime_override_str,
+                    )
+            if sub_type_override_str:
+                try:
+                    regime_sub_type = RegimeSubType(sub_type_override_str)
+                    logger.info(
+                        "%s: sub-type overridden to %s", ticker, regime_sub_type.value,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "%s: invalid sub_type_override '%s' — using auto-detected",
+                        ticker, sub_type_override_str,
+                    )
 
             # 4. Compute trend MA
             strat_cfg = self._cfg.section("strategy")
