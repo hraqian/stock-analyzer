@@ -94,6 +94,26 @@ COLOR_BENCHMARK = "#78909c"
 
 
 # ---------------------------------------------------------------------------
+# Contextual help popover
+# ---------------------------------------------------------------------------
+
+def _help_popover(terms: dict[str, str]) -> None:
+    """Render a clickable **?** popover with plain-English term definitions.
+
+    Call this right after a ``st.subheader`` / ``st.header`` or inside a
+    column alongside the section title.
+
+    Parameters
+    ----------
+    terms : dict[str, str]
+        ``{"Term Name": "Plain-English explanation", ...}``
+    """
+    with st.popover("?"):
+        for term, explanation in terms.items():
+            st.markdown(f"**{term}** — {explanation}")
+
+
+# ---------------------------------------------------------------------------
 # Config hashing (for cache invalidation)
 # ---------------------------------------------------------------------------
 
@@ -2394,6 +2414,15 @@ def render_header(result: AnalysisResult, cfg: Config) -> None:
 
 def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
     """Render indicator breakdown with color-coded score bars."""
+    _help_popover({
+        "Score (0-10)": "How bullish (10) or bearish (0) each indicator reads right now. 5 is neutral.",
+        "Weight": "How much influence this indicator has on the overall score. Higher weight = more impact.",
+        "Trend indicators": "Indicators that do well in strong, directional markets (e.g. MACD, ADX). They follow the prevailing move.",
+        "Contrarian indicators": "Indicators that spot reversals — they shine in choppy, range-bound markets (e.g. RSI, Stochastics).",
+        "Neutral indicators": "Indicators that work in any market environment (e.g. volume analysis).",
+        "Dominant group": "Which group (trend or contrarian) is getting more weight right now, based on the detected market regime.",
+        "Pre-spread score": "The raw overall score before the trend/contrarian weighting adjustment is applied.",
+    })
     weights = cfg.normalized_weights()
 
     rows = []
@@ -2444,6 +2473,12 @@ def render_indicator_table(result: AnalysisResult, cfg: Config) -> None:
 
 def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
     """Render pattern breakdown with color-coded score bars."""
+    _help_popover({
+        "Pattern": "A recognizable shape or formation in the price chart (e.g. Head & Shoulders, Double Bottom).",
+        "Signal": "Whether the pattern suggests the price will go up (bullish), down (bearish), or is inconclusive (neutral).",
+        "Score (0-10)": "How strongly the pattern points bullish (10) or bearish (0). 5 means the pattern is neutral.",
+        "Weight": "How much this pattern contributes to the overall pattern score. Higher = more influence.",
+    })
     weights = cfg.normalized_pattern_weights()
 
     rows = []
@@ -2476,6 +2511,12 @@ def render_pattern_table(result: AnalysisResult, cfg: Config) -> None:
 
 def render_suitability(assessment_dict: dict, ticker: str) -> None:
     """Render suitability assessment as an info/warning box."""
+    _help_popover({
+        "Trading Mode": "What the strategy is allowed to do: LONG SHORT (buy and short-sell), LONG ONLY (buy only, no shorting), or HOLD ONLY (too risky or illiquid to trade).",
+        "ADX": "Average Directional Index — measures how strong the current trend is. Above 25 = strong trend, below 20 = weak/no trend.",
+        "ATR%": "Average True Range as a percentage of price — measures daily volatility. Higher = more price swings.",
+        "Avg Volume": "Average number of shares traded per day. Low volume means it may be hard to buy/sell without moving the price.",
+    })
     mode_value = assessment_dict["mode"]
     mode_label = mode_value.replace("_", " ").upper()
     mode_map = {
@@ -2504,6 +2545,19 @@ def render_regime(regime: RegimeAssessment | None) -> None:
     """Render market regime classification as a colored info box with metrics."""
     if regime is None:
         return
+
+    _help_popover({
+        "Market Regime": "The current market environment. The strategy adapts its behavior depending on which regime is detected.",
+        "Strong Trend": "Price is moving decisively in one direction. Trend-following indicators get more weight.",
+        "Mean Reverting": "Price bounces between support and resistance. Contrarian indicators (RSI, Stochastics) get more weight.",
+        "Volatile Choppy": "Price swings wildly without a clear direction. The strategy becomes more cautious.",
+        "Breakout Transition": "The market is shifting from one regime to another. Could be the start of a new trend.",
+        "Sub-type": "A more specific label within the regime (e.g. Explosive Mover, Steady Compounder, Stagnant).",
+        "Confidence": "How sure the classifier is about this regime call. Higher = more reliable.",
+        "ADX": "Trend strength — higher means a stronger directional move.",
+        "Trend MA %": "Percentage of recent bars where price was above the trend moving average. 80%+ = strong uptrend.",
+        "Dir Changes": "How often the price direction flips. Lots of flips = choppy, few flips = trending.",
+    })
 
     # Color and icon based on regime type
     regime_styles = {
@@ -2568,6 +2622,15 @@ def render_regime(regime: RegimeAssessment | None) -> None:
 
 def render_backtest_metrics(bt_result: BacktestResult) -> None:
     """Render backtest performance metrics as metric cards."""
+    _help_popover({
+        "Total Return": "The overall profit or loss as a percentage of the starting capital.",
+        "Annualized": "Total return converted to a yearly rate, so you can compare across different time periods.",
+        "Max Drawdown": "The biggest peak-to-trough drop in portfolio value. Tells you the worst losing streak.",
+        "Sharpe Ratio": "Return per unit of risk. Above 1.0 is decent, above 2.0 is very good. Below 0 means you lost money.",
+        "Win Rate": "Percentage of trades that made a profit. 50%+ is typical for trend-following strategies.",
+        "Profit Factor": "Total gains divided by total losses. Above 1.0 means profitable overall; above 2.0 is strong.",
+        "Avg Trade P&L": "The average profit or loss per trade as a percentage. Positive = the average trade made money.",
+    })
     c1, c2, c3, c4 = st.columns(4)
 
     ret_delta = f"{bt_result.total_return_pct:+.2f}%"
@@ -2585,6 +2648,13 @@ def render_backtest_metrics(bt_result: BacktestResult) -> None:
 
 def render_trade_log(bt_result: BacktestResult) -> None:
     """Render the trade log as an expandable dataframe."""
+    _help_popover({
+        "Side": "LONG means the strategy bought expecting the price to go up. SHORT means it sold expecting the price to drop.",
+        "Entry/Exit Reason": "Why the strategy opened or closed the trade (e.g. score crossed threshold, stop loss hit, take profit reached).",
+        "P&L": "Profit or Loss in dollars for that trade.",
+        "P&L %": "Profit or loss as a percentage of the entry price.",
+        "Qty": "Number of shares bought or sold in the trade.",
+    })
     if not bt_result.trades:
         st.info("No trades were executed during the backtest period.")
         return
@@ -2611,6 +2681,13 @@ def render_trade_log(bt_result: BacktestResult) -> None:
 
 def render_significant_patterns(bt_result: BacktestResult) -> None:
     """Render significant patterns timeline as an expandable dataframe."""
+    _help_popover({
+        "Detector": "Which pattern recognition engine spotted this pattern (e.g. candlestick detector, chart pattern detector).",
+        "Pattern": "The specific formation detected (e.g. Hammer, Double Bottom, Head & Shoulders).",
+        "Signal": "Bullish (price likely to rise), Bearish (price likely to fall), or Neutral (no clear direction).",
+        "Strength (0-1)": "How pronounced the pattern is. 1.0 = textbook perfect, closer to 0 = weak/ambiguous.",
+        "Confidence": "How reliable this type of pattern historically is. Higher confidence patterns are weighted more by the strategy.",
+    })
     patterns = bt_result.significant_patterns
     if not patterns:
         st.info("No significant patterns were detected during the backtest period.")
@@ -2655,6 +2732,18 @@ def render_significant_patterns(bt_result: BacktestResult) -> None:
 
 def render_strategy_config(cfg: Config) -> None:
     """Render strategy configuration summary (read-only view of active config)."""
+    _help_popover({
+        "Threshold Mode": "How the strategy decides when to buy or sell. 'Fixed' uses hard score levels; 'Percentile' adapts to recent history.",
+        "Combination Mode": "How indicator scores and pattern scores are combined. 'Weighted' blends them; 'Boost' lets patterns nudge the indicator score.",
+        "Stop Loss": "Automatically sells if the trade loses this much, to limit damage.",
+        "Take Profit": "Automatically sells if the trade gains this much, to lock in profit.",
+        "ATR Stop": "An adaptive stop loss that widens in volatile markets and tightens in calm ones, based on Average True Range.",
+        "Trend Filter": "Only allows trades in the direction of the moving average trend. Prevents buying in a downtrend.",
+        "Cooldown": "After consecutive losing trades, the strategy pauses or demands a stronger signal before re-entering.",
+        "Global Trend Bias": "Adjusts signal thresholds based on the stock's overall direction over the backtest period.",
+        "Slippage": "Simulates the cost of real-world order execution — price usually moves slightly against you when you trade.",
+        "Warmup Bars": "Bars at the start of data used to compute initial indicator values. No trades happen during warmup.",
+    })
     strat_cfg = cfg.section("strategy")
     bt_cfg = cfg.section("backtest")
     thresholds = strat_cfg.get("score_thresholds", {})
@@ -2749,6 +2838,13 @@ def render_stock_overview(
     result: AnalysisResult, cfg: Config,
 ) -> None:
     """Render the stock overview: basic info, regime, sub-type, scores, price chart."""
+    _help_popover({
+        "Indicator Score": "A 0-10 composite score from technical indicators (RSI, MACD, moving averages, etc.). Above 6 is bullish, below 3.5 is bearish.",
+        "Pattern Score": "A 0-10 composite score from chart and candlestick pattern recognition. Bullish patterns push it up, bearish patterns pull it down.",
+        "Subgroups": "Indicators are split into Trend (follow the move) and Contrarian (bet on reversals). The dominant group gets more weight based on market regime.",
+        "Quick Signal": "The strategy's recommendation based on the latest bar, before any backtest. Run a backtest for a more complete picture.",
+        "Market Regime": "The detected market environment. It changes how the strategy weighs indicators and makes trade decisions.",
+    })
 
     # ── Header: name, price, scores ───────────────────────────────────────
     info = result.info
@@ -3130,6 +3226,11 @@ def render_recommendation(rec: dict, context: str = "backtest") -> None:
     - ``"overview"``: shown in the stock overview before any backtest.
     - ``"backtest"``: shown alongside backtest results.
     """
+    _help_popover({
+        "Signal (BUY/SELL/HOLD)": "The strategy's current recommendation. BUY = open a long position, SELL = close or short, HOLD = stay put.",
+        "Confidence": "How strong the signal is. High = multiple factors agree, Medium = mixed signals, Low = marginal call.",
+        "Effective Score": "The blended indicator + pattern score (0-10) that the strategy used to make this call.",
+    })
     signal = rec["signal"]
     confidence = rec["confidence"]
 
@@ -3326,6 +3427,12 @@ def render_backtest_section(
 
     # ── Equity curve ──────────────────────────────────────────────────────
     st.subheader("Equity Curve")
+    _help_popover({
+        "Strategy line (blue)": "Your portfolio value over time if you followed this strategy's trades.",
+        "Benchmark line (grey)": "Buy-and-hold comparison — what would have happened if you just bought on day one and held.",
+        "Warmup zone": "The initial period where indicators are calculated but no trades happen. Shown as a shaded bar.",
+        "Trade markers": "Triangles on the chart marking where the strategy entered or exited trades.",
+    })
     eq_fig = create_equity_chart(bt_result, result.df)
     st.plotly_chart(eq_fig, width="stretch")
 
@@ -3812,6 +3919,13 @@ def _render_dca_purchase_log(result: DCAResult) -> None:
 
 def _render_dca_comparison(dca_result: DCAResult, bt_result: BacktestResult) -> None:
     """Render a side-by-side comparison table: DCA vs Active Strategy."""
+    _help_popover({
+        "DCA Strategy": "Dollar-Cost Averaging — investing fixed amounts at regular intervals. Capital is deployed gradually over time.",
+        "Active Strategy": "The score-based trading strategy that buys and sells based on indicator/pattern signals. Capital is deployed as a lump sum on day one.",
+        "Starting Capital": "DCA accumulates capital over time (each purchase adds more). Active starts with the full amount.",
+        "Total Return": "Overall profit/loss as a percentage. DCA return is relative to total cash invested; Active is relative to starting capital.",
+        "Max Drawdown": "Worst peak-to-trough decline. DCA typically has lower drawdowns because not all capital is at risk from day one.",
+    })
     import pandas as pd
 
     dca_profit = dca_result.final_value - dca_result.total_invested
@@ -3845,6 +3959,15 @@ def render_dca_section(
     # ── Performance summary ──────────────────────────────────────────────
     mode_label = _DCA_MODE_LABELS.get(dca_result.mode, dca_result.mode)
     st.subheader(f"DCA Results — {mode_label}")
+    _help_popover({
+        "DCA (Dollar-Cost Averaging)": "Investing a fixed dollar amount at regular intervals regardless of price. You buy more shares when prices are low, fewer when high.",
+        "Pure DCA": "Fixed amount every interval — no timing or analysis. Serves as a baseline to compare against smarter modes.",
+        "Dip-Weighted DCA": "Buys more when the price drops from its recent high. Mild/Strong/Extreme dip tiers each get a higher multiplier.",
+        "Score-Integrated DCA": "Uses technical indicators (RSI, Bollinger Bands, overall score) to decide how much extra to invest on top of the base amount.",
+        "DRIP": "Dividend Reinvestment Plan — automatically uses dividend payments to buy more shares instead of taking cash.",
+        "Dip Tiers": "How far the price has fallen from its recent high: Normal (<threshold), Mild Dip, Strong Dip, Extreme Dip. Each tier triggers a larger buy.",
+        "Multiplier": "How many times the base amount to invest. 1.0x = normal, 2.0x = double, etc. Capped by safety limits.",
+    })
     st.info(
         f"**{dca_result.frequency.title()}** purchases of "
         f"**${dca_result.purchases[0].amount if dca_result.purchases else 0:,.0f}** base "
@@ -3857,6 +3980,11 @@ def render_dca_section(
 
     # ── Equity chart ─────────────────────────────────────────────────────
     st.subheader("Equity Curve")
+    _help_popover({
+        "Portfolio value line": "Total value of all shares purchased so far, at today's prices.",
+        "Cost basis line": "Total cash you have invested over time (cumulative purchases).",
+        "The gap between them": "When portfolio value is above cost basis, your DCA is profitable. Below = underwater.",
+    })
     eq_fig = _create_dca_equity_chart(dca_result)
     st.plotly_chart(eq_fig, width="stretch")
 
@@ -4077,6 +4205,13 @@ def render_scanner() -> None:
 
 def _render_dividend_scanner() -> None:
     """Render the dividend scanner UI."""
+    _help_popover({
+        "Yield": "Annual dividend payment as a percentage of the current stock price. Higher = more income per dollar invested.",
+        "CAGR": "Compound Annual Growth Rate of dividends — how fast the dividend has been growing each year.",
+        "Consistency": "How reliably the company pays dividends without cuts. 100% = never missed or reduced a payment.",
+        "Streak": "Number of consecutive years the company has increased its dividend. Longer streaks = more dependable.",
+        "Dividend Score": "A composite score (0-100) combining yield, growth, consistency, and streak. Higher = better overall dividend quality.",
+    })
     st.markdown(
         "Scan a stock universe for **dividend quality** — ranked by yield, "
         "growth rate, payout consistency, and increase streak."
@@ -4424,6 +4559,18 @@ def _build_dividend_results_html(
 
 def _render_dca_scanner() -> None:
     """Render the DCA (Dollar-Cost Averaging) scanner UI."""
+    _help_popover({
+        "DCA Score (0-100)": "Overall attractiveness for Dollar-Cost Averaging. Higher = better time to deploy capital. Combines dip severity, technicals, and regime.",
+        "Dip %": "How far the price has fallen from its recent high. Bigger dip = potentially better buying opportunity.",
+        "Dip Sigma": "The dip expressed in standard deviations of the stock's own volatility. A 2-sigma dip is unusual; 3+ sigma is extreme.",
+        "Tier": "Dip severity bucket: Normal (small dip), Mild Dip, Strong Dip, or Extreme Dip. Each tier gets a different buy multiplier.",
+        "Multiplier": "How much extra to invest relative to the base amount. 1.0x = normal amount, 2.0x = double, etc.",
+        "Regime": "The market environment used for DCA context (e.g. Mean Reverting regimes are better for dip-buying).",
+        "RSI": "Relative Strength Index — below 30 is oversold (potential buy), above 70 is overbought.",
+        "Bollinger %B": "Where price sits relative to the Bollinger Bands. Below 0 = below lower band (oversold), above 1 = above upper band.",
+        "Volatility": "Recent price volatility (standard deviation of returns). Higher volatility means wider dip ranges.",
+        "Confidence": "How reliable the DCA signal is, based on data quality and indicator agreement.",
+    })
     st.markdown(
         "Scan a stock universe to rank tickers by **DCA attractiveness** — "
         "answering *\"where should I allocate my next DCA dollar?\"* "
@@ -4719,6 +4866,15 @@ def _build_dca_scanner_results_html(
 
 def _render_technical_scanner() -> None:
     """Render the original technical scanner UI."""
+    _help_popover({
+        "Trend Score": "How bullish the trend-following indicators are (0-10). High = strong uptrend signal.",
+        "Contrarian Score": "How bullish the contrarian/reversal indicators are (0-10). High = oversold bounce signal.",
+        "Pattern Score": "Composite score from chart and candlestick pattern recognition (0-10).",
+        "MT Agreement": "Multi-timeframe agreement — do the daily, weekly, and monthly charts agree? Higher = stronger conviction.",
+        "Regime": "The detected market environment (Strong Trend, Mean Reverting, Volatile Choppy, Breakout Transition).",
+        "Sub-Type": "A finer classification within the regime (e.g. Explosive Mover, Steady Compounder).",
+        "Confidence": "How reliable the signal is. Dots show High (3), Medium (2), or Low (1).",
+    })
     st.markdown(
         "Scan a predefined stock universe through the full analysis + strategy "
         "pipeline to surface the top **BUY** and **SELL** candidates."
@@ -5532,6 +5688,14 @@ def render_watchlist() -> None:
 
     # ── Active Strategy Signal table ──────────────────────────────────────
     st.subheader("Active Strategy Signals")
+    _help_popover({
+        "Signal": "BUY = strategy wants to go long, SELL = close or short, HOLD = no action needed right now.",
+        "Action": "The specific trade instruction (e.g. 'Open Long', 'Close Position', 'Hold — wait').",
+        "Score": "The blended indicator + pattern score (0-10) driving this signal.",
+        "Indicator / Pattern": "Separate scores from the indicator engine and the pattern engine.",
+        "Regime": "Current market regime for this stock (affects how the strategy trades).",
+        "Position": "Whether the strategy currently holds a position, and its unrealized P&L.",
+    })
     st.caption(
         "Signals from the score-based active trading strategy "
         "(same logic as the backtest engine)."
@@ -5584,6 +5748,15 @@ def render_watchlist() -> None:
     dca_signals = [s for s in signals if s.dca is not None]
     if dca_signals:
         st.subheader("DCA Context")
+        _help_popover({
+            "Dip %": "How far the price has fallen from its recent high.",
+            "Dip Sigma": "The dip in standard deviations — a 2-sigma dip is unusual for this stock.",
+            "Tier": "Dip bucket: Normal, Mild Dip, Strong Dip, or Extreme Dip.",
+            "Multiplier": "How much extra to buy. 1.0x = normal, 2.0x = double the usual amount.",
+            "RSI": "Below 30 is oversold (potential buying opportunity).",
+            "Regime": "Market environment influencing DCA decisions.",
+            "Guidance": "The suggested DCA action: Normal DCA or DCA Buy (with tier).",
+        })
         st.caption(
             "Enhanced dollar-cost averaging guidance combining price dip "
             "detection, volatility normalisation, technical scores, and "
