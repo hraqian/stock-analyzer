@@ -633,6 +633,16 @@ class ScoreBasedStrategy(Strategy):
         if effective_score < min_score:
             return None
 
+        # ── Pattern veto ────────────────────────────────────────────────
+        # Even if the blended effective_score passes min_score, a strong
+        # indicator score can mask an actively bearish pattern score
+        # (e.g. exhaustion gap, bearish engulfing).  If the raw pattern
+        # score is below the veto threshold, defer entry until patterns
+        # are at least neutral.
+        pattern_veto = float(adapt.get("pattern_veto_threshold", 0.0))
+        if pattern_veto > 0 and pat_score < pattern_veto:
+            return None  # patterns actively warn against entry — defer
+
         # ── Determine effective trend bias ──────────────────────────────
         # Use total return as the primary directional signal.
         # total_return is a fraction (e.g. 1.15 = +115%, -0.20 = -20%)
@@ -693,10 +703,11 @@ class ScoreBasedStrategy(Strategy):
         """Breakout/Transition regime: check momentum & volume requirements.
 
         Returns True if the breakout conditions are met:
-        1. Price moved beyond breakout_atr_mult × recent range (approximated
-           from the bar's high-low as a proxy for ATR when actual ATR is not
-           available in the context).
-        2. Optionally, volume exceeds volume_surge_mult × average.
+        1. The bar's range (high - low) as a percentage of price must exceed
+           a minimum threshold (``min_bar_range_pct``).  This filters out
+           narrow-range noise bars that happen to have a good move ratio.
+        2. The bar move is meaningfully directional (move ratio check).
+        3. Optionally, volume exceeds volume_surge_mult × average.
         """
         adapt = self._get_regime_adapt(RegimeType.BREAKOUT_TRANSITION, ctx.regime_sub_type)
         bar = ctx.bar
@@ -713,6 +724,16 @@ class ScoreBasedStrategy(Strategy):
         # Use the bar move (|close - open|) as a proxy for directional momentum
         bar_move = abs(close - open_price)
         bar_range_pct = bar_range / close if close > 0 else 0
+
+        # ── Bar range expansion filter ──────────────────────────────────
+        # Reject bars whose range is too small to represent a genuine
+        # volatility expansion / squeeze release.  A typical daily ATR is
+        # 1-3% of price; requiring at least min_bar_range_pct (default 1.5%)
+        # filters out narrow-range noise bars that coincidentally have a
+        # favourable move ratio or volume spike.
+        min_bar_range_pct = float(adapt.get("min_bar_range_pct", 0.015))
+        if bar_range_pct < min_bar_range_pct:
+            return False  # bar too narrow — not a real breakout expansion
 
         # A typical daily ATR is around 1-3% of price. We check if the bar
         # move is meaningfully directional (> 50% of bar range), which suggests

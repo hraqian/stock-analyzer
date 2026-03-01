@@ -615,6 +615,7 @@ regime:
       min_distance: 0.01            # price must be 1%+ from MA for trend entry
       min_score: 3.5                # don't enter when indicators are strongly bearish
       respect_trend_direction: true  # only enter in direction of long-term trend
+      pattern_veto_threshold: 3.0   # skip entry if pattern score below this (0 = disabled)
       # ── Sub-type overrides (merged on top of base strong_trend params) ──
       # Sub-type is classified from warmup data at backtest start and
       # re-evaluated at every rebalance, so it can change mid-run.
@@ -639,6 +640,7 @@ regime:
     breakout_transition:
       use_momentum_entry: true      # enter on breakout confirmation
       breakout_atr_mult: 1.5        # price must move N×ATR from squeeze level
+      min_bar_range_pct: 0.015      # bar range (high-low)/close must exceed 1.5% to confirm volatility expansion
       require_volume_surge: true
       volume_surge_mult: 1.3        # volume must exceed avg by this factor
       avg_volume_window: 20         # rolling window (bars) for average volume baseline
