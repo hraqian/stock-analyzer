@@ -809,13 +809,15 @@ class WatchlistMonitor:
             notes.append(f"Tier upgraded from {raw_tier.replace('_',' ')} to {tier.replace('_',' ')} by technical signals.")
 
         # ── 4. Regime adjustment ─────────────────────────────────────────
+        # RegimeType members: STRONG_TREND, MEAN_REVERTING,
+        #                     VOLATILE_CHOPPY, BREAKOUT_TRANSITION
         regime_str = regime_type.value if regime_type else "unknown"
         regime_adj = wl_ctx.get("regime_adjustment", {})
         bear_max_mult = float(regime_adj.get("bear_max_multiplier", 1.5))
         bull_pullback_bonus = float(regime_adj.get("bull_pullback_bonus", 0.5))
 
         regime_capped = False
-        if regime_type in (RegimeType.BEAR, RegimeType.CRISIS):
+        if regime_type == RegimeType.VOLATILE_CHOPPY:
             if multiplier > bear_max_mult:
                 multiplier = bear_max_mult
                 regime_capped = True
@@ -823,27 +825,27 @@ class WatchlistMonitor:
                 f"Regime is {regime_str.replace('_', ' ')} — "
                 f"multiplier capped at {bear_max_mult:.1f}x (higher risk of continued decline)."
             )
-        elif regime_type == RegimeType.BULL and dip_pct >= mild_drop_pct:
+        elif regime_type == RegimeType.STRONG_TREND and dip_pct >= mild_drop_pct:
             multiplier = min(multiplier + bull_pullback_bonus, max_multiplier)
             notes.append(
-                f"Bull regime pullback — good DCA entry point, "
+                f"Strong trend pullback — good DCA entry point, "
                 f"multiplier boosted by {bull_pullback_bonus:.1f}x."
             )
-        elif regime_type == RegimeType.BULL:
-            notes.append("Bull regime — steady accumulation recommended.")
-        elif regime_type in (RegimeType.SIDEWAYS, RegimeType.RECOVERY):
+        elif regime_type == RegimeType.STRONG_TREND:
+            notes.append("Strong trend regime — steady accumulation recommended.")
+        elif regime_type in (RegimeType.MEAN_REVERTING, RegimeType.BREAKOUT_TRANSITION):
             notes.append(f"Regime is {regime_str.replace('_', ' ')} — standard DCA allocation.")
 
         # Clamp final multiplier
         multiplier = min(multiplier, max_multiplier)
 
         # ── 5. Confidence assessment ─────────────────────────────────────
-        # High: dip + bullish/neutral regime + supportive technicals
-        # Low:  bear/crisis regime, or overbought RSI during dip
+        # High: dip + trending/transitioning regime + supportive technicals
+        # Low:  volatile choppy regime, or overbought RSI during dip
         is_dca_buy = dip_pct >= mild_drop_pct or ind_composite < buy_zone_below
-        if is_dca_buy and regime_type in (RegimeType.BULL, RegimeType.RECOVERY) and rsi_val < 50:
+        if is_dca_buy and regime_type in (RegimeType.STRONG_TREND, RegimeType.BREAKOUT_TRANSITION) and rsi_val < 50:
             confidence = "high"
-        elif is_dca_buy and regime_type in (RegimeType.BEAR, RegimeType.CRISIS):
+        elif is_dca_buy and regime_type == RegimeType.VOLATILE_CHOPPY:
             confidence = "low"
         elif is_dca_buy:
             confidence = "medium"
