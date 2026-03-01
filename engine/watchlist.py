@@ -601,11 +601,10 @@ class WatchlistMonitor:
         # Load persisted state
         self.state = WatchlistState.load(self._state_path)
 
-        # Initialise cash balance from config if this is a fresh state file
-        initial_cash = float(wl_cfg.get(
-            "initial_cash",
-            cfg.section("backtest").get("initial_cash", 100_000.0),
-        ))
+        # Initialise cash balance from config if this is a fresh state file.
+        # watchlist.initial_cash is independent of backtest.initial_cash —
+        # they represent different pools (live trading vs. simulation).
+        initial_cash = float(wl_cfg.get("initial_cash", 100_000.0))
         self.state.ensure_cash(initial_cash)
 
     # ------------------------------------------------------------------
