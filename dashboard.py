@@ -6204,43 +6204,105 @@ def _render_recommendation_card(
                         f"Cash after: ${edit_cash_after:,.0f}"
                     )
 
-            # Confirm with edits
-            if st.button(
-                f"Confirm {action_label} (edited)",
-                key=f"{key_prefix}_confirm_edit",
-                type="primary",
-            ):
-                _execute_recommendation(
-                    rec, wl_state,
-                    override_price=edit_price,
-                    override_quantity=float(edit_qty),
-                )
-                st.session_state.pop(edit_key, None)
-                st.toast(
-                    f"{action_label} {rec.ticker}: "
-                    f"{int(edit_qty)} shares @ ${edit_price:,.2f}",
-                    icon="✅",
-                )
-                st.rerun()
-
-        # ── Action buttons ────────────────────────────────────────────
-        else:
-            btn1, btn2, btn3 = st.columns(3)
-            with btn1:
+            # Confirm with edits — apply cash guardrail for buys
+            edit_insufficient = is_buy and edit_cash_after < 0
+            if edit_insufficient:
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    st.button(
+                        f"Confirm {action_label} (edited)",
+                        key=f"{key_prefix}_confirm_edit",
+                        disabled=True,
+                        help="Disabled — edited trade exceeds available cash.",
+                    )
+                with ec2:
+                    if st.button(
+                        "Confirm Anyway (edited)",
+                        key=f"{key_prefix}_confirm_edit_force",
+                        type="primary",
+                        help="Allow this buy even though it exceeds available cash.",
+                    ):
+                        _execute_recommendation(
+                            rec, wl_state,
+                            override_price=edit_price,
+                            override_quantity=float(edit_qty),
+                            allow_negative_cash=True,
+                        )
+                        st.session_state.pop(edit_key, None)
+                        st.toast(
+                            f"{action_label} {rec.ticker}: "
+                            f"{int(edit_qty)} shares @ ${edit_price:,.2f} (margin)",
+                            icon="⚠️",
+                        )
+                        st.rerun()
+            else:
                 if st.button(
-                    f"Confirm {action_label}",
-                    key=f"{key_prefix}_confirm",
+                    f"Confirm {action_label} (edited)",
+                    key=f"{key_prefix}_confirm_edit",
                     type="primary",
-                    help=f"Execute this {action_label.lower()} at the recommended price and quantity.",
                 ):
-                    _execute_recommendation(rec, wl_state)
+                    _execute_recommendation(
+                        rec, wl_state,
+                        override_price=edit_price,
+                        override_quantity=float(edit_qty),
+                    )
+                    st.session_state.pop(edit_key, None)
                     st.toast(
                         f"{action_label} {rec.ticker}: "
-                        f"{rec.recommended_quantity:.0f} shares "
-                        f"@ ${rec.recommended_price:,.2f}",
+                        f"{int(edit_qty)} shares @ ${edit_price:,.2f}",
                         icon="✅",
                     )
                     st.rerun()
+
+        # ── Action buttons ────────────────────────────────────────────
+        else:
+            # Cash guardrail: if buy would go negative, require explicit
+            # "Confirm Anyway" instead of normal confirm.
+            needs_override = is_buy and rec.insufficient_cash
+            if needs_override:
+                btn1, btn2, btn3, btn_force = st.columns(4)
+                with btn1:
+                    # Disable normal confirm — grey out with explanation
+                    st.button(
+                        f"Confirm {action_label}",
+                        key=f"{key_prefix}_confirm",
+                        disabled=True,
+                        help="Disabled — insufficient cash. Use 'Confirm Anyway' to allow negative cash.",
+                    )
+                with btn_force:
+                    if st.button(
+                        "Confirm Anyway",
+                        key=f"{key_prefix}_confirm_force",
+                        type="primary",
+                        help="Allow this buy even though it exceeds available cash (margin/negative balance).",
+                    ):
+                        _execute_recommendation(
+                            rec, wl_state, allow_negative_cash=True,
+                        )
+                        st.toast(
+                            f"{action_label} {rec.ticker}: "
+                            f"{rec.recommended_quantity:.0f} shares "
+                            f"@ ${rec.recommended_price:,.2f} (margin)",
+                            icon="⚠️",
+                        )
+                        st.rerun()
+            else:
+                btn1, btn2, btn3 = st.columns(3)
+                with btn1:
+                    if st.button(
+                        f"Confirm {action_label}",
+                        key=f"{key_prefix}_confirm",
+                        type="primary",
+                        help=f"Execute this {action_label.lower()} at the recommended price and quantity.",
+                    ):
+                        _execute_recommendation(rec, wl_state)
+                        st.toast(
+                            f"{action_label} {rec.ticker}: "
+                            f"{rec.recommended_quantity:.0f} shares "
+                            f"@ ${rec.recommended_price:,.2f}",
+                            icon="✅",
+                        )
+                        st.rerun()
             with btn2:
                 if st.button(
                     "Edit",
@@ -6268,11 +6330,16 @@ def _execute_recommendation(
     *,
     override_price: float | None = None,
     override_quantity: float | None = None,
+    allow_negative_cash: bool = False,
 ) -> None:
     """Execute a trade recommendation: update portfolio state and persist.
 
     Rebuilds a minimal WatchlistMonitor to call acknowledge_signal()
     with the correct config context, then saves updated state.
+
+    Args:
+        allow_negative_cash: If False (default), BUY is blocked when
+            cash is insufficient.  Set True to allow margin usage.
     """
     if wl_state is None or rec.signal is None:
         return
@@ -6294,6 +6361,18 @@ def _execute_recommendation(
         from engine.watchlist import WatchlistPosition
 
         cost = exec_qty * exec_price
+
+        # Cash guardrail: block if insufficient funds (unless overridden)
+        if not allow_negative_cash and wl_state.cash_balance is not None:
+            if cost > wl_state.cash_balance:
+                st.error(
+                    f"Insufficient cash to buy {ticker}: "
+                    f"cost ${cost:,.0f} exceeds available "
+                    f"${wl_state.cash_balance:,.0f}. "
+                    f"Use 'Confirm Anyway' to allow negative cash."
+                )
+                return
+
         pos = WatchlistPosition(
             ticker=ticker,
             side="long",

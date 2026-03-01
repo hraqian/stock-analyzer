@@ -675,8 +675,15 @@ class WatchlistMonitor:
             return []
 
         results: list[WatchlistSignal] = []
+        # Accumulate live prices as each ticker is scanned, so that
+        # _compute_equity() inside _scan_ticker() uses progressively
+        # more accurate market values.
+        live_prices: dict[str, float] = {}
         for ticker in scan_tickers:
-            results.append(self._scan_ticker(ticker))
+            sig = self._scan_ticker(ticker, live_prices=live_prices)
+            if sig.current_price > 0 and not sig.error:
+                live_prices[sig.ticker] = sig.current_price
+            results.append(sig)
 
         self.state.last_updated = datetime.now().isoformat(timespec="seconds")
         return results
@@ -692,6 +699,8 @@ class WatchlistMonitor:
         *,
         override_price: float | None = None,
         override_quantity: float | None = None,
+        allow_negative_cash: bool = False,
+        live_prices: dict[str, float] | None = None,
     ) -> None:
         """Update portfolio state after the user acts on a signal.
 
@@ -704,6 +713,11 @@ class WatchlistMonitor:
             signal: The signal that was acted on.
             override_price: Actual execution price (defaults to signal's current_price).
             override_quantity: Actual share count (defaults to computed quantity).
+            allow_negative_cash: If False (default), raises ValueError when a
+                BUY would push cash below zero.  Set True to explicitly allow
+                margin/negative-cash usage.
+            live_prices: Optional mapping of ticker → live price for accurate
+                equity-based position sizing.
         """
         ticker = ticker.upper()
         exec_price = override_price if override_price is not None else signal.current_price
@@ -720,10 +734,21 @@ class WatchlistMonitor:
                 else:
                     pct = float(strat_cfg.get("percent_equity", 1.0))
                     # Use real portfolio equity: cash + market value of positions
-                    equity = self._compute_equity()
+                    equity = self._compute_equity(live_prices)
                     qty = int(pct * equity / exec_price) if exec_price > 0 else 0
 
             cost = qty * exec_price
+
+            # Cash guardrail: block if insufficient funds (unless overridden)
+            if not allow_negative_cash and self.state.cash_balance is not None:
+                if cost > self.state.cash_balance:
+                    raise ValueError(
+                        f"Insufficient cash to buy {ticker}: "
+                        f"cost ${cost:,.0f} exceeds available "
+                        f"${self.state.cash_balance:,.0f}. "
+                        f"Use allow_negative_cash=True to override."
+                    )
+
             pos = WatchlistPosition(
                 ticker=ticker,
                 side="long",
@@ -770,19 +795,29 @@ class WatchlistMonitor:
             ss["bars_since_exit"] = 0
             self.state.strategy_state[ticker] = ss
 
-    def _compute_equity(self) -> float:
+    def _compute_equity(
+        self,
+        prices: dict[str, float] | None = None,
+    ) -> float:
         """Compute total portfolio equity (cash + estimated position value).
 
-        Uses entry prices for position valuation since we may not have
-        live prices at the time of the acknowledge call.  The scan()
-        method provides accurate live-price equity via
-        ``state.portfolio_value()``.
+        Args:
+            prices: Optional mapping of ticker → live price.  When provided,
+                positions are valued at the live price; otherwise the entry
+                price is used as a conservative fallback.
+
+        Returns:
+            Total equity (cash + market value of open positions).
         """
         cash = self.state.cash_balance if self.state.cash_balance is not None else 0.0
-        market_value = sum(
-            pos.quantity * pos.entry_price
-            for pos in self.state.positions.values()
-        )
+        market_value = 0.0
+        for ticker, pos in self.state.positions.items():
+            price = (
+                prices.get(ticker, pos.entry_price)
+                if prices is not None
+                else pos.entry_price
+            )
+            market_value += pos.quantity * price
         return cash + market_value
 
     # ------------------------------------------------------------------
@@ -814,6 +849,13 @@ class WatchlistMonitor:
         fixed_qty = float(strat_cfg.get("fixed_quantity", 100))
         pct_equity = float(strat_cfg.get("percent_equity", 1.0))
 
+        # Build live-price map from scan signals for accurate equity calc
+        live_prices: dict[str, float] = {
+            s.ticker: s.current_price
+            for s in signals
+            if s.current_price > 0 and not s.error
+        }
+
         # Build regime adaptation map (mirrors ScoreBasedStrategy.__init__)
         ra = strat_cfg.get("regime_adaptation", {})
         regime_adapt: dict[str, dict] = {
@@ -838,7 +880,7 @@ class WatchlistMonitor:
 
             if sig.signal == Signal.BUY and sig.position is None:
                 # --- BUY recommendation ---
-                equity = self._compute_equity()
+                equity = self._compute_equity(live_prices)
 
                 # Base quantity from sizing mode
                 if sizing_mode == "fixed":
@@ -915,7 +957,7 @@ class WatchlistMonitor:
                     estimated_pnl_pct=pnl_pct,
                     estimated_pnl_dollar=pnl_dollar,
                     sizing_mode=sizing_mode,
-                    equity_used=self._compute_equity(),
+                    equity_used=self._compute_equity(live_prices),
                     signal=sig,
                 ))
 
@@ -925,8 +967,19 @@ class WatchlistMonitor:
     # Internal
     # ------------------------------------------------------------------
 
-    def _scan_ticker(self, ticker: str) -> WatchlistSignal:
-        """Run the full signal pipeline on a single ticker."""
+    def _scan_ticker(
+        self,
+        ticker: str,
+        *,
+        live_prices: dict[str, float] | None = None,
+    ) -> WatchlistSignal:
+        """Run the full signal pipeline on a single ticker.
+
+        Args:
+            live_prices: Optional mapping of ticker → live price from
+                previously scanned tickers. Used for more accurate
+                equity computation during position sizing.
+        """
         try:
             # 1. Fetch data
             df = self._provider.fetch(
@@ -1029,7 +1082,10 @@ class WatchlistMonitor:
                 pattern_score=pat_composite,
                 position=position_qty,
                 cash=self.state.cash_balance or 0.0,
-                portfolio_value=self._compute_equity(),
+                # Include the current ticker's live price for equity calc
+                portfolio_value=self._compute_equity(
+                    {**(live_prices or {}), ticker: current_price}
+                ),
                 trend_ma=trend_ma,
                 regime=regime_type,
                 regime_sub_type=regime_sub_type,
@@ -1046,8 +1102,10 @@ class WatchlistMonitor:
                 ind_composite, pat_composite, strat_cfg,
             )
 
-            # 11. Determine action
-            action = self._determine_action(order.signal, pos)
+            # 11. Determine action (respect long-only mode)
+            action = self._determine_action(
+                order.signal, pos, self._trading_mode,
+            )
 
             # 12. Compute DCA context (dip tier, multiplier, buy guidance)
             try:
@@ -1290,13 +1348,28 @@ class WatchlistMonitor:
         return map_dca_regime(regime_type, regime_trend, total_return, wl_ctx)
 
     def _determine_action(
-        self, signal: Signal, position: WatchlistPosition | None,
+        self,
+        signal: Signal,
+        position: WatchlistPosition | None,
+        trading_mode: TradingMode | None = None,
     ) -> str:
-        """Translate a signal + current position into a human-readable action."""
+        """Translate a signal + current position into a human-readable action.
+
+        In ``LONG_ONLY`` mode, short-related actions are suppressed:
+        SELL with no existing position returns "No action" instead of
+        "OPEN SHORT", and CLOSE SHORT transitions are blocked.
+        """
+        long_only = (
+            trading_mode is None or trading_mode == TradingMode.LONG_ONLY
+        )
+
         if signal == Signal.BUY:
             if position is None:
                 return "OPEN LONG"
             elif position.side == "short":
+                if long_only:
+                    # Shouldn't have a short in long-only mode; just flag hold
+                    return "Hold (short position — close manually)"
                 return "CLOSE SHORT → OPEN LONG"
             else:
                 return "Hold (already long)"
@@ -1304,6 +1377,8 @@ class WatchlistMonitor:
             if position is not None and position.side == "long":
                 return "CLOSE LONG"
             elif position is None:
+                if long_only:
+                    return "No action"
                 return "OPEN SHORT"
             else:
                 return "Hold (already short)"
