@@ -5711,6 +5711,55 @@ def render_watchlist() -> None:
     )
 
     cfg = _get_config()
+
+    # ── Active strategy summary ───────────────────────────────────────────
+    strat = cfg.section("strategy")
+    overall = cfg.section("overall")
+
+    # Threshold description
+    thr_mode = strat.get("threshold_mode", "fixed")
+    if thr_mode == "fixed":
+        sc_thr = strat.get("score_thresholds", {})
+        short_b = sc_thr.get("short_below", 3.5)
+        hold_b = sc_thr.get("hold_below", 6.0)
+        thr_text = f"Fixed thresholds — BUY > {hold_b}, SELL ≤ {short_b}, HOLD in between"
+    else:
+        pct_thr = strat.get("percentile_thresholds", {})
+        long_p = pct_thr.get("long_percentile", 75)
+        short_p = pct_thr.get("short_percentile", 25)
+        lookback = pct_thr.get("lookback_bars", 60)
+        thr_text = f"Adaptive percentile — BUY top {100 - long_p}%, SELL bottom {short_p}% ({lookback}-bar window)"
+
+    # Combination mode
+    combo = strat.get("combination_mode", "weighted")
+    ind_w = strat.get("indicator_weight", 0.7)
+    pat_w = strat.get("pattern_weight", 0.3)
+    if combo == "weighted":
+        combo_text = f"Weighted blend — {ind_w:.0%} indicators / {pat_w:.0%} patterns"
+    elif combo == "boost":
+        combo_text = "Boost mode — patterns adjust the indicator score"
+    elif combo == "gate":
+        combo_text = "Gate mode — both indicator and pattern scores must agree"
+    else:
+        combo_text = f"{combo} mode"
+
+    # Top 3 indicators by weight
+    weights = overall.get("weights", {})
+    if weights:
+        sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_text = ", ".join(
+            f"{name.replace('_', ' ').title()} ({w:.0%})"
+            for name, w in sorted_w
+        )
+    else:
+        top_text = "default indicators"
+
+    st.info(
+        f"**Active strategy:** {thr_text}  \n"
+        f"**Score blending:** {combo_text}  \n"
+        f"**Top indicators:** {top_text}",
+        icon="ℹ️",
+    )
     data = st.session_state.get("config_data", {})
     wl_tickers: list[str] = [
         t.upper() for t in data.get("watchlist", {}).get("tickers", []) if t.strip()
