@@ -6747,6 +6747,18 @@ def _render_watchlist_portfolio(signals: list[WatchlistSignal]) -> None:
                 # Recompute totals
                 cash = new_cash
                 total_equity = cash + positions_value
+                # Update cash projections on pending recommendations so
+                # the cards reflect the new balance.
+                _recs = st.session_state.get("wl_recommendations", [])
+                for _r in _recs:
+                    _r.cash_before = new_cash
+                    if _r.side == "buy":
+                        _r.cash_after = new_cash - _r.estimated_cost
+                        _r.insufficient_cash = _r.cash_after < 0
+                    else:
+                        _r.cash_after = new_cash + _r.estimated_cost
+                        _r.insufficient_cash = False
+                st.session_state["wl_recommendations"] = _recs
         p2.metric(
             "Positions Value", f"${positions_value:,.0f}",
             help="Total market value of all open positions.",
