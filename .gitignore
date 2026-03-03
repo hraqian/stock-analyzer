@@ -25,6 +25,9 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Streamlit secrets (passwords — never commit)
+.streamlit/secrets.toml
+
 # Project-specific
 *.log
 config_slot_*.yaml

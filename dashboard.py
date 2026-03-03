@@ -73,6 +73,43 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
+# Password gate — protect the app with a shared password.
+#
+# The password is stored in Streamlit Cloud's Secrets manager (or locally in
+# .streamlit/secrets.toml) under the key ``app_password``.  If no secret is
+# configured the gate is skipped so local development is unaffected.
+# ---------------------------------------------------------------------------
+
+def _check_password() -> bool:
+    """Return True if the user has entered the correct password or no
+    password is configured."""
+    try:
+        expected = st.secrets["app_password"]
+    except (KeyError, FileNotFoundError):
+        # No password configured — allow access (local dev).
+        return True
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("Stock Technical Analyzer")
+    st.subheader("Login required")
+    with st.form("login_form"):
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log in")
+    if submitted:
+        if password == expected:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+    return False
+
+
+if not _check_password():
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
