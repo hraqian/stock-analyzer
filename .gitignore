@@ -32,3 +32,4 @@ Thumbs.db
 *.log
 config_slot_*.yaml
 watchlist_state.json
+watchlist_tickers.yaml

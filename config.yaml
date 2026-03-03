@@ -1130,19 +1130,9 @@ dca:
 # ─────────────────────────────────────────────────────────────────────────────
 
 watchlist:
-  # Tickers to monitor. Each entry can be a plain string ("AAPL") or an
-  # object with optional regime/sub-type overrides:
-  #   - ticker: AAPL
-  #     regime_override: strong_trend       # force regime (see below)
-  #     sub_type_override: steady_compounder # force sub-type (see below)
-  # Valid regime overrides: strong_trend, mean_reverting, volatile_choppy,
-  #                         breakout_transition
-  # Valid sub-type overrides: explosive_mover, volatile_directionless,
-  #                           steady_compounder, stagnant
-  tickers:
-    - ticker: CSCO
-    - ticker: AAPL
-    - ticker: AMZN
+  # Tickers are stored separately in watchlist_tickers.yaml (not tracked by git).
+  # See watchlist_tickers.example.yaml for the format.  You can also add/remove
+  # tickers from the dashboard sidebar or via the CLI (--watchlist-add / --watchlist-remove).
   data_period: "1y"              # how much history to fetch for indicator warmup
   interval: "1d"                 # data interval
   trading_mode: "long_only"      # "long_only" or "long_short"

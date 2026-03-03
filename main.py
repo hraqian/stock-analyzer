@@ -377,34 +377,47 @@ def main() -> None:
 
     # ── --watchlist-add / --watchlist-remove ───────────────────────────────────
     if args.watchlist_add or args.watchlist_remove:
-        from config import save_watchlist_tickers
-        wl_tickers = [t.upper() for t in cfg.section("watchlist").get("tickers", [])]
+        from config import save_watchlist_tickers, load_watchlist_tickers, parse_watchlist_tickers
+        from pathlib import Path as _Path
+
+        project_root = _Path(cfg.path).parent if cfg.path else _Path(__file__).parent
+
+        # Load from dedicated ticker file first, fall back to config
+        wl_entries = load_watchlist_tickers(project_root)
+        if not wl_entries:
+            wl_entries = parse_watchlist_tickers(
+                cfg.section("watchlist").get("tickers", [])
+            )
+        wl_tickers = [str(e["ticker"]) for e in wl_entries]
 
         if args.watchlist_add:
             t = args.watchlist_add.upper().strip()
             if t in wl_tickers:
                 console.print(f"[yellow]{t}[/yellow] is already in the watchlist.")
             else:
-                wl_tickers.append(t)
+                wl_entries.append({
+                    "ticker": t,
+                    "regime_override": None,
+                    "sub_type_override": None,
+                })
                 console.print(f"[green]Added {t}[/green] to watchlist.")
 
         if args.watchlist_remove:
             t = args.watchlist_remove.upper().strip()
-            if t in wl_tickers:
-                wl_tickers.remove(t)
+            matching = [e for e in wl_entries if e["ticker"] == t]
+            if matching:
+                wl_entries = [e for e in wl_entries if e["ticker"] != t]
                 console.print(f"[green]Removed {t}[/green] from watchlist.")
             else:
                 console.print(f"[yellow]{t}[/yellow] is not in the watchlist.")
 
-        # Persist to config.yaml
-        if cfg.path:
-            try:
-                save_watchlist_tickers(cfg.path, wl_tickers)
-                console.print(f"[dim]Saved to {cfg.path}[/dim]")
-            except Exception as exc:
-                console.print(f"[red]Failed to save config:[/red] {exc}")
-        else:
-            console.print("[yellow]No config.yaml found — changes are not persisted.[/yellow]")
+        # Persist to ticker file
+        try:
+            save_watchlist_tickers(project_root, wl_entries)
+            console.print(f"[dim]Saved to {project_root / 'watchlist_tickers.yaml'}[/dim]")
+        except Exception as exc:
+            console.print(f"[red]Failed to save tickers:[/red] {exc}")
+        wl_tickers = [str(e["ticker"]) for e in wl_entries]
         console.print(f"[dim]Watchlist: {', '.join(wl_tickers) or '(empty)'}[/dim]")
         return
 

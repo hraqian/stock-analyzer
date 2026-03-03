@@ -991,6 +991,11 @@ class Config:
 
         If *path* is None, looks for ``config.yaml`` next to this file, then
         in the current working directory.
+
+        Tickers are loaded from a separate file (``watchlist_tickers.yaml``)
+        and merged into the ``watchlist`` section.  If the ticker file does
+        not exist, the ``watchlist.tickers`` value from ``config.yaml`` (or
+        defaults) is preserved for backward compatibility.
         """
         search_paths = []
         if path:
@@ -1011,6 +1016,17 @@ class Config:
                 break
 
         merged = _deep_merge(DEFAULT_CONFIG, loaded)
+
+        # Overlay tickers from the dedicated ticker file (if it exists).
+        project_root = Path(resolved_path).parent if resolved_path else Path(__file__).parent
+        ext_tickers = load_watchlist_tickers(project_root)
+        if ext_tickers:
+            # Convert back to the raw list-of-dicts format config expects.
+            merged.setdefault("watchlist", {})["tickers"] = [
+                {k: v for k, v in t.items() if v is not None}
+                for t in ext_tickers
+            ]
+
         cfg = cls(merged, resolved_path)
         errors = cfg.validate()
         if errors:
@@ -1448,8 +1464,10 @@ class Config:
 
 
 # ---------------------------------------------------------------------------
-# Utility — persist watchlist tickers to config.yaml
+# Watchlist ticker file — tickers are stored separately from config.yaml
 # ---------------------------------------------------------------------------
+
+TICKER_FILE_NAME = "watchlist_tickers.yaml"
 
 # Type alias: each ticker entry is either a plain string or a dict with
 # at least a "ticker" key, and optional "regime_override" / "sub_type_override".
@@ -1471,62 +1489,74 @@ def _normalise_ticker_entry(entry: WatchlistTickerEntry) -> dict[str, str | None
     }
 
 
+def _ticker_file_path(project_root: str | Path | None = None) -> Path:
+    """Return the path to the watchlist ticker file.
+
+    Searches next to this file first, then in *project_root* if given.
+    """
+    candidates: list[Path] = [Path(__file__).parent / TICKER_FILE_NAME]
+    if project_root:
+        candidates.append(Path(project_root) / TICKER_FILE_NAME)
+    for p in candidates:
+        if p.exists():
+            return p
+    # Default write location: next to this file
+    return candidates[0]
+
+
+def load_watchlist_tickers(
+    project_root: str | Path | None = None,
+) -> list[dict[str, str | None]]:
+    """Load tickers from the dedicated watchlist ticker file.
+
+    Returns a list of normalised dicts (same format as
+    ``parse_watchlist_tickers``).  Returns an empty list if the file
+    does not exist.
+    """
+    path = _ticker_file_path(project_root)
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r") as fh:
+            data = yaml.safe_load(fh) or {}
+    except (yaml.YAMLError, OSError):
+        return []
+    return parse_watchlist_tickers(data.get("tickers", []))
+
+
 def save_watchlist_tickers(
-    config_path: str | Path,
+    project_root: str | Path | None,
     tickers: Sequence[WatchlistTickerEntry],
 ) -> None:
-    """Write the watchlist ticker list to config.yaml.
+    """Write the watchlist ticker list to the dedicated ticker file.
 
-    Supports both the legacy inline array format (``["AAPL", "MSFT"]``)
-    and the new block-list format with per-ticker overrides::
+    The file (``watchlist_tickers.yaml``) is separate from ``config.yaml``
+    because tickers are user data, not application configuration.
 
-        tickers:
-          - ticker: AAPL
-            regime_override: strong_trend
-          - ticker: MSFT
-
-    The function replaces the ``tickers:`` block inside the ``watchlist:``
-    section while preserving the rest of the file.
-
-    Raises ``FileNotFoundError`` if *config_path* does not exist.
+    The *project_root* argument determines where the file is written.
+    If ``None``, it defaults to the directory containing this module.
     """
-    config_path = Path(config_path)
-    content = config_path.read_text()
-
-    # Build replacement YAML block
-    if not tickers:
-        new_block = "  tickers: []"
+    if project_root:
+        path = Path(project_root) / TICKER_FILE_NAME
     else:
-        lines: list[str] = ["  tickers:"]
-        for raw in tickers:
-            entry = _normalise_ticker_entry(raw)
-            tk = entry["ticker"]
-            if not tk:
-                continue
-            regime = entry.get("regime_override")
-            sub = entry.get("sub_type_override")
-            lines.append(f"    - ticker: {tk}")
-            if regime:
-                lines.append(f"      regime_override: {regime}")
-            if sub:
-                lines.append(f"      sub_type_override: {sub}")
-        new_block = "\n".join(lines)
+        path = Path(__file__).parent / TICKER_FILE_NAME
 
-    # Replace the tickers block.  Match either:
-    #   tickers: [...]                    (legacy inline)
-    #   tickers:\n    - ...\n    - ...    (new block list)
-    # We capture everything up to and including the tickers key, then
-    # consume all continuation lines (indented deeper than the key).
-    content = re.sub(
-        r"(^watchlist:\s*\n(?:.*\n)*?)"   # preamble up to tickers
-        r"  tickers:.*?"                   # tickers key line
-        r"(?:\n    [ -].*)*",             # optional continuation lines
-        rf"\g<1>{new_block}",
-        content,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    config_path.write_text(content)
+    entries: list[dict[str, str | None]] = []
+    for raw in tickers:
+        entry = _normalise_ticker_entry(raw)
+        if entry["ticker"]:
+            entries.append(
+                {k: v for k, v in entry.items() if v is not None}
+            )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        yaml.dump(
+            {"tickers": entries},
+            fh,
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
 
 def parse_watchlist_tickers(

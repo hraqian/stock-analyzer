@@ -43,7 +43,10 @@ from analysis.multi_timeframe import _build_percentile_window
 from analysis.scorer import CompositeScorer
 from analysis.pattern_scorer import PatternCompositeScorer
 from analysis.score_timeseries import compute_dca_score_df
-from config import Config, save_watchlist_tickers, parse_watchlist_tickers, DEFAULT_CONFIG
+from config import (
+    Config, save_watchlist_tickers, load_watchlist_tickers,
+    parse_watchlist_tickers, DEFAULT_CONFIG,
+)
 from data.yahoo import YahooFinanceProvider
 from engine.backtest import BacktestEngine, BacktestResult
 from engine.dca import DCABacktester, DCAResult
@@ -1851,8 +1854,15 @@ def render_sidebar() -> dict:
     st.sidebar.markdown("#### Watchlist")
 
     wl = data.setdefault("watchlist", {})
-    # Parse ticker entries (supports both legacy string and new dict format)
-    wl_entries = parse_watchlist_tickers(wl.get("tickers", []))
+    # Load tickers from dedicated ticker file, fall back to config data
+    wl_entries = load_watchlist_tickers(_PROJECT_ROOT)
+    if not wl_entries:
+        wl_entries = parse_watchlist_tickers(wl.get("tickers", []))
+    # Keep session state in sync
+    wl["tickers"] = [
+        {k: v for k, v in e.items() if v is not None}
+        for e in wl_entries
+    ]
     wl_ticker_names: list[str] = [e["ticker"] for e in wl_entries if e["ticker"]]
 
     # Add ticker via form (Enter key submits)
@@ -1882,13 +1892,11 @@ def render_sidebar() -> dict:
                     for e in wl_entries
                 ]
                 st.session_state["config_data"] = data
-                # Persist to config.yaml
-                cfg_path = st.session_state.get("config_path")
-                if cfg_path:
-                    try:
-                        save_watchlist_tickers(cfg_path, wl_entries)
-                    except Exception:
-                        pass  # best-effort; session state is still updated
+                # Persist to ticker file
+                try:
+                    save_watchlist_tickers(_PROJECT_ROOT, wl_entries)
+                except Exception:
+                    pass  # best-effort; session state is still updated
                 # Clear stale scan results so the tab shows the updated list
                 st.session_state.pop("wl_signals", None)
                 st.toast(f"Added {new_wl_ticker} to watchlist")
@@ -1910,13 +1918,11 @@ def render_sidebar() -> dict:
                     for e in wl_entries
                 ]
                 st.session_state["config_data"] = data
-                # Persist to config.yaml
-                cfg_path = st.session_state.get("config_path")
-                if cfg_path:
-                    try:
-                        save_watchlist_tickers(cfg_path, wl_entries)
-                    except Exception:
-                        pass  # best-effort
+                # Persist to ticker file
+                try:
+                    save_watchlist_tickers(_PROJECT_ROOT, wl_entries)
+                except Exception:
+                    pass  # best-effort
                 st.session_state.pop("wl_signals", None)
                 st.toast(f"Removed {t} from watchlist")
                 st.rerun()
@@ -5821,7 +5827,7 @@ def render_watchlist() -> None:
     if not wl_tickers:
         st.info(
             "Your watchlist is empty. Add tickers using the sidebar Watchlist section, "
-            "or edit `config.yaml` → `watchlist.tickers`."
+            "or edit `watchlist_tickers.yaml`."
         )
         return
 

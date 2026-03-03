@@ -1,0 +1,17 @@
+# Example watchlist tickers — copy this file to watchlist_tickers.yaml and
+# edit to add your own tickers.
+#
+# Each entry can be a plain ticker string or a dict with optional overrides:
+#   - ticker: AAPL
+#   - ticker: MSFT
+#     regime_override: strong_trend       # force regime classification
+#     sub_type_override: steady_compounder # force sub-type classification
+#
+# Valid regime_override values: strong_trend, mean_reverting, volatile_choppy,
+#                               breakout_transition
+# Valid sub_type_override values: explosive_mover, volatile_directionless,
+#                                 steady_compounder, stagnant
+tickers:
+  - ticker: AAPL
+  - ticker: MSFT
+  - ticker: GOOGL
