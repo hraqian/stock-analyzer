@@ -389,6 +389,7 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     # -- Strategy params --
     "strategy.stop_loss_pct": "tighter = limits losses but more likely to be stopped out",
     "strategy.take_profit_pct": "tighter = locks in gains sooner but caps upside; disabled in strong_trend regime",
+    "strategy.max_hold_bars": "0 = disabled; force-close after this many bars regardless of signals (e.g. 20 = ~4 weeks on daily)",
     "strategy.position_sizing": "percent_equity = risk scales with portfolio, fixed = constant share count",
     "strategy.percent_equity": "higher = larger positions, more risk per trade",
     "strategy.fixed_quantity": "higher = more shares per trade",
@@ -869,6 +870,7 @@ def _edit_strategy_params(data: dict) -> None:
         0.1, 50.0,
         value=float(strat.get("stop_loss_pct", 0.05)) * 100,
         step=0.5, key="sl_pct", format="%.1f",
+        help="Close the position if price drops by this percentage. Tighter stops limit losses but get triggered more often.",
     ) / 100.0
     _default_hint(f"{_ds.get('stop_loss_pct', 0.05) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.stop_loss_pct"))
 
@@ -877,14 +879,28 @@ def _edit_strategy_params(data: dict) -> None:
         0.1, 100.0,
         value=float(strat.get("take_profit_pct", 0.20)) * 100,
         step=0.5, key="tp_pct", format="%.1f",
+        help="Close the position if price rises by this percentage. Locks in gains sooner but caps your upside. Disabled automatically in strong-trend regimes.",
     ) / 100.0
     _default_hint(f"{_ds.get('take_profit_pct', 0.20) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.take_profit_pct"))
+
+    strat["max_hold_bars"] = st.number_input(
+        "Max hold bars",
+        0, 500,
+        value=int(strat.get("max_hold_bars", 0)),
+        step=5, key="max_hold_bars",
+        help=(
+            "Force-close the position after holding for this many bars, regardless of signals. "
+            "Set to 0 to disable. The swing_trade preset uses 20 bars (~4 weeks on daily data)."
+        ),
+    )
+    _default_hint(_ds.get("max_hold_bars"), PARAM_DESCRIPTIONS.get("strategy.max_hold_bars"))
 
     sizing_modes = ["percent_equity", "fixed"]
     current_sizing = strat.get("position_sizing", "percent_equity")
     sizing_idx = sizing_modes.index(current_sizing) if current_sizing in sizing_modes else 0
     strat["position_sizing"] = st.selectbox(
         "Position sizing", sizing_modes, index=sizing_idx, key="pos_sizing",
+        help="**percent_equity** — risk a percentage of your portfolio per trade (scales with account size). **fixed** — always trade the same number of shares.",
     )
     _default_hint(_ds.get("position_sizing"), PARAM_DESCRIPTIONS.get("strategy.position_sizing"))
 
@@ -907,6 +923,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Rebalance interval (bars)",
         1, 100, int(strat.get("rebalance_interval", 5)),
         step=1, key="rebal",
+        help="How often the strategy re-evaluates signals (in bars). Lower = more responsive but more whipsaw. Higher = fewer trades, less noise.",
     )
     _default_hint(_ds.get("rebalance_interval"), PARAM_DESCRIPTIONS.get("strategy.rebalance_interval"))
 
@@ -914,6 +931,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Flatten at EOD",
         value=bool(strat.get("flatten_eod", False)),
         key="flatten_eod_cb",
+        help="Close all positions at the end of each trading day. Only useful for intraday strategies.",
     )
     _default_hint(_ds.get("flatten_eod"), PARAM_DESCRIPTIONS.get("strategy.flatten_eod"))
 
@@ -922,6 +940,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Enable ATR stop",
         value=bool(strat.get("atr_stop_enabled", True)),
         key="atr_stop_en",
+        help="Use the stock's recent volatility (ATR) to set a dynamic stop loss. The actual stop is whichever is wider: the fixed stop-loss % or the ATR-based stop.",
     )
     _default_hint(_ds.get("atr_stop_enabled"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_enabled"))
 
@@ -931,6 +950,7 @@ def _edit_strategy_params(data: dict) -> None:
             0.5, 5.0,
             value=float(strat.get("atr_stop_multiplier", 2.5)),
             step=0.1, key="atr_stop_mult", format="%.1f",
+            help="How many ATRs away to place the stop. Higher = wider stop, fewer stop-outs but larger losses per trade.",
         )
         _default_hint(_ds.get("atr_stop_multiplier"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_multiplier"))
 
@@ -947,6 +967,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Enable trend filter",
         value=bool(strat.get("trend_confirm_enabled", True)),
         key="trend_conf_en",
+        help="Only enter trades when price is on the right side of the trend (above the EMA for longs, below for shorts). Reduces bad entries in choppy markets.",
     )
     _default_hint(_ds.get("trend_confirm_enabled"), PARAM_DESCRIPTIONS.get("strategy.trend_confirm_enabled"))
 
@@ -973,6 +994,7 @@ def _edit_strategy_params(data: dict) -> None:
         1, 10,
         value=int(strat.get("cooldown_max_losses", 2)),
         step=1, key="cooldown_max",
+        help="After this many losing trades in a row, the strategy becomes more cautious — raising entry requirements until a winning trade resets the counter.",
     )
     _default_hint(_ds.get("cooldown_max_losses"), PARAM_DESCRIPTIONS.get("strategy.cooldown_max_losses"))
 
@@ -997,6 +1019,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Enable global trend bias",
         value=bool(strat.get("global_trend_bias", True)),
         key="global_bias_en",
+        help="When the stock has a strong overall trend (e.g. up 10%+), suppress trades that go against it. Helps avoid shorting in a strong bull run.",
     )
     _default_hint(_ds.get("global_trend_bias"), PARAM_DESCRIPTIONS.get("strategy.global_trend_bias"))
 
@@ -1074,6 +1097,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Allow pyramiding",
         value=bool(strat.get("allow_pyramiding", False)),
         key="allow_pyr",
+        help="If enabled, the strategy can add to an existing position when it gets another buy signal in the same direction.",
     )
     _default_hint(_ds.get("allow_pyramiding"), PARAM_DESCRIPTIONS.get("strategy.allow_pyramiding"))
 
@@ -1081,6 +1105,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Allow immediate reversal",
         value=bool(strat.get("allow_immediate_reversal", True)),
         key="allow_rev",
+        help="If enabled, the strategy can close a position and immediately open one in the opposite direction when the signal flips.",
     )
     _default_hint(_ds.get("allow_immediate_reversal"), PARAM_DESCRIPTIONS.get("strategy.allow_immediate_reversal"))
 
@@ -1088,6 +1113,7 @@ def _edit_strategy_params(data: dict) -> None:
         "Disable TP in strong trend",
         value=bool(strat.get("disable_take_profit_in_strong_trend", True)),
         key="disable_tp_st",
+        help="In a strong trend, skip the fixed take-profit and let the trailing stop handle exits instead. Allows winners to run further.",
     )
     _default_hint(_ds.get("disable_take_profit_in_strong_trend"), PARAM_DESCRIPTIONS.get("strategy.disable_take_profit_in_strong_trend"))
 
@@ -1109,6 +1135,7 @@ def _edit_backtest_params(data: dict) -> None:
         0.0, 5.0,
         value=float(bt.get("slippage_pct", 0.001)) * 100,
         step=0.01, key="slippage", format="%.3f",
+        help="Simulates the difference between the expected price and the actual fill price. Higher values make the backtest more realistic.",
     ) / 100.0
     _default_hint(f"{_db.get('slippage_pct', 0.001) * 100:.3f}%", PARAM_DESCRIPTIONS.get("backtest.slippage_pct"))
 
@@ -1117,6 +1144,7 @@ def _edit_backtest_params(data: dict) -> None:
         10, 1000,
         value=int(bt.get("warmup_bars", 200)),
         step=10, key="warmup",
+        help="Number of bars used to initialize indicators before trading begins. More bars = more accurate signals at the start, but less data available for trading.",
     )
     _default_hint(_db.get("warmup_bars"), PARAM_DESCRIPTIONS.get("backtest.warmup_bars"))
 
@@ -1182,6 +1210,7 @@ def _edit_backtest_params(data: dict) -> None:
         "Close on end of data",
         value=bool(bt.get("close_on_end_of_data", True)),
         key="close_eod_cb",
+        help="Automatically close any open position when the data ends. Disable to see what would happen if you kept holding.",
     )
     _default_hint(_db.get("close_on_end_of_data"), PARAM_DESCRIPTIONS.get("backtest.close_on_end_of_data"))
 
@@ -3346,6 +3375,10 @@ def render_custom_backtest_params() -> dict:
             ["Period", "Custom dates"],
             horizontal=True,
             key="custom_bt_range_mode",
+            help=(
+                "**Period** — pick a relative window like 6mo or 2y.\n\n"
+                "**Custom dates** — choose exact start and end dates."
+            ),
         )
 
         period = None
@@ -3356,6 +3389,7 @@ def render_custom_backtest_params() -> dict:
             period = st.selectbox(
                 "Period", VALID_PERIODS, index=VALID_PERIODS.index("2y"),
                 key="custom_bt_period",
+                help="How far back to fetch price data. Longer periods give more trades but take longer to load.",
             )
         else:
             today = datetime.date.today()
@@ -3368,6 +3402,11 @@ def render_custom_backtest_params() -> dict:
         interval = st.selectbox(
             "Interval", ALL_INTERVALS, index=ALL_INTERVALS.index("1d"),
             key="custom_bt_interval",
+            help=(
+                "Bar size for price data.\n\n"
+                "**1d** (daily) is best for most backtests. "
+                "Intraday intervals (1m, 5m, etc.) have limited history from Yahoo Finance."
+            ),
         )
 
     with col2:
@@ -3376,6 +3415,18 @@ def render_custom_backtest_params() -> dict:
         objectives = ["(none)"] + cfg_temp.available_objectives()
         objective = st.selectbox(
             "Objective preset", objectives, index=0, key="custom_bt_objective",
+            help=(
+                "Load a pre-tuned set of indicator periods, weights, and "
+                "strategy parameters for a specific trading style. "
+                "Selecting a preset overwrites all parameters below.\n\n"
+                "**long_term** — weeks to months. Slow indicators (RSI 21, MACD 19/39), "
+                "wide stops (10%), 100% take-profit. Best for trend-following.\n\n"
+                "**short_term** — days to weeks. Faster indicators (RSI 9, MACD 8/17), "
+                "tighter stops (3% / 20% TP). Good for active trading.\n\n"
+                "**swing_trade** — 2 to 4 week holds. Same fast indicators as short_term, "
+                "but with a 20-bar maximum holding period, 4% stop, and 12% take-profit. "
+                "Designed to capture multi-week moves without letting winners turn into losers."
+            ),
         )
         if objective == "(none)":
             objective = None
@@ -3388,6 +3439,14 @@ def render_custom_backtest_params() -> dict:
 
         trading_mode = st.selectbox(
             "Trading mode", TRADING_MODES, index=0, key="custom_bt_mode",
+            help=(
+                "Controls which direction the strategy is allowed to trade.\n\n"
+                "**auto** — automatically detect from the stock's price action "
+                "and liquidity (recommended).\n\n"
+                "**long_short** — allow both buying and short-selling.\n\n"
+                "**long_only** — only buy, never short.\n\n"
+                "**hold_only** — no trading; measures buy-and-hold performance."
+            ),
         )
 
     # ── Parameter tuning expanders ────────────────────────────────────────
