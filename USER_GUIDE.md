@@ -41,8 +41,8 @@ python main.py AAPL --backtest --period 2y
 # Use a preset objective
 python main.py AAPL --objective long_term -b --period 5y
 
-# Day trading (requires intraday interval)
-python main.py AAPL -o day_trading -b -i 5m --start 2026-02-17
+# Swing trading (2-4 week holds)
+python main.py AAPL -o swing_trade -b --period 2y
 
 # Launch the interactive dashboard
 streamlit run dashboard.py
@@ -78,7 +78,7 @@ stock_analyzer [-h] [TICKER] [options]
 |------|---------|-------------|
 | `--backtest`, `-b` | off | Run a backtest instead of (or alongside) analysis |
 | `--mode`, `-m` | auto | Trading mode: `auto`, `long_short`, `long_only`, `hold_only` |
-| `--objective`, `-o` | — | Apply a preset: `long_term`, `short_term`, `day_trading` (or custom) |
+| `--objective`, `-o` | — | Apply a preset: `long_term`, `short_term`, `swing_trade` (or custom) |
 
 ### Config & utility
 
@@ -918,7 +918,7 @@ Named presets that override specific base config values. Select via CLI:
 ```bash
 python main.py AAPL --objective long_term
 python main.py AAPL -o short_term -b
-python main.py AAPL -o day_trading -b -i 5m --start 2026-02-17
+python main.py AAPL -o swing_trade -b --period 2y
 ```
 
 Presets are partial configs — only keys listed in the preset are
@@ -930,7 +930,7 @@ overridden. All other settings keep their base values.
 |--------|---------------|-----------------|
 | `long_term` | Weeks to months | Slower periods (RSI 21, MACD 19/39), wider stops (10% / 100% take-profit), heavier MA/ADX/volume weights, 200-bar warmup |
 | `short_term` | Days to weeks | Faster periods (RSI 9, MACD 8/17), tighter stops (3% / 20%), heavier MACD/Stochastic weights, 60-bar warmup |
-| `day_trading` | Intraday only | Very fast periods (RSI 5, MACD 5/13), tight stops (1.5% / 3%), EOD flattening, rebalance every bar, 30-bar warmup |
+| `swing_trade` | 2-4 weeks | Fast periods (RSI 9, MACD 8/17), moderate stops (4% / 12% take-profit), 20-bar max hold, rebalance every 5 bars, 60-bar warmup |
 
 ### Creating custom presets
 

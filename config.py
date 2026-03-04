@@ -680,113 +680,102 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "warmup_bars": 60,
             },
         },
-        "day_trading": {
-            "description": "Day trading — intraday positions only. Very fast indicators, tight stops, EOD flattening.",
+        "swing_trade": {
+            "description": "Swing trading — 2 to 4 week holds. Fast indicators, tight stops, 20-bar max hold.",
             "rsi": {
-                "period": 5,
-                "thresholds": {"oversold": 30, "overbought": 70},
+                "period": 9,
+                "thresholds": {"oversold": 35, "overbought": 65},
             },
             "macd": {
-                "fast_period": 5,
-                "slow_period": 13,
-                "signal_period": 6,
+                "fast_period": 8,
+                "slow_period": 17,
+                "signal_period": 9,
             },
             "bollinger_bands": {
-                "period": 10,
-                "std_dev": 2.0,
+                "period": 14,
             },
             "moving_averages": {
-                "periods": [5, 10, 20],
+                "periods": [10, 20, 50],
             },
             "stochastic": {
-                "k_period": 5,
+                "k_period": 9,
                 "d_period": 3,
-                "smooth_k": 2,
-                "thresholds": {"oversold": 20, "overbought": 80},
+                "smooth_k": 3,
+                "thresholds": {"oversold": 25, "overbought": 75},
             },
             "adx": {
-                "period": 7,
+                "period": 10,
             },
             "volume": {
                 "obv_trend_period": 10,
                 "price_trend_period": 10,
             },
             "fibonacci": {
-                "swing_lookback": 20,
+                "swing_lookback": 30,
             },
             "support_resistance": {
-                "fractal_lookback": 20,
+                "fractal_lookback": 30,
                 "fractal_order": 3,
             },
             "gaps": {
-                "lookback": 10,
-                "min_gap_pct": 0.003,
-                "trend_period": 7,
+                "lookback": 15,
+                "trend_period": 10,
                 "consolidation_lookback": 15,
                 "bb_percentile_lookback": 30,
-                "consolidation_min_bars": 3,
-                "consolidation_max_return": 0.015,
-                "exhaustion_min_return": 0.06,
-                "exhaustion_min_distance_pct": 0.03,
-                "exhaustion_min_trend_bars": 25,
-                "intraday_min_gap_pct": 0.008,
+                "consolidation_min_bars": 4,
+                "exhaustion_min_trend_bars": 30,
             },
             "volume_range": {
                 "period": 10,
-                "lookback": 5,
+                "lookback": 8,
             },
             "candlesticks": {
-                "lookback": 5,
-                "trend_period": 5,
+                "lookback": 8,
+                "trend_period": 8,
             },
             "spikes": {
                 "period": 10,
-                "spike_std": 2.0,
-                "lookback": 10,
+                "lookback": 15,
                 "confirm_bars": 2,
             },
             "inside_outside": {
-                "lookback": 10,
-                "trend_period": 5,
+                "lookback": 15,
+                "trend_period": 8,
                 "breakout_bars": 2,
-                "outside_range_min": 1.15,   # lower threshold intraday — smaller bars
             },
             "overall_patterns": {
                 "weights": {
-                    "gaps": 0.10,              # gaps less meaningful intraday
-                    "volume_range": 0.30,
+                    "gaps": 0.15,
+                    "volume_range": 0.20,
                     "candlesticks": 0.25,
                     "spikes": 0.15,
-                    "inside_outside": 0.20,    # breakout setups important intraday
+                    "inside_outside": 0.25,
                 },
             },
             "overall": {
                 "weights": {
                     "rsi": 0.15,
-                    "macd": 0.25,
-                    "bollinger_bands": 0.10,
-                    "moving_averages": 0.05,
-                    "stochastic": 0.20,
+                    "macd": 0.20,
+                    "bollinger_bands": 0.15,
+                    "moving_averages": 0.10,
+                    "stochastic": 0.15,
                     "adx": 0.10,
                     "volume": 0.10,
                     "fibonacci": 0.05,
                 },
             },
             "strategy": {
-                "rebalance_interval": 1,
-                "stop_loss_pct": 0.015,
-                "take_profit_pct": 0.03,
-                "flatten_eod": True,
-                "indicator_weight": 0.5,
-                "pattern_weight": 0.5,
-                "boost_strength": 0.7,      # stronger boost — patterns more meaningful intraday
-                "boost_dead_zone": 0.2,     # narrower dead zone — react to smaller pattern signals
-                "atr_stop_multiplier": 1.5,  # tight ATR stop for day trading
-                "atr_stop_period": 10,       # shorter ATR period for intraday
-                "trend_confirm_period": 10,  # fast confirmation for intraday
+                "rebalance_interval": 5,       # check twice a week on daily bars
+                "stop_loss_pct": 0.04,         # 4% stop loss
+                "take_profit_pct": 0.12,       # 12% take profit
+                "max_hold_bars": 20,           # force exit after 20 bars (~4 weeks)
+                "indicator_weight": 0.6,
+                "pattern_weight": 0.4,
+                "atr_stop_multiplier": 3.0,    # moderate ATR stop for 2-4 week swings
+                "trend_confirm_period": 10,
             },
             "backtest": {
-                "warmup_bars": 30,
+                "warmup_bars": 60,
             },
         },
     },

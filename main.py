@@ -14,7 +14,7 @@ Usage:
     python main.py AAPL --backtest --mode long_only      # force long-only mode
     python main.py AAPL --objective long_term            # use long-term indicator presets
     python main.py AAPL --objective short_term -b        # short-term backtest
-    python main.py AAPL -o day_trading -b -i 5m --start <recent>  # day trading
+    python main.py AAPL -o swing_trade -b --period 2y            # swing trading (2-4 weeks)
     python main.py AAPL --dca --period 5y               # DCA backtest (5 years)
     python main.py AAPL --dca --dca-mode pure            # pure DCA (no dip weighting)
     python main.py AAPL --dca --dca-amount 1000 --dca-frequency weekly  # custom DCA
@@ -69,7 +69,7 @@ Examples:
   python main.py AAPL --backtest --mode auto           # auto-detect mode
   python main.py AAPL --objective long_term            # long-term indicator presets
   python main.py AAPL --objective short_term -b -p 6mo # short-term backtest
-  python main.py AAPL -o day_trading -b -i 5m --start {d['recent_intraday']}  # day trading
+  python main.py AAPL -o swing_trade -b --period 2y             # swing trading (2-4 weeks)
   python main.py AAPL --dca --period 5y            # DCA backtest (5 years, default dip-weighted)
   python main.py AAPL --dca --dca-mode pure         # pure DCA, no dip weighting
   python main.py AAPL --dca --dca-amount 1000       # DCA with $1000/period
@@ -200,7 +200,7 @@ Streamlit dashboard:
         metavar="NAME",
         help=(
             "Trading objective preset to apply "
-            "(e.g. long_term, short_term, day_trading). "
+            "(e.g. long_term, short_term, swing_trade). "
             "Overrides indicator periods, strategy thresholds, weights, etc. "
             "Define custom presets in the 'objectives' section of config.yaml."
         ),
@@ -302,22 +302,9 @@ def main() -> None:
             + "[/dim]"
         )
 
-    # ── Validate interval vs objective ────────────────────────────────────────
-    # day_trading requires an intraday interval — daily bars make no sense
-    # with 1.5% stops and EOD flattening.
+    # ── Validate intraday interval constraints ───────────────────────────────
     intraday_intervals = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
     is_intraday = args.interval.lower().strip() in intraday_intervals
-
-    if args.objective == "day_trading" and not is_intraday:
-        _recent = (datetime.date.today() - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
-        console.print(
-            "[red]Error:[/red] The [bold]day_trading[/bold] objective requires an intraday interval.\n"
-            "  Add [bold]-i 5m[/bold] (or 1m, 15m, 30m, 1h) to your command.\n\n"
-            f"  Example: [dim]python main.py TSLA -o day_trading -b -i 5m --start {_recent}[/dim]\n\n"
-            "  [dim]yfinance intraday limits:[/dim]\n"
-            "  [dim]  1m = last 7 days  |  5m/15m/30m = last 60 days  |  1h = last 730 days[/dim]"
-        )
-        sys.exit(1)
 
     # Warn about yfinance intraday data limits when using --period
     if is_intraday and not args.start:
