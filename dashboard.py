@@ -393,6 +393,7 @@ PARAM_DESCRIPTIONS: dict[str, str] = {
     "strategy.percent_equity": "higher = larger positions, more risk per trade",
     "strategy.fixed_quantity": "higher = more shares per trade",
     "strategy.rebalance_interval": "lower = checks signals more often, more responsive; higher = less whipsaw",
+    "strategy.swing_trade_mode": "applies tighter stops and a 4-week holding limit for shorter trades",
     "strategy.flatten_eod": "enable for day-trading to close all positions at end of day",
     "strategy.reentry_grace_bars": "bars after exit where trend filter is skipped for faster re-entry",
     # -- Consecutive loss cooldown --
@@ -864,11 +865,31 @@ def _edit_strategy_params(data: dict) -> None:
     strat = data.setdefault("strategy", {})
     _ds = DEFAULT_CONFIG.get("strategy", {})
 
+    # ── Swing trade mode toggle ─────────────────────────────────────
+    _SWING_PRESET = {
+        "max_hold_bars": 20,        # ~4 weeks on daily data
+        "stop_loss_pct": 0.04,      # 4%
+        "take_profit_pct": 0.12,    # 12%
+        "atr_stop_multiplier": 3.0, # tighter ATR stop
+    }
+    swing_on = st.toggle(
+        "Swing trade mode",
+        value=bool(strat.get("swing_trade_mode", False)),
+        key="swing_trade_toggle",
+        help="Optimised for 2-4 week holding periods with tighter stops and a forced exit after 20 trading days",
+    )
+    strat["swing_trade_mode"] = swing_on
+    if swing_on:
+        for k, v in _SWING_PRESET.items():
+            strat[k] = v
+        st.caption("Stop loss 4% | Take profit 12% | ATR stop 3.0x | Max hold 20 bars")
+
     strat["stop_loss_pct"] = st.number_input(
         "Stop loss %",
         0.1, 50.0,
         value=float(strat.get("stop_loss_pct", 0.05)) * 100,
         step=0.5, key="sl_pct", format="%.1f",
+        disabled=swing_on,
     ) / 100.0
     _default_hint(f"{_ds.get('stop_loss_pct', 0.05) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.stop_loss_pct"))
 
@@ -877,6 +898,7 @@ def _edit_strategy_params(data: dict) -> None:
         0.1, 100.0,
         value=float(strat.get("take_profit_pct", 0.20)) * 100,
         step=0.5, key="tp_pct", format="%.1f",
+        disabled=swing_on,
     ) / 100.0
     _default_hint(f"{_ds.get('take_profit_pct', 0.20) * 100:.1f}%", PARAM_DESCRIPTIONS.get("strategy.take_profit_pct"))
 
@@ -931,6 +953,7 @@ def _edit_strategy_params(data: dict) -> None:
             0.5, 5.0,
             value=float(strat.get("atr_stop_multiplier", 2.5)),
             step=0.1, key="atr_stop_mult", format="%.1f",
+            disabled=swing_on,
         )
         _default_hint(_ds.get("atr_stop_multiplier"), PARAM_DESCRIPTIONS.get("strategy.atr_stop_multiplier"))
 
@@ -2801,6 +2824,10 @@ def render_strategy_config(cfg: Config) -> None:
     rows.append(("Stop Loss", f"{strat_cfg.get('stop_loss_pct', 0.05) * 100:.1f}%"))
     rows.append(("Take Profit", f"{strat_cfg.get('take_profit_pct', 0.15) * 100:.1f}%"))
     rows.append(("Rebalance", f"every {strat_cfg.get('rebalance_interval', 5)} bars"))
+    if strat_cfg.get("swing_trade_mode", False):
+        rows.append(("Swing Trade", f"ON (max {strat_cfg.get('max_hold_bars', 20)} bars)"))
+    elif int(strat_cfg.get("max_hold_bars", 0)) > 0:
+        rows.append(("Max Hold", f"{strat_cfg.get('max_hold_bars')} bars"))
     rows.append(("EOD Flatten", "ON" if strat_cfg.get("flatten_eod", False) else "OFF"))
 
     # ATR-adaptive stop
