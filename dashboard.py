@@ -2963,7 +2963,7 @@ def render_stock_overview(
     # ── Price chart ───────────────────────────────────────────────────────
     st.subheader("Price Chart")
     price_fig = create_price_chart(result, score_df=None, cfg=cfg)
-    st.plotly_chart(price_fig, width="stretch")
+    st.plotly_chart(price_fig, width="stretch", key="overview_price_chart")
 
     # ── Indicator & Pattern breakdown (collapsed by default) ──────────────
     with st.expander("Indicator Breakdown"):
@@ -3436,6 +3436,8 @@ def render_custom_backtest_params() -> dict:
         if objective != prev_obj:
             _apply_objective_to_session(objective)
             st.session_state["_prev_custom_objective"] = objective
+            # Re-read after apply so expanders below use the updated config
+            data = st.session_state["config_data"]
 
         trading_mode = st.selectbox(
             "Trading mode", TRADING_MODES, index=0, key="custom_bt_mode",
@@ -3505,6 +3507,7 @@ def render_backtest_section(
     cfg: Config,
     trading_mode_val: str,
     assessment_dict: dict | None,
+    key_prefix: str = "bt",
 ) -> None:
     """Render the full backtest results section with recommendation."""
 
@@ -3565,7 +3568,7 @@ def render_backtest_section(
         "Trade markers": "Triangles on the chart marking where the strategy entered or exited trades.",
     }))
     eq_fig = create_equity_chart(bt_result, result.df)
-    st.plotly_chart(eq_fig, width="stretch")
+    st.plotly_chart(eq_fig, width="stretch", key=f"{key_prefix}_equity_chart")
 
     # ── Strategy config ───────────────────────────────────────────────────
     with st.expander("Strategy Configuration"):
@@ -4198,12 +4201,12 @@ def render_dca_section(
         "The gap between them": "When portfolio value is above cost basis, your DCA is profitable. Below = underwater.",
     }))
     eq_fig = _create_dca_equity_chart(dca_result)
-    st.plotly_chart(eq_fig, width="stretch")
+    st.plotly_chart(eq_fig, width="stretch", key="dca_equity_chart")
 
     # ── Return comparison chart ──────────────────────────────────────────
     ret_fig = _create_dca_return_chart(dca_result)
     if ret_fig is not None:
-        st.plotly_chart(ret_fig, width="stretch")
+        st.plotly_chart(ret_fig, width="stretch", key="dca_return_chart")
 
     # ── Comparison vs active strategy ────────────────────────────────────
     if bt_result is not None:
@@ -7209,6 +7212,7 @@ def main() -> None:
 
                     render_backtest_section(
                         bt_result, result, cfg, trading_mode_val, assessment_dict,
+                        key_prefix="quick_bt",
                     )
 
             # ── Custom Backtest ───────────────────────────────────────────
@@ -7262,6 +7266,7 @@ def main() -> None:
                     render_backtest_section(
                         bt_result, custom_result, custom_cfg,
                         trading_mode_val, assessment_dict,
+                        key_prefix="custom_bt",
                     )
 
         # ── DCA Strategy ──────────────────────────────────────────────────
