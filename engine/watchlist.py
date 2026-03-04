@@ -35,7 +35,7 @@ from indicators.registry import IndicatorRegistry
 from analysis.scorer import CompositeScorer
 from patterns.registry import PatternRegistry
 from analysis.pattern_scorer import PatternCompositeScorer
-from engine.strategy import Signal, StrategyContext
+from engine.strategy import Signal, StrategyContext, TradeOrder
 from engine.score_strategy import ScoreBasedStrategy
 from engine.suitability import TradingMode
 from engine.regime import RegimeClassifier, RegimeType, RegimeSubType
@@ -1097,6 +1097,20 @@ class WatchlistMonitor:
             # 9. Get signal
             order = strategy.on_bar(ctx)
 
+            # 9a. Max hold override — force SELL if position held too long
+            max_hold_bars = int(strat_cfg.get("max_hold_bars", 0))
+            max_hold_triggered = False
+            if max_hold_bars > 0 and pos is not None:
+                try:
+                    entry_dt = datetime.strptime(pos.entry_date, "%Y-%m-%d").date()
+                    today = datetime.now().date()
+                    bars_held = int(np.busday_count(entry_dt, today))
+                    if bars_held >= max_hold_bars:
+                        order = TradeOrder(signal=Signal.SELL, notes="max hold reached")
+                        max_hold_triggered = True
+                except (ValueError, TypeError):
+                    pass  # malformed entry_date — skip override
+
             # 10. Compute effective score (same blend the strategy uses)
             effective_score = self._compute_effective_score(
                 ind_composite, pat_composite, strat_cfg,
@@ -1106,6 +1120,13 @@ class WatchlistMonitor:
             action = self._determine_action(
                 order.signal, pos, self._trading_mode,
             )
+
+            # Annotate action when max hold limit forced the exit
+            if max_hold_triggered and pos is not None:
+                if pos.side == "long":
+                    action = "CLOSE LONG (max hold)"
+                else:
+                    action = "CLOSE SHORT (max hold)"
 
             # 12. Compute DCA context (dip tier, multiplier, buy guidance)
             try:

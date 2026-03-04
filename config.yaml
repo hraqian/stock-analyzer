@@ -363,6 +363,12 @@ strategy:
   # How often to re-evaluate and potentially change position
   rebalance_interval: 10    # re-score every N bars (raised from 5 for less whipsaw, fewer trades)
 
+  # Maximum holding period: force-exit any position held longer than N bars.
+  # Set to 0 to disable (no time limit). On daily data, 20 bars ≈ 4 weeks.
+  # This is an absolute constraint — checked before all other exit rules
+  # (trailing stop, stop-loss, take-profit, etc.).
+  max_hold_bars: 0
+
   # Re-entry grace period: after exiting a position (stop-loss, take-profit,
   # trailing stop), skip the trend confirmation filter for this many bars.
   # Allows faster re-entry in trending markets after forced exits.

@@ -231,6 +231,7 @@ class BacktestEngine:
         self._warmup_bars: int = int(bt_cfg.get("warmup_bars", 200))
 
         self._rebalance_interval: int = int(strat_cfg.get("rebalance_interval", 5))
+        self._max_hold_bars: int = int(strat_cfg.get("max_hold_bars", 0))
         self._stop_loss_pct: float = float(strat_cfg.get("stop_loss_pct", 0.05))
         self._take_profit_pct: float = float(strat_cfg.get("take_profit_pct", 0.15))
         self._flatten_eod: bool = bool(strat_cfg.get("flatten_eod", False))
@@ -971,6 +972,7 @@ class BacktestEngine:
         Returns exit reason or empty string.
 
         Stop hierarchy (first triggered wins):
+          0. Max hold bars (absolute time limit)
           1. Trailing stop (strong_trend regime)
           2. Chandelier Exit (ATR from recent high/low)
           3. Support/resistance-based stop
@@ -981,6 +983,10 @@ class BacktestEngine:
         per regime. In strong_trend, the trailing stop (option 1) takes priority.
         """
         pnl_pct = position.unrealized_pnl_pct(current_price)
+
+        # ── Max hold bars (absolute time constraint) ────────────────────
+        if self._max_hold_bars > 0 and position.bars_held >= self._max_hold_bars:
+            return "max_hold"
 
         # ── Trailing stop management ────────────────────────────────────
         # Update the high-water mark for trailing stop

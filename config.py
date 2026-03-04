@@ -170,6 +170,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stop_loss_pct": 0.05,
         "take_profit_pct": 0.30,
         "rebalance_interval": 10,
+        "max_hold_bars": 0,    # force-exit after N bars (0 = disabled); 20 bars ≈ 4 weeks on daily
         "flatten_eod": False,  # force-close all positions at end of each trading day
         # ATR-adaptive stop loss — uses max(fixed %, ATR-based %) so ATR widens the stop
         "atr_stop_enabled": True,       # use ATR-based stop instead of fixed %
