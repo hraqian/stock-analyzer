@@ -873,7 +873,7 @@ def _edit_strategy_params(data: dict) -> None:
         "atr_stop_multiplier": 3.0, # tighter ATR stop
     }
     swing_on = st.toggle(
-        "Swing trade mode",
+        "Swing trade mode (2-4 weeks)",
         value=bool(strat.get("swing_trade_mode", False)),
         key="swing_trade_toggle",
         help="Optimised for 2-4 week holding periods with tighter stops and a forced exit after 20 trading days",
@@ -882,7 +882,7 @@ def _edit_strategy_params(data: dict) -> None:
     if swing_on:
         for k, v in _SWING_PRESET.items():
             strat[k] = v
-        st.caption("Stop loss 4% | Take profit 12% | ATR stop 3.0x | Max hold 20 bars")
+        st.caption("Targets a 2-4 week holding period — stop loss 4% | take profit 12% | ATR stop 3.0x | max hold 20 bars")
 
     strat["stop_loss_pct"] = st.number_input(
         "Stop loss %",
