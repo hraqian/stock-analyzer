@@ -7307,6 +7307,18 @@ def main() -> None:
                         desc += f" / **{sub_label}**"
                     st.markdown(desc)
 
+                if period in ("1mo", "3mo"):
+                    st.warning(
+                        f"**{period}** is very short for backtesting. "
+                        f"After the 60-bar indicator warmup, very few tradeable bars remain. "
+                        f"Results may be unreliable. Consider using 1y or longer."
+                    )
+                elif period == "6mo":
+                    st.info(
+                        "**6mo** is marginal for backtesting — you may get only a handful of trades. "
+                        "Results are more reliable with 1y or longer."
+                    )
+
                 run_quick = st.button("Run Quick Backtest", type="primary", key="run_quick_bt")
 
                 if run_quick or st.session_state.get("_quick_bt_ran"):
