@@ -3523,35 +3523,74 @@ def render_custom_backtest_params() -> dict:
     # ── Parameter tuning expanders ────────────────────────────────────────
     st.markdown("##### Parameter Tuning")
 
-    with st.expander("Indicator Weights"):
-        _edit_indicator_weights(data)
+    if objective:
+        # Preset is active — show a locked notice instead of editable widgets.
+        # The preset values are re-applied on every rerun (see above), so
+        # editing widgets would have no lasting effect.
+        strat = data.get("strategy", {})
+        thresholds = strat.get("score_thresholds", {})
+        st.info(
+            f"Parameters are locked by the **{objective}** preset. "
+            f"Select **(none)** above to customise parameters manually."
+        )
+        with st.expander("Preset values (read-only)"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Strategy**")
+                st.caption(
+                    f"- Rebalance interval: **{strat.get('rebalance_interval')}** bars\n"
+                    f"- Stop loss: **{strat.get('stop_loss_pct', 0) * 100:.1f}%**\n"
+                    f"- Take profit: **{strat.get('take_profit_pct', 0) * 100:.1f}%**\n"
+                    f"- Max hold: **{strat.get('max_hold_bars', 0)}** bars\n"
+                    f"- Trading mode: **{strat.get('trading_mode', 'auto')}**\n"
+                    f"- SHORT below: **{thresholds.get('short_below', '—')}**\n"
+                    f"- LONG above: **{thresholds.get('hold_below', '—')}**"
+                )
+            with c2:
+                st.markdown("**Indicators**")
+                rsi_p = data.get("rsi", {}).get("period", "—")
+                macd_f = data.get("macd", {}).get("fast_period", "—")
+                macd_s = data.get("macd", {}).get("slow_period", "—")
+                bb_p = data.get("bollinger_bands", {}).get("period", "—")
+                warmup = data.get("backtest", {}).get("warmup_bars", "—")
+                st.caption(
+                    f"- RSI period: **{rsi_p}**\n"
+                    f"- MACD: **{macd_f}/{macd_s}**\n"
+                    f"- Bollinger period: **{bb_p}**\n"
+                    f"- Warmup bars: **{warmup}**\n"
+                    f"- Global trend bias: **{'on' if strat.get('global_trend_bias') else 'off'}**\n"
+                    f"- Immediate reversal: **{'on' if strat.get('allow_immediate_reversal') else 'off'}**"
+                )
+    else:
+        with st.expander("Indicator Weights"):
+            _edit_indicator_weights(data)
 
-    with st.expander("Composite Scoring"):
-        _edit_composite_scoring(data)
+        with st.expander("Composite Scoring"):
+            _edit_composite_scoring(data)
 
-    with st.expander("Indicator Parameters"):
-        _edit_indicator_params(data)
+        with st.expander("Indicator Parameters"):
+            _edit_indicator_params(data)
 
-    with st.expander("Pattern Weights"):
-        _edit_pattern_weights(data)
+        with st.expander("Pattern Weights"):
+            _edit_pattern_weights(data)
 
-    with st.expander("Pattern-Indicator Combination"):
-        _edit_pattern_indicator_combination(data)
+        with st.expander("Pattern-Indicator Combination"):
+            _edit_pattern_indicator_combination(data)
 
-    with st.expander("Scoring Thresholds"):
-        _edit_scoring_thresholds(data)
+        with st.expander("Scoring Thresholds"):
+            _edit_scoring_thresholds(data)
 
-    with st.expander("Strategy"):
-        _edit_strategy_params(data)
+        with st.expander("Strategy"):
+            _edit_strategy_params(data)
 
-    with st.expander("Backtest"):
-        _edit_backtest_params(data)
+        with st.expander("Backtest"):
+            _edit_backtest_params(data)
 
-    with st.expander("Regime Classification"):
-        _edit_regime_params(data)
+        with st.expander("Regime Classification"):
+            _edit_regime_params(data)
 
-    with st.expander("Suitability Detection"):
-        _edit_suitability_params(data)
+        with st.expander("Suitability Detection"):
+            _edit_suitability_params(data)
 
     # Write back to session state
     st.session_state["config_data"] = data
