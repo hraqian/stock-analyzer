@@ -970,7 +970,7 @@ objectives:
         fibonacci: 0.05
 
     strategy:
-      rebalance_interval: 5     # check twice a week on daily bars
+      rebalance_interval: 2     # check nearly every bar for swing opportunities
       stop_loss_pct: 0.04       # 4% stop loss
       take_profit_pct: 0.12     # 12% take profit
       max_hold_bars: 20         # force exit after 20 bars (~4 weeks on daily)
@@ -978,6 +978,12 @@ objectives:
       pattern_weight: 0.4
       atr_stop_multiplier: 3.0  # moderate ATR stop for 2-4 week swings
       trend_confirm_period: 10
+      trend_confirm_tolerance_pct: 0.0  # no buffer — fast indicators already filter
+      score_thresholds:
+        short_below: 4.0        # narrower HOLD zone for more trade signals
+        hold_below: 5.5         # (1.5-point HOLD vs 3.5-point base default)
+      global_trend_bias: false  # swing traders want both long and short entries
+      cooldown_max_losses: 4    # tight stops cause frequent small losses
 
     backtest:
       warmup_bars: 60

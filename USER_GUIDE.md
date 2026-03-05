@@ -930,7 +930,7 @@ overridden. All other settings keep their base values.
 |--------|---------------|-----------------|
 | `long_term` | Weeks to months | Slower periods (RSI 21, MACD 19/39), wider stops (10% / 100% take-profit), heavier MA/ADX/volume weights, 200-bar warmup |
 | `short_term` | Days to weeks | Faster periods (RSI 9, MACD 8/17), tighter stops (3% / 20%), heavier MACD/Stochastic weights, 60-bar warmup |
-| `swing_trade` | 2-4 weeks | Fast periods (RSI 9, MACD 8/17), moderate stops (4% / 12% take-profit), 20-bar max hold, rebalance every 5 bars, 60-bar warmup |
+| `swing_trade` | 2-4 weeks | Fast periods (RSI 9, MACD 8/17), moderate stops (4% / 12% take-profit), 20-bar max hold, rebalance every 2 bars, narrower score thresholds (4.0/5.5), no global trend bias, relaxed cooldown (4 losses), 60-bar warmup |
 
 ### Creating custom presets
 
