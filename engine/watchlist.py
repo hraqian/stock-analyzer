@@ -1098,6 +1098,10 @@ class WatchlistMonitor:
             order = strategy.on_bar(ctx)
 
             # 9a. Max hold override — force SELL if position held too long
+            # NOTE: bars_held is computed using np.busday_count (business days)
+            # from the entry date.  This is accurate for daily-interval scans
+            # but may miscount for intraday intervals where "bars" don't map
+            # 1:1 to business days.
             max_hold_bars = int(strat_cfg.get("max_hold_bars", 0))
             max_hold_triggered = False
             if max_hold_bars > 0 and pos is not None:

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from datetime import datetime
 from functools import partial
 
 from PySide6.QtCore import Qt, QThread, Signal as QSignal, QSize
@@ -60,8 +59,6 @@ from engine.watchlist import (
     WatchlistMonitor,
     WatchlistSignal,
     WatchlistState,
-    WatchlistPosition,
-    WatchlistClosedTrade,
     TradeRecommendation,
 )
 from engine.strategy import Signal
@@ -292,7 +289,7 @@ class MetricCard(QFrame):
 class RecommendationCard(QFrame):
     """A card for a single trade recommendation with Confirm / Edit / Skip."""
 
-    confirmed = QSignal(object)   # emits the TradeRecommendation
+    confirmed = QSignal(object, bool)   # emits (TradeRecommendation, allow_negative_cash)
     skipped = QSignal(object)
 
     def __init__(self, rec: TradeRecommendation, parent=None):
@@ -391,14 +388,14 @@ class RecommendationCard(QFrame):
             force_btn.setProperty("danger", True)
             force_btn.style().unpolish(force_btn)
             force_btn.style().polish(force_btn)
-            force_btn.clicked.connect(lambda: self.confirmed.emit(self.rec))
+            force_btn.clicked.connect(lambda: self.confirmed.emit(self.rec, True))
             btn_layout.addWidget(force_btn)
         else:
             confirm_btn = QPushButton(f"Confirm {action}")
             confirm_btn.setProperty("primary", True)
             confirm_btn.style().unpolish(confirm_btn)
             confirm_btn.style().polish(confirm_btn)
-            confirm_btn.clicked.connect(lambda: self.confirmed.emit(self.rec))
+            confirm_btn.clicked.connect(lambda: self.confirmed.emit(self.rec, False))
             btn_layout.addWidget(confirm_btn)
 
         skip_btn = QPushButton("Skip")
@@ -437,6 +434,7 @@ class PortfolioPage(QWidget):
         self._monitor = monitor
         self._signals: list[WatchlistSignal] = []
         self._recs: list[TradeRecommendation] = []
+        self._live_prices: dict[str, float] = {}
         self._worker: ScanWorker | None = None
         self._build_ui()
         self._refresh_portfolio()
@@ -685,6 +683,11 @@ class PortfolioPage(QWidget):
         self._scan_btn.setText("Scan Watchlist")
         self._signals = signals
         self._recs = recs
+        self._live_prices = {
+            s.ticker: s.current_price
+            for s in signals
+            if s.current_price > 0 and not s.error
+        }
 
         # Show signals
         self._signals_group.show()
@@ -734,60 +737,24 @@ class PortfolioPage(QWidget):
 
         self._recs_group.show()
 
-    def _on_confirm_rec(self, rec: TradeRecommendation):
-        """Execute a confirmed trade recommendation."""
+    def _on_confirm_rec(self, rec: TradeRecommendation, allow_negative_cash: bool = False):
+        """Execute a confirmed trade recommendation via the engine's
+        acknowledge_signal() method, which enforces cash guardrails,
+        proper position sizing with live prices, and strategy state
+        management."""
         try:
-            state = self._monitor.state
             sig = rec.signal
             if sig is None:
                 return
 
-            ticker = rec.ticker.upper()
-            exec_price = rec.recommended_price
-            exec_qty = rec.recommended_quantity
-
-            if rec.side == "buy" and ticker not in state.positions:
-                cost = exec_qty * exec_price
-                pos = WatchlistPosition(
-                    ticker=ticker,
-                    side="long",
-                    entry_date=datetime.now().strftime("%Y-%m-%d"),
-                    entry_price=exec_price,
-                    quantity=exec_qty,
-                    entry_reason=sig.signal_notes,
-                )
-                state.positions[ticker] = pos
-                if state.cash_balance is not None:
-                    state.cash_balance -= cost
-
-            elif rec.side == "sell" and ticker in state.positions:
-                pos = state.positions.pop(ticker)
-                pnl_pct = pos.unrealized_pnl_pct(exec_price)
-                closed = WatchlistClosedTrade(
-                    ticker=ticker,
-                    side=pos.side,
-                    entry_date=pos.entry_date,
-                    exit_date=datetime.now().strftime("%Y-%m-%d"),
-                    entry_price=pos.entry_price,
-                    exit_price=exec_price,
-                    quantity=exec_qty,
-                    pnl_pct=pnl_pct,
-                    exit_reason=sig.signal_notes,
-                )
-                state.closed_trades.append(closed)
-                if state.cash_balance is not None:
-                    state.cash_balance += exec_qty * exec_price
-
-                # Update strategy state
-                ss = state.strategy_state.get(ticker, {})
-                losses = ss.get("consecutive_losses", 0)
-                if pnl_pct < 0:
-                    ss["consecutive_losses"] = losses + 1
-                else:
-                    ss["consecutive_losses"] = 0
-                ss["bars_since_exit"] = 0
-                state.strategy_state[ticker] = ss
-
+            self._monitor.acknowledge_signal(
+                ticker=rec.ticker,
+                signal=sig,
+                override_price=rec.recommended_price,
+                override_quantity=rec.recommended_quantity,
+                allow_negative_cash=allow_negative_cash,
+                live_prices=self._live_prices or None,
+            )
             self._monitor.save_state()
             self._refresh_portfolio()
             self._remove_rec_card(rec)
@@ -799,6 +766,12 @@ class PortfolioPage(QWidget):
                 5000,
             )
 
+        except ValueError as ve:
+            # Cash guardrail rejection from acknowledge_signal()
+            QMessageBox.warning(
+                self, "Insufficient Cash",
+                f"Trade blocked:\n{ve}",
+            )
         except Exception as exc:
             QMessageBox.warning(
                 self, "Execution Error", f"Failed to execute trade:\n{exc}",
