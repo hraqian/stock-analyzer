@@ -2012,6 +2012,9 @@ def load_backtest(
     forced = trading_mode_str != "auto"
     assessment_dict = None
 
+    # Check if the active preset/config forces a trading mode
+    preset_mode_str = cfg.section("strategy").get("trading_mode", None)
+
     if forced:
         mode_map = {
             "long_short": TradingMode.LONG_SHORT,
@@ -2019,6 +2022,14 @@ def load_backtest(
             "hold_only": TradingMode.HOLD_ONLY,
         }
         trading_mode = mode_map[trading_mode_str]
+    elif preset_mode_str is not None:
+        # Preset specifies a trading mode — honour it
+        mode_map = {
+            "long_short": TradingMode.LONG_SHORT,
+            "long_only": TradingMode.LONG_ONLY,
+            "hold_only": TradingMode.HOLD_ONLY,
+        }
+        trading_mode = mode_map.get(preset_mode_str, TradingMode.LONG_SHORT)
     elif is_intraday(interval):
         trading_mode = TradingMode.LONG_SHORT
     else:

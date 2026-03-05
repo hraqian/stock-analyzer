@@ -780,6 +780,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 },
                 "global_trend_bias": False,    # swing traders want both long and short entries
                 "cooldown_max_losses": 4,      # tight stops cause frequent small losses
+                "trading_mode": "long_only",   # SELL signals go to cash, never open shorts
+                "allow_immediate_reversal": False,  # prevent whipsaw oscillation
+            },
+            "regime": {
+                "strategy_adaptation": {
+                    "strong_trend": {
+                        "hold_with_trend": False,       # don't override score-based exits
+                        "ignore_score_entries": False,   # always respect score signals
+                    },
+                },
             },
             "backtest": {
                 "warmup_bars": 60,

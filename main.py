@@ -652,12 +652,16 @@ def main() -> None:
         from display.backtest_terminal import render_backtest
 
         # ── Determine trading mode ────────────────────────────────────────
-        # Priority: --mode CLI flag > config.yaml mode_override > auto-detect
+        # Priority: --mode CLI flag > config.yaml mode_override > preset
+        #           strategy.trading_mode > auto-detect
         # Note: suitability detection is designed for daily data; intraday
         # intervals bypass auto-detection and default to long_short.
         mode_str = args.mode  # CLI flag (None if not provided)
         if mode_str is None:
             mode_str = cfg.section("suitability").get("mode_override", "auto")
+
+        # Check if the active preset/config forces a trading mode
+        preset_mode_str = cfg.section("strategy").get("trading_mode", None)
 
         # If a specific mode is forced (not "auto"), use it directly
         forced = mode_str != "auto"
@@ -670,6 +674,15 @@ def main() -> None:
                 "hold_only": TradingMode.HOLD_ONLY,
             }
             trading_mode = mode_map[mode_str]
+        elif preset_mode_str is not None:
+            # Preset specifies a trading mode — honour it
+            mode_map = {
+                "long_short": TradingMode.LONG_SHORT,
+                "long_only": TradingMode.LONG_ONLY,
+                "hold_only": TradingMode.HOLD_ONLY,
+            }
+            trading_mode = mode_map.get(preset_mode_str, TradingMode.LONG_SHORT)
+            forced = True  # treat preset mode as forced for display purposes
         elif is_intraday:
             # Suitability thresholds are calibrated for daily bars;
             # intraday data has naturally lower ATR% and per-bar volume.
@@ -714,7 +727,13 @@ def main() -> None:
         # ── Show mode selection ───────────────────────────────────────────
         mode_label = trading_mode.value.replace("_", " ").upper()
         if forced:
-            console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (forced via {'CLI' if args.mode else 'config'})[/dim]")
+            if args.mode:
+                source = "CLI"
+            elif preset_mode_str is not None:
+                source = "preset"
+            else:
+                source = "config"
+            console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (forced via {source})[/dim]")
         else:
             console.print(f"[dim]Trading mode: [bold]{mode_label}[/bold] (auto-detected)[/dim]")
 
