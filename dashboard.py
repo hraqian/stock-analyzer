@@ -1829,7 +1829,7 @@ def _edit_suitability_params(data: dict) -> None:
 # Constants — classification periods
 # ---------------------------------------------------------------------------
 
-CLASSIFICATION_PERIODS = ["1y", "2y", "5y", "max"]
+CLASSIFICATION_PERIODS = ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"]
 DEFAULT_CLASSIFICATION_PERIOD = "2y"
 
 
