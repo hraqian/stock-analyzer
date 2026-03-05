@@ -185,28 +185,16 @@ def _init_config_data() -> None:
             st.session_state["config_path"] = cfg.path
 
 
-def _apply_objective_to_session(objective: str | None) -> None:
-    """Re-load base config, apply objective if any, store in session state.
+def _clear_parameter_widget_keys() -> None:
+    """Delete all Custom Backtest parameter-editor widget keys from session state.
 
-    This is called when the objective dropdown changes.  We must start from
-    the base YAML (not the already-mutated session state) so that switching
-    objectives gives a clean slate.
-
-    We also clear all Custom Backtest widget keys from session state so that
-    Streamlit re-initialises them from the new config values.  Without this,
-    Streamlit's widget-key persistence would silently override the preset
-    values with whichever values the widgets held before the switch.
+    Streamlit persists widget values by their ``key=`` parameter across reruns.
+    When ``config_data`` is replaced programmatically (e.g. loading an objective
+    preset or a saved loadout slot), the stale widget keys silently override the
+    new config values.  Calling this function forces Streamlit to treat every
+    parameter widget as "first render" on the next rerun, so the ``value=``
+    parameter (which reads from ``config_data``) is honoured again.
     """
-    cfg = Config.load()
-    if objective:
-        cfg.apply_objective(objective)
-    st.session_state["config_data"] = cfg.to_dict()
-
-    # ── Clear widget keys so widgets re-read from the updated config ──────
-    # All Custom Backtest parameter-editor widgets use recognisable key
-    # prefixes.  We delete every matching key from session state; Streamlit
-    # will treat the widget as "first render" and use its value= parameter
-    # (which reads from config_data) on the next rerun.
     _WIDGET_KEY_PREFIXES = (
         "iw_",        # indicator weights
         "cs_",        # composite scoring
@@ -246,6 +234,20 @@ def _apply_objective_to_session(objective: str | None) -> None:
         del st.session_state[k]
 
 
+def _apply_objective_to_session(objective: str | None) -> None:
+    """Re-load base config, apply objective if any, store in session state.
+
+    This is called when the objective dropdown changes.  We must start from
+    the base YAML (not the already-mutated session state) so that switching
+    objectives gives a clean slate.
+    """
+    cfg = Config.load()
+    if objective:
+        cfg.apply_objective(objective)
+    st.session_state["config_data"] = cfg.to_dict()
+    _clear_parameter_widget_keys()
+
+
 # ---------------------------------------------------------------------------
 # Loadout helpers
 # ---------------------------------------------------------------------------
@@ -265,6 +267,7 @@ def _load_loadout(slot: int) -> bool:
         return False
     cfg = Config.load(str(path))
     st.session_state["config_data"] = cfg.to_dict()
+    _clear_parameter_widget_keys()
     return True
 
 
