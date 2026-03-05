@@ -225,6 +225,7 @@ def _clear_parameter_widget_keys() -> None:
         "slippage", "warmup", "sig_min_str",
         "max_warmup_r", "min_warmup", "min_post_warmup",
         "trade_days_yr", "trade_day_min", "default_score", "close_eod_cb",
+        "custom_bt_mode",
     }
     keys_to_delete = [
         k for k in list(st.session_state.keys())
@@ -3508,17 +3509,29 @@ def render_custom_backtest_params() -> dict:
             st.session_state["_prev_custom_objective"] = objective
             data = st.session_state["config_data"]
 
-        trading_mode = st.selectbox(
-            "Trading mode", TRADING_MODES, index=0, key="custom_bt_mode",
-            help=(
-                "Controls which direction the strategy is allowed to trade.\n\n"
-                "**auto** — automatically detect from the stock's price action "
-                "and liquidity (recommended).\n\n"
-                "**long_short** — allow both buying and short-selling.\n\n"
-                "**long_only** — only buy, never short.\n\n"
-                "**hold_only** — no trading; measures buy-and-hold performance."
-            ),
+        # When the preset forces a trading mode, lock the selectbox to it.
+        preset_trading_mode = (
+            data.get("strategy", {}).get("trading_mode") if objective else None
         )
+        if preset_trading_mode and preset_trading_mode in TRADING_MODES:
+            _ptm_idx = TRADING_MODES.index(preset_trading_mode)
+            trading_mode = st.selectbox(
+                "Trading mode", TRADING_MODES, index=_ptm_idx,
+                key="custom_bt_mode", disabled=True,
+                help=f"Locked to **{preset_trading_mode}** by the {objective} preset.",
+            )
+        else:
+            trading_mode = st.selectbox(
+                "Trading mode", TRADING_MODES, index=0, key="custom_bt_mode",
+                help=(
+                    "Controls which direction the strategy is allowed to trade.\n\n"
+                    "**auto** — automatically detect from the stock's price action "
+                    "and liquidity (recommended).\n\n"
+                    "**long_short** — allow both buying and short-selling.\n\n"
+                    "**long_only** — only buy, never short.\n\n"
+                    "**hold_only** — no trading; measures buy-and-hold performance."
+                ),
+            )
 
     # ── Parameter tuning expanders ────────────────────────────────────────
     st.markdown("##### Parameter Tuning")
