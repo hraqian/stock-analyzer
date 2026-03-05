@@ -191,11 +191,59 @@ def _apply_objective_to_session(objective: str | None) -> None:
     This is called when the objective dropdown changes.  We must start from
     the base YAML (not the already-mutated session state) so that switching
     objectives gives a clean slate.
+
+    We also clear all Custom Backtest widget keys from session state so that
+    Streamlit re-initialises them from the new config values.  Without this,
+    Streamlit's widget-key persistence would silently override the preset
+    values with whichever values the widgets held before the switch.
     """
     cfg = Config.load()
     if objective:
         cfg.apply_objective(objective)
     st.session_state["config_data"] = cfg.to_dict()
+
+    # ── Clear widget keys so widgets re-read from the updated config ──────
+    # All Custom Backtest parameter-editor widgets use recognisable key
+    # prefixes.  We delete every matching key from session state; Streamlit
+    # will treat the widget as "first render" and use its value= parameter
+    # (which reads from config_data) on the next rerun.
+    _WIDGET_KEY_PREFIXES = (
+        "iw_",        # indicator weights
+        "cs_",        # composite scoring
+        "ip_",        # indicator params
+        "pw_",        # pattern weights
+        "combo_",     # pattern-indicator combination
+        "gate_",      # combination gate mode
+        "boost_",     # combination boost mode
+        "threshold_", # scoring threshold mode
+        "fix_",       # fixed-mode thresholds
+        "pct_",       # percentile-mode thresholds / equity sizing
+        "sl_",        # stop loss
+        "tp_",        # take profit
+        "pos_",       # position sizing
+        "reg_",       # regime params
+        "suit_",      # suitability params
+    )
+    _WIDGET_KEY_EXACT = {
+        "max_hold_bars", "rebal", "flatten_eod_cb",
+        "atr_stop_en", "atr_stop_mult", "atr_stop_per",
+        "trend_conf_en", "trend_conf_per",
+        "reentry_grace", "cooldown_max", "cooldown_dist", "cooldown_score",
+        "global_bias_en", "global_bias_thr",
+        "trend_ma_type", "trend_tol_pct", "trend_bias_ret",
+        "extreme_exit_off", "brkout_move",
+        "cooldown_be", "allow_pyr", "allow_rev",
+        "disable_tp_st", "trail_req_profit",
+        "slippage", "warmup", "sig_min_str",
+        "max_warmup_r", "min_warmup", "min_post_warmup",
+        "trade_days_yr", "trade_day_min", "default_score", "close_eod_cb",
+    }
+    keys_to_delete = [
+        k for k in list(st.session_state.keys())
+        if k.startswith(_WIDGET_KEY_PREFIXES) or k in _WIDGET_KEY_EXACT
+    ]
+    for k in keys_to_delete:
+        del st.session_state[k]
 
 
 # ---------------------------------------------------------------------------
