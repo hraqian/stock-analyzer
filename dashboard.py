@@ -3493,21 +3493,19 @@ def render_custom_backtest_params() -> dict:
         if objective == "(none)":
             objective = None
 
-        # When objective changes (or its preset content was updated on disk),
-        # re-apply from scratch.  We hash the preset content so that code
-        # updates to a preset are detected even when the name stays the same.
-        cfg_temp_for_hash = Config.load()
-        if objective:
-            preset_content = cfg_temp_for_hash.section("objectives").get(objective, {})
-        else:
-            preset_content = {}
-        preset_sig = f"{objective}::{_config_hash(preset_content)}"
-        prev_sig = st.session_state.get("_prev_custom_objective_sig")
-        if preset_sig != prev_sig:
+        # Always re-apply the objective preset on every rerun when one is
+        # active.  Streamlit's widget key persistence means that even after
+        # clearing keys on the "change" rerun, subsequent reruns can restore
+        # stale base-config values into the widget keys — which the _edit_*
+        # functions then write back into config_data, silently overwriting the
+        # preset.  Re-applying on every rerun ensures config_data always has
+        # the correct preset values, and clearing keys forces the widgets to
+        # read their ``value=`` parameter from config_data instead of from
+        # stale session state.
+        prev_obj = st.session_state.get("_prev_custom_objective")
+        if objective != prev_obj or objective is not None:
             _apply_objective_to_session(objective)
-            st.session_state["_prev_custom_objective_sig"] = preset_sig
             st.session_state["_prev_custom_objective"] = objective
-            # Re-read after apply so expanders below use the updated config
             data = st.session_state["config_data"]
 
         trading_mode = st.selectbox(
