@@ -121,6 +121,11 @@ INTRADAY_INTERVALS = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]
 DAILY_INTERVALS = ["1d", "5d", "1wk", "1mo", "3mo"]
 ALL_INTERVALS = INTRADAY_INTERVALS + DAILY_INTERVALS
 TRADING_MODES = ["auto", "long_short", "long_only", "hold_only"]
+TRADING_MODE_MAP: dict[str, TradingMode] = {
+    "long_short": TradingMode.LONG_SHORT,
+    "long_only": TradingMode.LONG_ONLY,
+    "hold_only": TradingMode.HOLD_ONLY,
+}
 
 LOADOUT_DIR = _PROJECT_ROOT
 LOADOUT_SLOTS = 3
@@ -2068,20 +2073,10 @@ def load_backtest(
     preset_mode_str = cfg.section("strategy").get("trading_mode", None)
 
     if forced:
-        mode_map = {
-            "long_short": TradingMode.LONG_SHORT,
-            "long_only": TradingMode.LONG_ONLY,
-            "hold_only": TradingMode.HOLD_ONLY,
-        }
-        trading_mode = mode_map[trading_mode_str]
+        trading_mode = TRADING_MODE_MAP[trading_mode_str]
     elif preset_mode_str is not None:
         # Preset specifies a trading mode — honour it
-        mode_map = {
-            "long_short": TradingMode.LONG_SHORT,
-            "long_only": TradingMode.LONG_ONLY,
-            "hold_only": TradingMode.HOLD_ONLY,
-        }
-        trading_mode = mode_map.get(preset_mode_str, TradingMode.LONG_SHORT)
+        trading_mode = TRADING_MODE_MAP.get(preset_mode_str, TradingMode.LONG_SHORT)
     elif is_intraday(interval):
         trading_mode = TradingMode.LONG_SHORT
     else:
@@ -3556,8 +3551,8 @@ def render_custom_backtest_params() -> dict:
                     f"- Take profit: **{strat.get('take_profit_pct', 0) * 100:.1f}%**\n"
                     f"- Max hold: **{strat.get('max_hold_bars', 0)}** bars\n"
                     f"- Trading mode: **{strat.get('trading_mode', 'auto')}**\n"
-                    f"- SHORT below: **{thresholds.get('short_below', '—')}**\n"
-                    f"- LONG above: **{thresholds.get('hold_below', '—')}**"
+                    f"- SHORT when score <=: **{thresholds.get('short_below', '—')}**\n"
+                    f"- LONG when score >: **{thresholds.get('hold_below', '—')}**"
                 )
             with c2:
                 st.markdown("**Indicators**")

@@ -280,6 +280,7 @@ overall_patterns:
 # is enabled.
 
 multi_timeframe:
+  enabled: false
   timeframes: ["1d", "1wk", "1mo"]
   weights:
     "1d": 0.5

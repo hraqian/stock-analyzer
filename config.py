@@ -352,6 +352,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Multi-timeframe analysis
     # ------------------------------------------------------------------
     "multi_timeframe": {
+        "enabled": False,
         "timeframes": ["1d", "1wk", "1mo"],
         "weights": {"1d": 0.5, "1wk": 0.3, "1mo": 0.2},
         "periods": {"1d": "2y", "1wk": "5y", "1mo": "max"},
