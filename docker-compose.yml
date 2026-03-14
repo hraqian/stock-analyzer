@@ -1,0 +1,50 @@
+# Stock Analyzer — Docker Compose
+# Usage:
+#   docker compose up          (start both services)
+#   docker compose up --build  (rebuild and start)
+#   docker compose down        (stop)
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount backend code for hot-reload during development
+      - ./backend:/app
+      # Mount engine code so backend can import existing modules
+      - ./engine:/engine
+      - ./indicators:/indicators
+      - ./patterns:/patterns
+      - ./data:/data_module
+      - ./config.py:/app/engine_config.py:ro
+    environment:
+      - DEBUG=true
+      - CORS_ORIGINS=["http://localhost:3000"]
+      - PYTHONPATH=/app:/engine/..
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount frontend code for hot-reload during development
+      - ./frontend:/app
+      - /app/node_modules  # Don't mount node_modules from host
+      - /app/.next         # Don't mount .next build cache from host
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
