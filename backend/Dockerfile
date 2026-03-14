@@ -7,12 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency file and install
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
-
-# Copy application code
+# Copy everything first (needed for editable install)
 COPY . .
+
+# Install dependencies
+RUN pip install --no-cache-dir -e ".[dev]"
 
 EXPOSE 8000
 
