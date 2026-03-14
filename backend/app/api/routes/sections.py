@@ -138,7 +138,10 @@ def _run_analysis(ticker: str, period: str, interval: str, trade_mode: str) -> d
     composite_raw = _sanitize_float(result.composite)
     composite = {
         "overall": composite_raw.get("overall", 5.0),
-        "breakdown": composite_raw.get("breakdown", []),
+        "overall_raw": composite_raw.get("overall_raw"),
+        "breakdown": composite_raw.get("breakdown", {}),
+        "n_scored": composite_raw.get("n_scored", 0),
+        "weights_used": composite_raw.get("weights_used", {}),
         "trend_score": composite_raw.get("trend_score"),
         "contrarian_score": composite_raw.get("contrarian_score"),
         "neutral_score": composite_raw.get("neutral_score"),

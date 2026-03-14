@@ -171,7 +171,10 @@ class OHLCVBar(BaseModel):
 class CompositeScoreSchema(BaseModel):
     """Composite score breakdown."""
     overall: float
-    breakdown: list[dict] = []
+    overall_raw: float | None = None
+    breakdown: dict[str, float] = {}
+    n_scored: int = 0
+    weights_used: dict[str, float] = {}
     trend_score: float | None = None
     contrarian_score: float | None = None
     neutral_score: float | None = None

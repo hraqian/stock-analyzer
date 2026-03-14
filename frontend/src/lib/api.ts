@@ -216,7 +216,10 @@ export interface RegimeAssessment {
 
 export interface CompositeScore {
   overall: number;
-  breakdown: Array<Record<string, unknown>>;
+  overall_raw: number | null;
+  breakdown: Record<string, number>;
+  n_scored: number;
+  weights_used: Record<string, number>;
   trend_score: number | null;
   contrarian_score: number | null;
   neutral_score: number | null;
