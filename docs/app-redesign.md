@@ -32,7 +32,7 @@ These live in the app header, always visible:
 
 | Control | Description |
 |---------|-------------|
-| **Trade Mode** | `Swing Trade` / `Day Trade` / `Long-Term Investment` — global toggle that adjusts indicator parameters, holding periods, position sizing defaults, scanner thresholds, and backtest horizons across the entire app. |
+| **Trade Mode** | `Swing Trade` / `Day Trade` / `Long-Term Investment` — global toggle that adjusts indicator parameters, holding periods, position sizing defaults, scanner thresholds, and backtest horizons across the entire app. Day Trade is visible but marked "Coming Soon — requires paid data provider" until intraday data support is added. |
 | **User Mode** | `Normal` / `Power User` — Normal mode hides advanced parameters and favors AI auto-tuning. Power User mode exposes all configurable parameters. |
 | **Account Summary** | Cash balance, total equity, open position count (visible when portfolio simulation is active). |
 
@@ -394,6 +394,29 @@ Global configuration that applies across all sections.
 
 ## Technical Considerations
 
+### Tech Stack
+
+```
+Frontend:  Next.js (React + TypeScript)
+           - TailwindCSS for styling
+           - Recharts or Lightweight Charts (TradingView) for financial charts
+           - TanStack Query for API state management
+
+Backend:   FastAPI (Python)
+           - Serves the existing engine code as REST API
+           - WebSocket support for scan progress / live updates
+           - SQLite or PostgreSQL for strategy/portfolio persistence
+
+Engine:    Python (existing code, refactored)
+           - Indicators, patterns, regime detection
+           - Backtester, walk-forward, auto-tuner
+           - Scanner, signal scoring
+           - Portfolio simulation engine
+
+AI:        ML model (scikit-learn or XGBoost) for signal scoring
+           LLM (pluggable: OpenAI / Anthropic) for qualitative analysis
+```
+
 ### Walk-Forward Default Windows
 
 | Trade Mode | Train | Test | Notes |
@@ -494,18 +517,36 @@ This is a large redesign. Suggested phased approach:
 
 ---
 
+## Resolved Decisions
+
+1. **Web framework** — **Next.js (React/TypeScript) frontend + FastAPI
+   (Python) backend.** React gives us the interactive UI needed for complex
+   charts, multi-panel layouts, and real-time recommendation cards. FastAPI
+   serves the Python engine (indicators, backtester, ML models) as a REST
+   API. This keeps the existing Python engine code reusable.
+
+2. **Day trade mode** — **Deferred.** Day trade mode will appear in the UI
+   trade mode toggle but marked as "Coming Soon — requires paid data
+   provider". Intraday data (1-min, 5-min bars) needs a paid provider
+   (Polygon, etc.) for reliable coverage. The UI, data models, and walk-
+   forward window logic will be designed to support it, but actual intraday
+   scanning and backtesting is not implemented in the initial release.
+
+3. **LLM cost management** — **ML for bulk ranking, LLM for top-N only.**
+   The scanner uses the ML model to score all candidates (cheap, fast).
+   LLM qualitative analysis runs only on tickers the user clicks into
+   (Single Stock Analysis) or the top N recommendations in Portfolio
+   Simulation. This keeps API costs proportional to user engagement, not
+   universe size.
+
 ## Open Questions
 
-1. **Web framework choice** — React/Next.js? Or a Python-native framework
-   like FastAPI + HTMX, or Dash? Trade-off: React is more capable for
-   complex UIs but requires JS/TS expertise. Python-native keeps the stack
-   unified.
-2. **ML model approach** — What features to train on? How much historical
+1. **ML model approach** — What features to train on? How much historical
    data is needed? Retrain frequency?
-3. **LLM integration** — Which provider (OpenAI, Anthropic, local model)?
-   How to keep API costs reasonable for frequent scans?
-4. **Real-time vs on-demand** — Start with on-demand scanning. When/if to
+2. **LLM provider** — OpenAI, Anthropic, or local model? May want to
+   support multiple via a pluggable interface (similar to data providers).
+3. **Real-time vs on-demand** — Start with on-demand scanning. When/if to
    add real-time streaming?
-5. **Day trade data** — Intraday data (1-min, 5-min bars) requires either
-   a paid provider or careful rate limiting with Yahoo Finance. What's the
-   minimum bar interval needed?
+4. **Authentication** — Current Streamlit Cloud uses a simple password gate.
+   The new app may need proper user accounts if shared between 2 people
+   (separate portfolios, strategies, settings).
