@@ -36,6 +36,12 @@ export default function CandlestickChart({
       crosshair: {
         mode: 0, // Normal
       },
+      handleScroll: {
+        mouseWheel: false, // Don't hijack scroll wheel (let page scroll)
+      },
+      handleScale: {
+        mouseWheel: false, // Don't zoom on scroll wheel
+      },
       timeScale: {
         borderColor: "#374151",
         timeVisible: false,
