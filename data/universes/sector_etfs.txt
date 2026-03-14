@@ -1,0 +1,14 @@
+# Sector ETFs — SPDR Select Sector ETFs (11 GICS sectors)
+# Last updated: 2026-03-14
+# These track the 11 GICS sectors of the S&P 500
+XLK  # Technology
+XLF  # Financials
+XLE  # Energy
+XLV  # Health Care
+XLY  # Consumer Discretionary
+XLP  # Consumer Staples
+XLI  # Industrials
+XLB  # Materials
+XLRE # Real Estate
+XLU  # Utilities
+XLC  # Communication Services

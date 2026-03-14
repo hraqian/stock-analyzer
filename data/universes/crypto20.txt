@@ -1,0 +1,23 @@
+# Crypto Top 20 — Major cryptocurrencies by market cap
+# Last updated: 2026-03-14
+# Note: yfinance uses -USD suffix for crypto
+BTC-USD   # Bitcoin
+ETH-USD   # Ethereum
+BNB-USD   # Binance Coin
+XRP-USD   # XRP (Ripple)
+SOL-USD   # Solana
+ADA-USD   # Cardano
+DOGE-USD  # Dogecoin
+AVAX-USD  # Avalanche
+DOT-USD   # Polkadot
+TRX-USD   # Tron
+LINK-USD  # Chainlink
+MATIC-USD # Polygon
+SHIB-USD  # Shiba Inu
+UNI-USD   # Uniswap
+LTC-USD   # Litecoin
+ATOM-USD  # Cosmos
+XLM-USD   # Stellar
+FIL-USD   # Filecoin
+NEAR-USD  # NEAR Protocol
+APT-USD   # Aptos

@@ -18,7 +18,14 @@ BUILTIN_UNIVERSES: dict[str, str] = {
     "dow30": "dow30",
     "nasdaq100": "nasdaq100",
     "sp500": "sp500",
+    "russell1000": "russell1000",
+    "russell2000": "russell2000",
     "tsx60": "tsx60",
+    "tsx_composite": "tsx_composite",
+    "sector_etfs": "sector_etfs",
+    "crypto20": "crypto20",
+    "bond_etfs": "bond_etfs",
+    "us_dividend": "us_dividend",
     "ca_dividend_etfs": "ca_dividend_etfs",
 }
 

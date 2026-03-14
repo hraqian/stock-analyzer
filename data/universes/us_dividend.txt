@@ -1,0 +1,102 @@
+# US Dividend Aristocrats & High-Quality Dividend Stocks
+# Last updated: 2026-03-14
+# Includes Dividend Aristocrats (25+ years of consecutive increases)
+# and other high-quality US dividend payers
+#
+# --- Dividend Aristocrats (25+ year streak) ---
+JNJ    # Johnson & Johnson
+PG     # Procter & Gamble
+KO     # Coca-Cola
+PEP    # PepsiCo
+MMM    # 3M
+ABT    # Abbott Labs
+ABBV   # AbbVie
+AFL    # Aflac
+APD    # Air Products
+ADP    # Automatic Data Processing
+BDX    # Becton Dickinson
+BEN    # Franklin Resources
+CAH    # Cardinal Health
+CB     # Chubb
+CINF   # Cincinnati Financial
+CTAS   # Cintas
+CLX    # Clorox
+CL     # Colgate-Palmolive
+CVX    # Chevron
+DOV    # Dover
+ED     # Consolidated Edison
+EMR    # Emerson Electric
+ESS    # Essex Property Trust
+EXPD   # Expeditors International
+FRT    # Federal Realty Investment Trust
+GD     # General Dynamics
+GPC    # Genuine Parts
+HRL    # Hormel Foods
+IBM    # IBM
+ITW    # Illinois Tool Works
+KMB    # Kimberly-Clark
+LEG    # Leggett & Platt
+LIN    # Linde
+LOW    # Lowe's
+MCD    # McDonald's
+MDT    # Medtronic
+MKC    # McCormick
+NEE    # NextEra Energy
+NUE    # Nucor
+O      # Realty Income
+PPG    # PPG Industries
+ROP    # Roper Technologies
+SHW    # Sherwin-Williams
+SJM    # J.M. Smucker
+SPGI   # S&P Global
+SWK    # Stanley Black & Decker
+SYY    # Sysco
+T      # AT&T
+TGT    # Target
+TROW   # T. Rowe Price
+VFC    # VF Corporation
+WBA    # Walgreens Boots Alliance
+WMT    # Walmart
+XOM    # Exxon Mobil
+#
+# --- Other High-Quality Dividend Payers ---
+AAPL   # Apple
+MSFT   # Microsoft
+HD     # Home Depot
+UNP    # Union Pacific
+AVGO   # Broadcom
+TXN    # Texas Instruments
+QCOM   # Qualcomm
+BLK    # BlackRock
+SCHW   # Charles Schwab
+CME    # CME Group
+ICE    # Intercontinental Exchange
+PFE    # Pfizer
+MRK    # Merck
+AMGN   # Amgen
+GILD   # Gilead Sciences
+USB    # U.S. Bancorp
+PNC    # PNC Financial
+TFC    # Truist Financial
+FITB   # Fifth Third Bancorp
+KEY    # KeyCorp
+D      # Dominion Energy
+DUK    # Duke Energy
+SO     # Southern Company
+AEP    # American Electric Power
+WEC    # WEC Energy
+XEL    # Xcel Energy
+CMS    # CMS Energy
+VZ     # Verizon
+CMCSA  # Comcast
+EPD    # Enterprise Products Partners
+ET     # Energy Transfer
+MPC    # Marathon Petroleum
+PSX    # Phillips 66
+VLO    # Valero Energy
+STAG   # STAG Industrial
+SPG    # Simon Property Group
+AMT    # American Tower
+CCI    # Crown Castle
+DLR    # Digital Realty Trust
+PSA    # Public Storage
