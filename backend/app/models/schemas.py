@@ -98,6 +98,102 @@ class SectorOverview(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Single Stock Analysis (Phase 2)
+# ---------------------------------------------------------------------------
+
+class IndicatorResultSchema(BaseModel):
+    """One indicator's output (mirrors engine IndicatorResult)."""
+    name: str
+    config_key: str
+    score: float
+    values: dict = {}
+    display: dict = {}
+    error: str | None = None
+
+
+class PatternResultSchema(BaseModel):
+    """One pattern detector's output (mirrors engine PatternResult)."""
+    name: str
+    config_key: str
+    score: float
+    values: dict = {}
+    display: dict = {}
+    error: str | None = None
+
+
+class SRLevelSchema(BaseModel):
+    """A support or resistance level."""
+    price: float
+    level_type: str
+    source: str
+    touches: int = 1
+    label: str = ""
+
+
+class RegimeMetricsSchema(BaseModel):
+    """Raw metrics from regime classification."""
+    adx: float = 0.0
+    rolling_adx_mean: float = 0.0
+    total_return: float = 0.0
+    pct_above_ma: float = 50.0
+    atr_pct: float = 0.0
+    bb_width: float = 0.0
+    bb_width_percentile: float = 50.0
+    price_ma_distance: float = 0.0
+    direction_changes: float = 0.0
+    trend_direction: str = "neutral"
+
+
+class RegimeSchema(BaseModel):
+    """Regime assessment result."""
+    regime: str           # e.g. "strong_trend"
+    confidence: float
+    label: str
+    description: str
+    metrics: RegimeMetricsSchema
+    reasons: list[str] = []
+    regime_scores: dict[str, float] = {}
+    sub_type: str | None = None
+    sub_type_label: str = ""
+    sub_type_description: str = ""
+
+
+class OHLCVBar(BaseModel):
+    """Single OHLCV bar for charting."""
+    date: str          # ISO date string
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class CompositeScoreSchema(BaseModel):
+    """Composite score breakdown."""
+    overall: float
+    breakdown: list[dict] = []
+    trend_score: float | None = None
+    contrarian_score: float | None = None
+    neutral_score: float | None = None
+    dominant_group: str | None = None
+
+
+class AnalysisResponse(BaseModel):
+    """Full analysis response for a single ticker."""
+    ticker: str
+    period: str
+    info: dict = {}
+    price_data: list[OHLCVBar]
+    indicators: list[IndicatorResultSchema]
+    patterns: list[PatternResultSchema]
+    support_levels: list[SRLevelSchema]
+    resistance_levels: list[SRLevelSchema]
+    composite: CompositeScoreSchema
+    pattern_composite: dict = {}
+    regime: RegimeSchema | None = None
+
+
+# ---------------------------------------------------------------------------
 # Scanner (stubs — expanded in Phase 2)
 # ---------------------------------------------------------------------------
 

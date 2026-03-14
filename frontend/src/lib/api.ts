@@ -148,3 +148,101 @@ export async function getSectorInfo(
 ): Promise<{ ticker: string; sector: string; industry: string }> {
   return apiFetch(`/api/data/sector/${ticker}`);
 }
+
+// -------------------------------------------------------------------
+// Analysis
+// -------------------------------------------------------------------
+
+export interface OHLCVBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface IndicatorResult {
+  name: string;
+  config_key: string;
+  score: number;
+  values: Record<string, unknown>;
+  display: Record<string, unknown>;
+  error: string | null;
+}
+
+export interface PatternResult {
+  name: string;
+  config_key: string;
+  score: number;
+  values: Record<string, unknown>;
+  display: Record<string, unknown>;
+  error: string | null;
+}
+
+export interface SRLevel {
+  price: number;
+  level_type: string;
+  source: string;
+  touches: number;
+  label: string;
+}
+
+export interface RegimeMetrics {
+  adx: number;
+  rolling_adx_mean: number;
+  total_return: number;
+  pct_above_ma: number;
+  atr_pct: number;
+  bb_width: number;
+  bb_width_percentile: number;
+  price_ma_distance: number;
+  direction_changes: number;
+  trend_direction: string;
+}
+
+export interface RegimeAssessment {
+  regime: string;
+  confidence: number;
+  label: string;
+  description: string;
+  metrics: RegimeMetrics;
+  reasons: string[];
+  regime_scores: Record<string, number>;
+  sub_type: string | null;
+  sub_type_label: string;
+  sub_type_description: string;
+}
+
+export interface CompositeScore {
+  overall: number;
+  breakdown: Array<Record<string, unknown>>;
+  trend_score: number | null;
+  contrarian_score: number | null;
+  neutral_score: number | null;
+  dominant_group: string | null;
+}
+
+export interface AnalysisResult {
+  ticker: string;
+  period: string;
+  info: Record<string, unknown>;
+  price_data: OHLCVBar[];
+  indicators: IndicatorResult[];
+  patterns: PatternResult[];
+  support_levels: SRLevel[];
+  resistance_levels: SRLevel[];
+  composite: CompositeScore;
+  pattern_composite: Record<string, unknown>;
+  regime: RegimeAssessment | null;
+}
+
+export async function analyzeStock(
+  ticker: string,
+  period: string = "6mo",
+  interval: string = "1d"
+): Promise<AnalysisResult> {
+  return apiFetch(
+    `/api/analysis/${encodeURIComponent(ticker)}?period=${period}&interval=${interval}`
+  );
+}

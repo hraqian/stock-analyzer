@@ -18,7 +18,8 @@ services:
       - ./engine:/engine
       - ./indicators:/indicators
       - ./patterns:/patterns
-      - ./data:/data_module
+      - ./analysis:/analysis
+      - ./data:/data
       - ./config.py:/config.py:ro
     environment:
       DEBUG: "true"
