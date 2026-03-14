@@ -53,13 +53,31 @@ analysis_router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 
 def _sanitize_float(v: Any) -> Any:
-    """Replace NaN/Inf with None so JSON serialization works."""
+    """Replace NaN/Inf with None and convert pandas/numpy types to plain Python."""
+    import numpy as np
+    import pandas as pd
+
+    if isinstance(v, (pd.Series, pd.Index)):
+        return [_sanitize_float(x) for x in v.tolist()]
+    if isinstance(v, pd.Timestamp):
+        return v.isoformat()
+    if isinstance(v, (np.integer,)):
+        return int(v)
+    if isinstance(v, (np.floating,)):
+        val = float(v)
+        if math.isnan(val) or math.isinf(val):
+            return None
+        return val
+    if isinstance(v, np.ndarray):
+        return [_sanitize_float(x) for x in v.tolist()]
+    if isinstance(v, np.bool_):
+        return bool(v)
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):
             return None
         return v
     if isinstance(v, dict):
-        return {k: _sanitize_float(val) for k, val in v.items()}
+        return {str(k): _sanitize_float(val) for k, val in v.items()}
     if isinstance(v, (list, tuple)):
         return [_sanitize_float(item) for item in v]
     return v
