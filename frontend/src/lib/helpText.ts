@@ -210,3 +210,46 @@ export const HELP_SCAN_CONFIDENCE =
 
 export const HELP_SCAN_PATTERN =
   "The most notable chart pattern detected for this stock, if any. Patterns can confirm or add context to the trading signal.";
+
+// ---------------------------------------------------------------------------
+// Sectors & Segments page
+// ---------------------------------------------------------------------------
+
+export const HELP_SECTORS =
+  "Shows which parts of the market (sectors) are strong or weak. Green sectors have upward momentum; red sectors are declining. Use this to find where the money is flowing.";
+
+export const HELP_SECTOR_HEATMAP =
+  "A visual grid of all 11 market sectors, colored by their momentum score. Dark green = strong uptrend, dark red = strong downtrend, gray = neutral.";
+
+export const HELP_MOMENTUM_SCORE =
+  "A combined score (0-10) measuring how strong a sector's price trend is. It blends 1-week, 1-month, and 3-month returns with relative strength vs the S&P 500.";
+
+export const HELP_RELATIVE_STRENGTH =
+  "How a sector performs compared to the overall market (S&P 500). Positive = outperforming the market, negative = underperforming. Helps identify where money is rotating.";
+
+export const HELP_SECTOR_ROTATION =
+  "Capital flows between sectors over time. When one sector strengthens while another weakens, it suggests investors are 'rotating' money from one area to another.";
+
+export const HELP_SECTOR_REGIME =
+  "Each sector can be in a different market condition — one might be trending strongly while another is stuck in a range. This shows the current 'personality' of each sector.";
+
+export const HELP_RETURN_1W =
+  "How much the sector ETF's price changed over the past week (5 trading days). Positive = up, negative = down.";
+
+export const HELP_RETURN_1M =
+  "How much the sector ETF's price changed over the past month (~21 trading days).";
+
+export const HELP_RETURN_3M =
+  "How much the sector ETF's price changed over the past 3 months (~63 trading days). Shows the bigger trend.";
+
+export const HELP_TOP_MOVERS =
+  "The best-performing stocks within this sector over the past month. These are the stocks driving the sector higher.";
+
+export const HELP_WORST_MOVERS =
+  "The worst-performing stocks within this sector over the past month. These are dragging the sector down.";
+
+export const HELP_SECTOR_ETF =
+  "A Sector ETF (Exchange-Traded Fund) tracks all major stocks in one sector. For example, XLK tracks all Technology stocks in the S&P 500. We use these as a quick proxy for sector health.";
+
+export const HELP_BENCHMARK =
+  "The S&P 500 (SPY) is used as the benchmark. Relative strength compares each sector against this benchmark to see which sectors are outperforming or underperforming the broader market.";

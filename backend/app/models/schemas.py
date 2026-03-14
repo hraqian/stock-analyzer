@@ -90,6 +90,59 @@ class SectorInfo(BaseModel):
     industry_group: str = ""
 
 
+class SectorMomentumSchema(BaseModel):
+    """One sector's momentum data for the heatmap."""
+    etf: str
+    sector: str
+    return_1w: float = 0.0
+    return_1m: float = 0.0
+    return_3m: float = 0.0
+    rs_1w: float = 0.0
+    rs_1m: float = 0.0
+    rs_3m: float = 0.0
+    current_price: float = 0.0
+    avg_volume: float = 0.0
+    regime: str = ""
+    regime_confidence: float = 0.0
+    momentum_score: float = 0.0
+
+
+class SectorOverviewResponse(BaseModel):
+    """Full sector heatmap response."""
+    sectors: list[SectorMomentumSchema]
+    benchmark_return_1w: float = 0.0
+    benchmark_return_1m: float = 0.0
+    benchmark_return_3m: float = 0.0
+    elapsed_seconds: float = 0.0
+
+
+class SectorTopMoverSchema(BaseModel):
+    """A top or worst mover within a sector."""
+    ticker: str
+    name: str
+    return_1m: float = 0.0
+    current_price: float = 0.0
+
+
+class SectorDetailResponse(BaseModel):
+    """Sector drill-down response."""
+    etf: str
+    sector: str
+    return_1w: float = 0.0
+    return_1m: float = 0.0
+    return_3m: float = 0.0
+    rs_1w: float = 0.0
+    rs_1m: float = 0.0
+    rs_3m: float = 0.0
+    regime: str = ""
+    regime_confidence: float = 0.0
+    momentum_score: float = 0.0
+    top_movers: list[SectorTopMoverSchema] = []
+    worst_movers: list[SectorTopMoverSchema] = []
+    elapsed_seconds: float = 0.0
+
+
+# Legacy alias kept for backward compat
 class SectorOverview(BaseModel):
     sector: str
     ticker_count: int

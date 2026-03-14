@@ -300,3 +300,69 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
 export async function getUniverseList(): Promise<{ universes: string[] }> {
   return apiFetch("/api/scanner/universes");
 }
+
+// -------------------------------------------------------------------
+// Sectors
+// -------------------------------------------------------------------
+
+export interface SectorMomentum {
+  etf: string;
+  sector: string;
+  return_1w: number;
+  return_1m: number;
+  return_3m: number;
+  rs_1w: number;
+  rs_1m: number;
+  rs_3m: number;
+  current_price: number;
+  avg_volume: number;
+  regime: string;
+  regime_confidence: number;
+  momentum_score: number;
+}
+
+export interface SectorOverviewResponse {
+  sectors: SectorMomentum[];
+  benchmark_return_1w: number;
+  benchmark_return_1m: number;
+  benchmark_return_3m: number;
+  elapsed_seconds: number;
+}
+
+export interface SectorTopMover {
+  ticker: string;
+  name: string;
+  return_1m: number;
+  current_price: number;
+}
+
+export interface SectorDetailResponse {
+  etf: string;
+  sector: string;
+  return_1w: number;
+  return_1m: number;
+  return_3m: number;
+  rs_1w: number;
+  rs_1m: number;
+  rs_3m: number;
+  regime: string;
+  regime_confidence: number;
+  momentum_score: number;
+  top_movers: SectorTopMover[];
+  worst_movers: SectorTopMover[];
+  elapsed_seconds: number;
+}
+
+export async function getSectorOverview(): Promise<SectorOverviewResponse> {
+  return apiFetch("/api/sectors/overview");
+}
+
+export async function getSectorDetail(
+  sectorName: string
+): Promise<SectorDetailResponse> {
+  return apiFetch(`/api/sectors/detail/${encodeURIComponent(sectorName)}`);
+}
+
+export async function getSectorList(): Promise<{ sectors: string[] }> {
+  return apiFetch("/api/sectors/list");
+}

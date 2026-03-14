@@ -19,6 +19,8 @@ from app.models.schemas import (
     AnalysisResponse,
     ScanRequest,
     ScanResponse,
+    SectorDetailResponse,
+    SectorOverviewResponse,
     UniverseListResponse,
     VALID_PRESETS,
     VALID_UNIVERSES,
@@ -31,6 +33,8 @@ logger = logging.getLogger(__name__)
 _analysis_pool = ThreadPoolExecutor(max_workers=2)
 # Separate pool for scanner (can run long batch fetches)
 _scanner_pool = ThreadPoolExecutor(max_workers=1)
+# Separate pool for sector analysis
+_sector_pool = ThreadPoolExecutor(max_workers=1)
 
 # Trade mode → engine objective mapping
 _TRADE_MODE_OBJECTIVES = {
@@ -378,13 +382,125 @@ async def analyze_stock(
 sectors_router = APIRouter(prefix="/sectors", tags=["sectors"])
 
 
-@sectors_router.get("/overview")
-async def sector_overview(user: User = Depends(get_current_user)):
+def _run_sector_overview() -> dict:
+    """Run sector overview synchronously (called from thread pool)."""
+    from app.services.sectors import get_sector_overview
+
+    result = get_sector_overview()
     return {
-        "section": "Sector & Segments",
-        "status": "coming_in_phase_2",
-        "description": "Sector heatmap, segment drill-down, rotation tracker, and relative strength.",
+        "sectors": [
+            {
+                "etf": s.etf,
+                "sector": s.sector,
+                "return_1w": s.return_1w,
+                "return_1m": s.return_1m,
+                "return_3m": s.return_3m,
+                "rs_1w": s.rs_1w,
+                "rs_1m": s.rs_1m,
+                "rs_3m": s.rs_3m,
+                "current_price": s.current_price,
+                "avg_volume": s.avg_volume,
+                "regime": s.regime,
+                "regime_confidence": s.regime_confidence,
+                "momentum_score": s.momentum_score,
+            }
+            for s in result.sectors
+        ],
+        "benchmark_return_1w": result.benchmark_return_1w,
+        "benchmark_return_1m": result.benchmark_return_1m,
+        "benchmark_return_3m": result.benchmark_return_3m,
+        "elapsed_seconds": result.elapsed_seconds,
     }
+
+
+def _run_sector_detail(sector_name: str) -> dict:
+    """Run sector detail synchronously (called from thread pool)."""
+    from app.services.sectors import get_sector_detail
+
+    result = get_sector_detail(sector_name)
+    return {
+        "etf": result.etf,
+        "sector": result.sector,
+        "return_1w": result.return_1w,
+        "return_1m": result.return_1m,
+        "return_3m": result.return_3m,
+        "rs_1w": result.rs_1w,
+        "rs_1m": result.rs_1m,
+        "rs_3m": result.rs_3m,
+        "regime": result.regime,
+        "regime_confidence": result.regime_confidence,
+        "momentum_score": result.momentum_score,
+        "top_movers": [
+            {
+                "ticker": m.ticker,
+                "name": m.name,
+                "return_1m": m.return_1m,
+                "current_price": m.current_price,
+            }
+            for m in result.top_movers
+        ],
+        "worst_movers": [
+            {
+                "ticker": m.ticker,
+                "name": m.name,
+                "return_1m": m.return_1m,
+                "current_price": m.current_price,
+            }
+            for m in result.worst_movers
+        ],
+        "elapsed_seconds": result.elapsed_seconds,
+    }
+
+
+@sectors_router.get("/overview", response_model=SectorOverviewResponse)
+async def sector_overview(user: User = Depends(get_current_user)):
+    """Sector heatmap: momentum scores, relative strength, regime for all 11 sectors."""
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(_sector_pool, _run_sector_overview)
+    except Exception as exc:
+        logger.exception("Sector overview failed")
+        raise HTTPException(500, f"Sector overview failed: {exc}") from exc
+    return result
+
+
+VALID_SECTORS = {
+    "Technology", "Financials", "Energy", "Health Care",
+    "Consumer Discretionary", "Consumer Staples", "Industrials",
+    "Materials", "Real Estate", "Utilities", "Communication Services",
+}
+
+
+@sectors_router.get("/detail/{sector_name}", response_model=SectorDetailResponse)
+async def sector_detail(sector_name: str, user: User = Depends(get_current_user)):
+    """Drill-down for a single sector: returns, RS, regime, top/worst movers."""
+    # URL-decode sector name (spaces come as %20)
+    import urllib.parse
+    sector_decoded = urllib.parse.unquote(sector_name)
+
+    if sector_decoded not in VALID_SECTORS:
+        raise HTTPException(
+            400,
+            f"Invalid sector '{sector_decoded}'. Must be one of: {sorted(VALID_SECTORS)}",
+        )
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _sector_pool, _run_sector_detail, sector_decoded,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Sector detail failed for %s", sector_decoded)
+        raise HTTPException(500, f"Sector detail failed: {exc}") from exc
+    return result
+
+
+@sectors_router.get("/list")
+async def list_sectors(user: User = Depends(get_current_user)):
+    """List available sector names."""
+    return {"sectors": sorted(VALID_SECTORS)}
 
 
 # ---------------------------------------------------------------------------
