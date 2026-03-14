@@ -197,15 +197,59 @@ class AnalysisResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Scanner (stubs — expanded in Phase 2)
+# Scanner (Phase 2)
 # ---------------------------------------------------------------------------
 
+VALID_PRESETS = {"breakout", "pullback", "reversal", "dividend"}
+
+VALID_UNIVERSES = {
+    "dow30", "nasdaq100", "sp500", "russell1000", "russell2000",
+    "tsx60", "tsx_composite", "sector_etfs", "crypto20", "bond_etfs",
+    "us_dividend", "ca_dividend_etfs", "custom",
+}
+
+
 class ScanRequest(BaseModel):
-    universe: str = "sp500"   # sp500, nasdaq100, tsx, russell1000, custom
+    universe: str = "sp500"
     custom_tickers: list[str] | None = None
+    preset: str = "breakout"           # breakout, pullback, reversal, dividend
+    period: str = "6mo"                # data lookback
     min_volume: int = 1_000_000
     min_price: float = 5.0
     max_atr_ratio: float | None = None
+    top_n: int = 50
+
+
+class ScannerResultSchema(BaseModel):
+    """One row in the scanner output table."""
+    rank: int
+    ticker: str
+    signal: str
+    score: float
+    confidence: float
+    pattern: str
+    regime: str
+    sector: str
+    breakdown: dict[str, float] = {}
+    volume: float = 0.0
+    price: float = 0.0
+    atr_ratio: float = 0.0
+
+
+class ScanResponse(BaseModel):
+    """Full scanner response."""
+    preset: str
+    universe: str
+    total_tickers: int
+    tickers_with_data: int
+    tickers_passing_filters: int
+    elapsed_seconds: float
+    results: list[ScannerResultSchema]
+
+
+class UniverseListResponse(BaseModel):
+    """Available universes."""
+    universes: list[str]
 
 
 # ---------------------------------------------------------------------------

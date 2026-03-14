@@ -15,13 +15,22 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.routes.auth import get_current_user
-from app.models.schemas import AnalysisResponse
+from app.models.schemas import (
+    AnalysisResponse,
+    ScanRequest,
+    ScanResponse,
+    UniverseListResponse,
+    VALID_PRESETS,
+    VALID_UNIVERSES,
+)
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 # Thread pool for blocking engine calls (indicator computation, yfinance fetch)
 _analysis_pool = ThreadPoolExecutor(max_workers=2)
+# Separate pool for scanner (can run long batch fetches)
+_scanner_pool = ThreadPoolExecutor(max_workers=1)
 
 # Trade mode → engine objective mapping
 _TRADE_MODE_OBJECTIVES = {
@@ -36,13 +45,129 @@ _TRADE_MODE_OBJECTIVES = {
 scanner_router = APIRouter(prefix="/scanner", tags=["scanner"])
 
 
-@scanner_router.get("/")
-async def scanner_status(user: User = Depends(get_current_user)):
+def _run_scanner(
+    tickers: list[str],
+    preset: str,
+    trade_mode: str,
+    period: str,
+    min_volume: int,
+    min_price: float,
+    max_atr_ratio: float | None,
+    top_n: int,
+    universe_name: str,
+) -> dict:
+    """Run the scanner engine synchronously (called from thread pool)."""
+    from app.services.scanner import run_scan  # late import
+
+    summary = run_scan(
+        tickers=tickers,
+        preset=preset,
+        trade_mode=trade_mode,
+        period=period,
+        min_volume=min_volume,
+        min_price=min_price,
+        max_atr_ratio=max_atr_ratio,
+        top_n=top_n,
+        universe_name=universe_name,
+    )
     return {
-        "section": "Market Scanner",
-        "status": "coming_in_phase_2",
-        "description": "Scan configurable universes for trade candidates.",
+        "preset": summary.preset,
+        "universe": summary.universe,
+        "total_tickers": summary.total_tickers,
+        "tickers_with_data": summary.tickers_with_data,
+        "tickers_passing_filters": summary.tickers_passing_filters,
+        "elapsed_seconds": summary.elapsed_seconds,
+        "results": [
+            {
+                "rank": r.rank,
+                "ticker": r.ticker,
+                "signal": r.signal,
+                "score": r.score,
+                "confidence": r.confidence,
+                "pattern": r.pattern,
+                "regime": r.regime,
+                "sector": r.sector,
+                "breakdown": r.breakdown,
+                "volume": r.volume,
+                "price": r.price,
+                "atr_ratio": r.atr_ratio,
+            }
+            for r in summary.results
+        ],
     }
+
+
+@scanner_router.post("/scan", response_model=ScanResponse)
+async def run_market_scan(
+    req: ScanRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run the market scanner on a universe of tickers.
+
+    POST body fields:
+    - universe: one of the 12 predefined universes or "custom"
+    - custom_tickers: required if universe == "custom"
+    - preset: "breakout", "pullback", "reversal", "dividend"
+    - period: data lookback (e.g. "6mo")
+    - min_volume, min_price, max_atr_ratio: filters
+    - top_n: max results to return
+    """
+    # Validate preset
+    if req.preset not in VALID_PRESETS:
+        raise HTTPException(400, f"Invalid preset '{req.preset}'. Must be one of: {sorted(VALID_PRESETS)}")
+
+    # Load tickers from universe
+    if req.universe == "custom":
+        if not req.custom_tickers:
+            raise HTTPException(400, "custom_tickers required when universe is 'custom'")
+        tickers = [t.upper().strip() for t in req.custom_tickers if t.strip()]
+        if not tickers:
+            raise HTTPException(400, "custom_tickers list is empty")
+    else:
+        if req.universe not in VALID_UNIVERSES:
+            raise HTTPException(400, f"Invalid universe '{req.universe}'. Must be one of: {sorted(VALID_UNIVERSES)}")
+        try:
+            from data.universes import load as load_universe  # type: ignore[import-untyped]
+            tickers = load_universe(req.universe)
+        except FileNotFoundError:
+            raise HTTPException(404, f"Universe file not found: {req.universe}")
+        except Exception as exc:
+            raise HTTPException(500, f"Failed to load universe: {exc}") from exc
+
+    if not tickers:
+        raise HTTPException(400, "No tickers in the selected universe")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _scanner_pool,
+            _run_scanner,
+            tickers,
+            req.preset,
+            user.trade_mode,
+            req.period,
+            req.min_volume,
+            req.min_price,
+            req.max_atr_ratio,
+            req.top_n,
+            req.universe,
+        )
+    except Exception as exc:
+        logger.exception("Scanner failed for universe=%s preset=%s", req.universe, req.preset)
+        raise HTTPException(500, f"Scanner failed: {exc}") from exc
+
+    return result
+
+
+@scanner_router.get("/universes", response_model=UniverseListResponse)
+async def list_universes(user: User = Depends(get_current_user)):
+    """List available universe names."""
+    try:
+        from data.universes import available as available_universes  # type: ignore[import-untyped]
+        names = available_universes()
+    except Exception:
+        names = sorted(VALID_UNIVERSES - {"custom"})
+    return {"universes": names}
 
 
 # ---------------------------------------------------------------------------
