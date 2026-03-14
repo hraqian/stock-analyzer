@@ -249,3 +249,54 @@ export async function analyzeStock(
     `/api/analysis/${encodeURIComponent(ticker)}?period=${period}&interval=${interval}`
   );
 }
+
+// -------------------------------------------------------------------
+// Scanner
+// -------------------------------------------------------------------
+
+export interface ScannerResultRow {
+  rank: number;
+  ticker: string;
+  signal: string;
+  score: number;
+  confidence: number;
+  pattern: string;
+  regime: string;
+  sector: string;
+  breakdown: Record<string, number>;
+  volume: number;
+  price: number;
+  atr_ratio: number;
+}
+
+export interface ScanResponse {
+  preset: string;
+  universe: string;
+  total_tickers: number;
+  tickers_with_data: number;
+  tickers_passing_filters: number;
+  elapsed_seconds: number;
+  results: ScannerResultRow[];
+}
+
+export interface ScanRequest {
+  universe: string;
+  custom_tickers?: string[];
+  preset: string;
+  period?: string;
+  min_volume?: number;
+  min_price?: number;
+  max_atr_ratio?: number | null;
+  top_n?: number;
+}
+
+export async function runScan(req: ScanRequest): Promise<ScanResponse> {
+  return apiFetch<ScanResponse>("/api/scanner/scan", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function getUniverseList(): Promise<{ universes: string[] }> {
+  return apiFetch("/api/scanner/universes");
+}

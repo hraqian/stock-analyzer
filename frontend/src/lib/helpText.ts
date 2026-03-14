@@ -164,3 +164,49 @@ export const PATTERN_HELP: Record<string, string> = {
   spikes: HELP_SPIKES,
   inside_outside: HELP_INSIDE_OUTSIDE,
 };
+
+// ---------------------------------------------------------------------------
+// Scanner page
+// ---------------------------------------------------------------------------
+
+export const HELP_SCANNER =
+  "The Market Scanner scans a group of stocks (called a 'universe') and ranks them by how strongly they match a trading strategy. Think of it as a filter that finds the best opportunities for you.";
+
+export const HELP_UNIVERSE =
+  "A pre-defined list of stocks to scan. For example, S&P 500 contains the 500 largest US companies. Pick a universe that matches what you want to trade.";
+
+export const HELP_PRESET =
+  "The type of trade setup you're looking for. Each preset uses different indicators and scoring to find stocks matching that strategy.";
+
+export const HELP_PRESET_BREAKOUT =
+  "Looks for stocks about to break out of a consolidation range — typically accompanied by increasing volume and narrowing Bollinger Bands.";
+
+export const HELP_PRESET_PULLBACK =
+  "Finds stocks in an uptrend that have temporarily pulled back to a support level — a potential buying opportunity at a better price.";
+
+export const HELP_PRESET_REVERSAL =
+  "Identifies stocks that may be reversing direction — e.g. oversold stocks showing signs of turning around, like extreme RSI readings.";
+
+export const HELP_PRESET_DIVIDEND =
+  "Ranks stocks by dividend quality: yield (how much they pay), growth (are dividends increasing?), consistency, and streak length.";
+
+export const HELP_MIN_VOLUME =
+  "Minimum average daily trading volume. Stocks with very low volume are harder to buy/sell and have wider bid-ask spreads. 1M shares/day is a good default.";
+
+export const HELP_MIN_PRICE =
+  "Filters out very cheap stocks (penny stocks). These are often more volatile and risky. $5 is a common minimum for swing trading.";
+
+export const HELP_MAX_ATR_RATIO =
+  "Maximum ATR/price ratio. ATR measures how much a stock moves per day as a percentage of its price. Higher = more volatile. Leave blank for no filter.";
+
+export const HELP_SCAN_SCORE =
+  "The composite score from the scan, 0-10. Higher means the stock more closely matches the selected preset's ideal setup.";
+
+export const HELP_SCAN_SIGNAL =
+  "A plain-language label describing the type and strength of the detected trading signal.";
+
+export const HELP_SCAN_CONFIDENCE =
+  "How confidently the algorithm classified the stock's market regime. Higher confidence means the stock clearly fits one market condition.";
+
+export const HELP_SCAN_PATTERN =
+  "The most notable chart pattern detected for this stock, if any. Patterns can confirm or add context to the trading signal.";
