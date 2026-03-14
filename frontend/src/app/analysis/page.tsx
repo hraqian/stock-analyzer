@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { analyzeStock } from "@/lib/api";
 import type { AnalysisResult } from "@/lib/api";
 import CandlestickChart from "@/components/CandlestickChart";
@@ -70,12 +71,16 @@ function fmtNum(n: unknown): string {
 }
 
 export default function AnalysisPage() {
+  const searchParams = useSearchParams();
   const [ticker, setTicker] = useState("");
   const [period, setPeriod] = useState("6mo");
   const [interval, setInterval] = useState("1d");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+
+  // Track whether we've already auto-run from URL params
+  const autoRanRef = useRef(false);
 
   const runAnalysis = useCallback(async () => {
     const t = ticker.trim().toUpperCase();
@@ -92,6 +97,27 @@ export default function AnalysisPage() {
       setLoading(false);
     }
   }, [ticker, period, interval]);
+
+  // Auto-run analysis if ticker is provided via URL query param (e.g. from scanner)
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    const urlTicker = searchParams.get("ticker");
+    if (urlTicker && urlTicker.trim()) {
+      autoRanRef.current = true;
+      const t = urlTicker.trim().toUpperCase();
+      setTicker(t);
+      // Run analysis directly (can't rely on state update + runAnalysis dep)
+      setLoading(true);
+      setError(null);
+      analyzeStock(t, period, interval)
+        .then((data) => setResult(data))
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Analysis failed");
+          setResult(null);
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [searchParams, period, interval]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") runAnalysis();
