@@ -11,12 +11,14 @@ interface HelpTipProps {
 
 /**
  * A small "?" icon that shows a tooltip on hover (desktop) or tap (mobile).
+ * Auto-flips below when too close to the top of the viewport.
  *
  * Usage:
  *   <span>RSI <HelpTip text="Relative Strength Index measures..." /></span>
  */
 export default function HelpTip({ text, size = 14 }: HelpTipProps) {
   const [open, setOpen] = useState(false);
+  const [flipped, setFlipped] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +41,15 @@ export default function HelpTip({ text, size = 14 }: HelpTipProps) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [handleOutside]);
 
-  // Reposition tooltip if it overflows viewport
+  // Decide whether to flip (show below) before rendering the tooltip
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const btnRect = ref.current.getBoundingClientRect();
+    // If less than 80px above the button, flip to below
+    setFlipped(btnRect.top < 80);
+  }, [open]);
+
+  // Reposition tooltip if it overflows viewport horizontally
   useEffect(() => {
     if (!open || !tipRef.current) return;
     const rect = tipRef.current.getBoundingClientRect();
@@ -53,7 +63,7 @@ export default function HelpTip({ text, size = 14 }: HelpTipProps) {
       tipRef.current.style.left = "0";
       tipRef.current.style.right = "auto";
     }
-  }, [open]);
+  }, [open, flipped]);
 
   return (
     <span ref={ref} className="relative inline-flex items-center ml-1">
@@ -76,17 +86,22 @@ export default function HelpTip({ text, size = 14 }: HelpTipProps) {
         <div
           ref={tipRef}
           role="tooltip"
-          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
+          className={`absolute z-50 left-1/2 -translate-x-1/2
                      w-64 max-w-[90vw] px-3 py-2 rounded-lg
                      bg-gray-800 border border-gray-700 shadow-lg
                      text-xs text-gray-300 leading-relaxed
-                     pointer-events-none"
+                     pointer-events-none
+                     ${flipped ? "top-full mt-2" : "bottom-full mb-2"}`}
         >
           {text}
           {/* Arrow */}
           <div
-            className="absolute top-full left-1/2 -translate-x-1/2
-                       border-4 border-transparent border-t-gray-800"
+            className={`absolute left-1/2 -translate-x-1/2
+                       border-4 border-transparent
+                       ${flipped
+                         ? "bottom-full border-b-gray-800"
+                         : "top-full border-t-gray-800"
+                       }`}
           />
         </div>
       )}
