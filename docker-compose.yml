@@ -21,9 +21,9 @@ services:
       - ./data:/data_module
       - ./config.py:/config.py:ro
     environment:
-      - DEBUG=true
-      - CORS_ORIGINS=["http://localhost:3000"]
-      - PYTHONPATH=/app:/
+      DEBUG: "true"
+      CORS_ORIGINS: '["http://localhost:3000"]'
+      PYTHONPATH: "/app:/"
     networks:
       - app-network
 
@@ -39,7 +39,7 @@ services:
       - /app/node_modules  # Don't mount node_modules from host
       - /app/.next         # Don't mount .next build cache from host
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"
     depends_on:
       - backend
     networks:
