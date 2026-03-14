@@ -1,6 +1,8 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
+import HelpTip from "@/components/HelpTip";
+import { HELP_TRADE_MODE, HELP_USER_MODE } from "@/lib/helpText";
 
 const TRADE_MODES = [
   { value: "swing", label: "Swing Trade" },
@@ -31,7 +33,7 @@ export function Header() {
     <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-5">
       {/* Left: Trade mode toggle */}
       <div className="flex items-center gap-1">
-        <span className="text-xs text-gray-500 mr-2 font-medium">Mode:</span>
+        <span className="text-xs text-gray-500 mr-2 font-medium">Mode: <HelpTip text={HELP_TRADE_MODE} /></span>
         {TRADE_MODES.map((mode) => (
           <button
             key={mode.value}
@@ -62,6 +64,7 @@ export function Header() {
       <div className="flex items-center gap-4">
         {/* User mode toggle */}
         <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-500 mr-1 font-medium">View: <HelpTip text={HELP_USER_MODE} /></span>
           {USER_MODES.map((mode) => (
             <button
               key={mode.value}

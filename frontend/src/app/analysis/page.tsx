@@ -4,6 +4,33 @@ import { useState, useCallback } from "react";
 import { analyzeStock } from "@/lib/api";
 import type { AnalysisResult } from "@/lib/api";
 import CandlestickChart from "@/components/CandlestickChart";
+import HelpTip from "@/components/HelpTip";
+import {
+  HELP_COMPOSITE_SCORES,
+  HELP_OVERALL_SCORE,
+  HELP_TREND_SCORE,
+  HELP_CONTRARIAN_SCORE,
+  HELP_NEUTRAL_SCORE,
+  HELP_PATTERN_SCORE,
+  HELP_DOMINANT_GROUP,
+  HELP_REGIME,
+  HELP_REGIME_CONFIDENCE,
+  HELP_REGIME_SUBTYPE,
+  HELP_ADX,
+  HELP_ATR_PCT,
+  HELP_TOTAL_RETURN,
+  HELP_PCT_ABOVE_MA,
+  HELP_TREND_DIRECTION,
+  HELP_INDICATORS,
+  HELP_PATTERNS,
+  HELP_SUPPORT_RESISTANCE,
+  HELP_SUPPORT,
+  HELP_RESISTANCE,
+  HELP_PERIOD,
+  HELP_INTERVAL,
+  INDICATOR_HELP,
+  PATTERN_HELP,
+} from "@/lib/helpText";
 
 const PERIODS = ["1mo", "3mo", "6mo", "1y", "2y", "5y"];
 const INTERVALS = ["1d", "1wk", "1mo"];
@@ -99,7 +126,7 @@ export default function AnalysisPage() {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Period</label>
+          <label className="block text-xs text-gray-500 mb-1">Period <HelpTip text={HELP_PERIOD} /></label>
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
@@ -115,7 +142,7 @@ export default function AnalysisPage() {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Interval</label>
+          <label className="block text-xs text-gray-500 mb-1">Interval <HelpTip text={HELP_INTERVAL} /></label>
           <select
             value={interval}
             onChange={(e) => setInterval(e.target.value)}
@@ -186,14 +213,18 @@ export default function AnalysisPage() {
           {/* Indicators Table */}
           <ResultsTable
             title="Technical Indicators"
+            titleHelp={HELP_INDICATORS}
             items={result.indicators}
+            helpMap={INDICATOR_HELP}
           />
 
           {/* Patterns Table */}
           {result.patterns.length > 0 && (
             <ResultsTable
               title="Pattern Detection"
+              titleHelp={HELP_PATTERNS}
               items={result.patterns}
+              helpMap={PATTERN_HELP}
             />
           )}
 
@@ -264,36 +295,40 @@ function CompositeScoreCard({ result }: { result: AnalysisResult }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <h3 className="text-sm font-medium text-gray-400 mb-3">
-        Composite Scores
+        Composite Scores <HelpTip text={HELP_COMPOSITE_SCORES} />
       </h3>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <ScoreBox label="Overall" score={c.overall} />
+        <ScoreBox label="Overall" score={c.overall} help={HELP_OVERALL_SCORE} />
         {c.trend_score != null && (
-          <ScoreBox label="Trend" score={c.trend_score} />
+          <ScoreBox label="Trend" score={c.trend_score} help={HELP_TREND_SCORE} />
         )}
         {c.contrarian_score != null && (
-          <ScoreBox label="Contrarian" score={c.contrarian_score} />
+          <ScoreBox label="Contrarian" score={c.contrarian_score} help={HELP_CONTRARIAN_SCORE} />
         )}
         {c.neutral_score != null && (
-          <ScoreBox label="Neutral" score={c.neutral_score} />
+          <ScoreBox label="Neutral" score={c.neutral_score} help={HELP_NEUTRAL_SCORE} />
         )}
         {pcOverall != null && (
-          <ScoreBox label="Pattern" score={pcOverall} />
+          <ScoreBox label="Pattern" score={pcOverall} help={HELP_PATTERN_SCORE} />
         )}
       </div>
       {c.dominant_group && (
         <p className="text-xs text-gray-500 mt-2">
           Dominant group: <span className="text-gray-300">{c.dominant_group}</span>
+          <HelpTip text={HELP_DOMINANT_GROUP} />
         </p>
       )}
     </div>
   );
 }
 
-function ScoreBox({ label, score }: { label: string; score: number }) {
+function ScoreBox({ label, score, help }: { label: string; score: number; help?: string }) {
   return (
     <div className="bg-gray-800 rounded-lg p-3 text-center">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
+      <div className="text-xs text-gray-500 mb-1">
+        {label}
+        {help && <HelpTip text={help} />}
+      </div>
       <div className={`text-2xl font-bold ${scoreColor(score)}`}>
         {score.toFixed(1)}
       </div>
@@ -308,7 +343,7 @@ function RegimeCard({ regime }: { regime: NonNullable<AnalysisResult["regime"]> 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <h3 className="text-sm font-medium text-gray-400 mb-3">
-        Market Regime
+        Market Regime <HelpTip text={HELP_REGIME} />
       </h3>
       <div className="flex flex-wrap items-start gap-4">
         <div>
@@ -316,14 +351,14 @@ function RegimeCard({ regime }: { regime: NonNullable<AnalysisResult["regime"]> 
             {regime.label}
           </span>
           <span className="text-gray-500 text-sm ml-2">
-            ({confidencePct}% confidence)
+            ({confidencePct}% confidence <HelpTip text={HELP_REGIME_CONFIDENCE} />)
           </span>
           <p className="text-sm text-gray-400 mt-1">{regime.description}</p>
         </div>
 
         {regime.sub_type && (
           <div className="bg-gray-800 rounded-lg p-3">
-            <div className="text-xs text-gray-500 mb-1">Sub-Type</div>
+            <div className="text-xs text-gray-500 mb-1">Sub-Type <HelpTip text={HELP_REGIME_SUBTYPE} /></div>
             <div className="text-sm text-white font-medium">
               {regime.sub_type_label}
             </div>
@@ -336,22 +371,26 @@ function RegimeCard({ regime }: { regime: NonNullable<AnalysisResult["regime"]> 
 
       {/* Key metrics */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mt-4">
-        <MetricPill label="ADX" value={regime.metrics.adx.toFixed(1)} />
+        <MetricPill label="ADX" value={regime.metrics.adx.toFixed(1)} help={HELP_ADX} />
         <MetricPill
           label="ATR%"
           value={`${(regime.metrics.atr_pct * 100).toFixed(2)}%`}
+          help={HELP_ATR_PCT}
         />
         <MetricPill
           label="Return"
           value={`${(regime.metrics.total_return * 100).toFixed(1)}%`}
+          help={HELP_TOTAL_RETURN}
         />
         <MetricPill
           label="% Above MA"
           value={`${regime.metrics.pct_above_ma.toFixed(0)}%`}
+          help={HELP_PCT_ABOVE_MA}
         />
         <MetricPill
           label="Direction"
           value={regime.metrics.trend_direction}
+          help={HELP_TREND_DIRECTION}
         />
       </div>
 
@@ -370,10 +409,13 @@ function RegimeCard({ regime }: { regime: NonNullable<AnalysisResult["regime"]> 
   );
 }
 
-function MetricPill({ label, value }: { label: string; value: string }) {
+function MetricPill({ label, value, help }: { label: string; value: string; help?: string }) {
   return (
     <div className="bg-gray-800 rounded px-2 py-1.5 text-center">
-      <div className="text-[10px] text-gray-500 leading-tight">{label}</div>
+      <div className="text-[10px] text-gray-500 leading-tight">
+        {label}
+        {help && <HelpTip text={help} size={12} />}
+      </div>
       <div className="text-xs text-gray-300 font-medium">{value}</div>
     </div>
   );
@@ -381,19 +423,27 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 
 function ResultsTable({
   title,
+  titleHelp,
   items,
+  helpMap,
 }: {
   title: string;
+  titleHelp?: string;
   items: Array<{
     name: string;
+    config_key?: string;
     score: number;
     display: Record<string, unknown>;
     error: string | null;
   }>;
+  helpMap?: Record<string, string>;
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <h3 className="text-sm font-medium text-gray-400 mb-3">{title}</h3>
+      <h3 className="text-sm font-medium text-gray-400 mb-3">
+        {title}
+        {titleHelp && <HelpTip text={titleHelp} />}
+      </h3>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -405,32 +455,39 @@ function ResultsTable({
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr
-                key={item.name}
-                className="border-b border-gray-800/50 hover:bg-gray-800/30"
-                style={scoreBarStyle(item.score)}
-              >
-                <td className="py-2 pr-4 text-gray-300 font-medium">
-                  {item.name}
-                </td>
-                <td
-                  className={`py-2 px-3 text-right font-bold ${scoreColor(item.score)}`}
+            {items.map((item) => {
+              const rowHelp =
+                helpMap && item.config_key
+                  ? helpMap[item.config_key]
+                  : undefined;
+              return (
+                <tr
+                  key={item.name}
+                  className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                  style={scoreBarStyle(item.score)}
                 >
-                  {item.score.toFixed(1)}
-                </td>
-                <td className="py-2 px-3 text-gray-400">
-                  {item.error
-                    ? "Error"
-                    : String(item.display.value_str ?? "")}
-                </td>
-                <td className="py-2 pl-3 text-gray-500 text-xs">
-                  {item.error
-                    ? item.error
-                    : String(item.display.detail_str ?? "")}
-                </td>
-              </tr>
-            ))}
+                  <td className="py-2 pr-4 text-gray-300 font-medium">
+                    {item.name}
+                    {rowHelp && <HelpTip text={rowHelp} />}
+                  </td>
+                  <td
+                    className={`py-2 px-3 text-right font-bold ${scoreColor(item.score)}`}
+                  >
+                    {item.score.toFixed(1)}
+                  </td>
+                  <td className="py-2 px-3 text-gray-400">
+                    {item.error
+                      ? "Error"
+                      : String(item.display.value_str ?? "")}
+                  </td>
+                  <td className="py-2 pl-3 text-gray-500 text-xs">
+                    {item.error
+                      ? item.error
+                      : String(item.display.detail_str ?? "")}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -449,13 +506,13 @@ function SRLevelsCard({ result }: { result: AnalysisResult }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <h3 className="text-sm font-medium text-gray-400 mb-3">
-        Support &amp; Resistance Levels
+        Support &amp; Resistance Levels <HelpTip text={HELP_SUPPORT_RESISTANCE} />
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Support */}
         <div>
           <div className="text-xs text-green-400 font-medium mb-2">
-            Support
+            Support <HelpTip text={HELP_SUPPORT} size={12} />
           </div>
           {result.support_levels.length === 0 ? (
             <p className="text-xs text-gray-600">None detected</p>
@@ -482,7 +539,7 @@ function SRLevelsCard({ result }: { result: AnalysisResult }) {
         {/* Resistance */}
         <div>
           <div className="text-xs text-red-400 font-medium mb-2">
-            Resistance
+            Resistance <HelpTip text={HELP_RESISTANCE} size={12} />
           </div>
           {result.resistance_levels.length === 0 ? (
             <p className="text-xs text-gray-600">None detected</p>
