@@ -306,8 +306,75 @@ class UniverseListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Strategy (stubs — expanded in Phase 3)
+# Strategy — Backtest (Phase 3)
 # ---------------------------------------------------------------------------
+
+class BacktestRequest(BaseModel):
+    """POST body for /api/strategy/backtest."""
+    ticker: str
+    period: str = "2y"                      # e.g. "1y", "2y", "5y"
+    interval: str = "1d"                    # "1d" only for now
+    start: str | None = None                # YYYY-MM-DD, overrides period
+    end: str | None = None                  # YYYY-MM-DD
+    initial_cash: float = 100_000.0
+    commission_pct: float = 0.0
+    slippage_pct: float = 0.001
+    stop_loss_pct: float | None = None      # None → use config default
+    take_profit_pct: float | None = None    # None → use config default
+
+
+class BacktestTradeSchema(BaseModel):
+    """A single round-trip trade from the backtest."""
+    entry_date: str
+    exit_date: str
+    entry_price: float
+    exit_price: float
+    quantity: float
+    side: str                               # "long" or "short"
+    pnl: float
+    pnl_pct: float
+    exit_reason: str = ""
+    entry_reason: str = ""
+    bars_held: int = 0
+
+
+class EquityPointSchema(BaseModel):
+    """One point on the equity curve."""
+    date: str
+    equity: float
+
+
+class BacktestRegimeSchema(BaseModel):
+    """Simplified regime info for backtest results."""
+    regime: str
+    confidence: float
+    label: str
+    description: str
+
+
+class BacktestResponse(BaseModel):
+    """Full backtest result returned by POST /api/strategy/backtest."""
+    ticker: str
+    period: str
+    strategy_name: str
+    initial_cash: float
+    final_equity: float
+    total_return_pct: float
+    annualized_return_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    win_rate_pct: float
+    total_trades: int
+    profit_factor: float
+    avg_trade_pnl_pct: float
+    best_trade_pnl_pct: float
+    worst_trade_pnl_pct: float
+    avg_bars_held: float
+    trades: list[BacktestTradeSchema]
+    equity_curve: list[EquityPointSchema]
+    regime: BacktestRegimeSchema | None = None
+    warmup_bars: int = 0
+
 
 class StrategyMeta(BaseModel):
     id: str

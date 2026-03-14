@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.routes.auth import get_current_user
 from app.models.schemas import (
     AnalysisResponse,
+    BacktestRequest,
+    BacktestResponse,
     ScanRequest,
     ScanResponse,
     SectorDetailResponse,
@@ -509,12 +511,98 @@ async def list_sectors(user: User = Depends(get_current_user)):
 
 strategy_router = APIRouter(prefix="/strategy", tags=["strategy"])
 
+# Separate pool for backtests (can run 30s+ for long periods)
+_backtest_pool = ThreadPoolExecutor(max_workers=1)
+
+
+def _run_backtest(
+    ticker: str,
+    trade_mode: str,
+    period: str,
+    interval: str,
+    start: str | None,
+    end: str | None,
+    initial_cash: float,
+    commission_pct: float,
+    slippage_pct: float,
+    stop_loss_pct: float | None,
+    take_profit_pct: float | None,
+) -> dict:
+    """Run backtest synchronously (called from thread pool)."""
+    from app.services.backtest import run_backtest  # late import
+
+    return run_backtest(
+        ticker=ticker,
+        trade_mode=trade_mode,
+        period=period,
+        interval=interval,
+        start=start,
+        end=end,
+        initial_cash=initial_cash,
+        commission_pct=commission_pct,
+        slippage_pct=slippage_pct,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+    )
+
+
+@strategy_router.post("/backtest", response_model=BacktestResponse)
+async def run_strategy_backtest(
+    req: BacktestRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run a single-ticker backtest with the score-based strategy.
+
+    Uses the user's trade mode to select the appropriate objective preset.
+    Cost model parameters (commission, slippage, stop loss, take profit)
+    can be overridden per request.
+    """
+    valid_periods = {"6mo", "1y", "2y", "5y", "10y", "max"}
+    valid_intervals = {"1d"}
+
+    # Allow period to be skipped when start/end are provided
+    if not req.start and req.period not in valid_periods:
+        raise HTTPException(
+            400,
+            f"Invalid period '{req.period}'. Must be one of: {sorted(valid_periods)}",
+        )
+    if req.interval not in valid_intervals:
+        raise HTTPException(
+            400,
+            f"Invalid interval '{req.interval}'. Must be one of: {sorted(valid_intervals)}",
+        )
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _backtest_pool,
+            _run_backtest,
+            req.ticker.upper(),
+            user.trade_mode,
+            req.period,
+            req.interval,
+            req.start,
+            req.end,
+            req.initial_cash,
+            req.commission_pct,
+            req.slippage_pct,
+            req.stop_loss_pct,
+            req.take_profit_pct,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Backtest failed for %s", req.ticker)
+        raise HTTPException(500, f"Backtest failed: {exc}") from exc
+
+    return result
+
 
 @strategy_router.get("/")
 async def strategy_lab_status(user: User = Depends(get_current_user)):
     return {
         "section": "Strategy Lab",
-        "status": "coming_in_phase_3",
+        "status": "active",
         "description": "Backtester, walk-forward testing, auto-tuner, and strategy library.",
     }
 
@@ -523,7 +611,7 @@ async def strategy_lab_status(user: User = Depends(get_current_user)):
 async def list_strategies(user: User = Depends(get_current_user)):
     return {
         "strategies": [],
-        "status": "coming_in_phase_3",
+        "status": "coming_in_phase_3d",
     }
 
 

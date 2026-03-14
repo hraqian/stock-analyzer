@@ -366,3 +366,76 @@ export async function getSectorDetail(
 export async function getSectorList(): Promise<{ sectors: string[] }> {
   return apiFetch("/api/sectors/list");
 }
+
+// -------------------------------------------------------------------
+// Strategy Lab — Backtest
+// -------------------------------------------------------------------
+
+export interface BacktestTrade {
+  entry_date: string;
+  exit_date: string;
+  entry_price: number;
+  exit_price: number;
+  quantity: number;
+  side: string;
+  pnl: number;
+  pnl_pct: number;
+  exit_reason: string;
+  entry_reason: string;
+  bars_held: number;
+}
+
+export interface EquityPoint {
+  date: string;
+  equity: number;
+}
+
+export interface BacktestRegime {
+  regime: string;
+  confidence: number;
+  label: string;
+  description: string;
+}
+
+export interface BacktestResult {
+  ticker: string;
+  period: string;
+  strategy_name: string;
+  initial_cash: number;
+  final_equity: number;
+  total_return_pct: number;
+  annualized_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  win_rate_pct: number;
+  total_trades: number;
+  profit_factor: number;
+  avg_trade_pnl_pct: number;
+  best_trade_pnl_pct: number;
+  worst_trade_pnl_pct: number;
+  avg_bars_held: number;
+  trades: BacktestTrade[];
+  equity_curve: EquityPoint[];
+  regime: BacktestRegime | null;
+  warmup_bars: number;
+}
+
+export interface BacktestRequest {
+  ticker: string;
+  period?: string;
+  interval?: string;
+  start?: string;
+  end?: string;
+  initial_cash?: number;
+  commission_pct?: number;
+  slippage_pct?: number;
+  stop_loss_pct?: number | null;
+  take_profit_pct?: number | null;
+}
+
+export async function runBacktest(req: BacktestRequest): Promise<BacktestResult> {
+  return apiFetch<BacktestResult>("/api/strategy/backtest", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}

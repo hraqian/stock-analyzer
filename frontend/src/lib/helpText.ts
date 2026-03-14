@@ -253,3 +253,64 @@ export const HELP_SECTOR_ETF =
 
 export const HELP_BENCHMARK =
   "The S&P 500 (SPY) is used as the benchmark. Relative strength compares each sector against this benchmark to see which sectors are outperforming or underperforming the broader market.";
+
+// ---------------------------------------------------------------------------
+// Strategy Lab — Backtest
+// ---------------------------------------------------------------------------
+
+export const HELP_BACKTEST =
+  "A backtest simulates how a trading strategy would have performed on historical data. It's like a 'time machine' that tests your strategy on past prices to see if it would have made money.";
+
+export const HELP_INITIAL_CASH =
+  "The amount of money you start with in the simulation. This is virtual money — no real trades are placed.";
+
+export const HELP_COMMISSION =
+  "The fee your broker charges per trade, expressed as a percentage of the trade value. Most modern brokers charge $0 (0%), but some charge 0.01-0.1%.";
+
+export const HELP_SLIPPAGE =
+  "The difference between the expected price and the actual execution price. In real markets, you rarely get the exact price you see — slippage accounts for this gap.";
+
+export const HELP_STOP_LOSS =
+  "An automatic exit that limits how much you can lose on a single trade. For example, 5% means if the price drops 5% from your entry, the position is automatically closed.";
+
+export const HELP_TAKE_PROFIT =
+  "An automatic exit that locks in gains when the price reaches a target. For example, 15% means if the price rises 15% from your entry, the position is automatically closed.";
+
+export const HELP_BT_TOTAL_RETURN =
+  "The total percentage gain or loss from start to finish. If you started with $100k and ended with $120k, total return is +20%.";
+
+export const HELP_ANNUALIZED_RETURN =
+  "The average yearly return, adjusted for the time period. A 50% return over 2 years is about 22% annualized. This lets you compare strategies across different time periods.";
+
+export const HELP_MAX_DRAWDOWN =
+  "The largest peak-to-trough decline during the backtest. If your portfolio went from $120k to $90k at its worst, that's a 25% drawdown. Lower is better — it measures your worst-case pain.";
+
+export const HELP_SHARPE_RATIO =
+  "A measure of risk-adjusted return. It tells you how much return you get per unit of risk. Above 1.0 is good, above 2.0 is great, below 0 means the strategy lost money.";
+
+export const HELP_WIN_RATE =
+  "The percentage of trades that were profitable. A 60% win rate means 6 out of every 10 trades made money. Note: a low win rate can still be profitable if winners are much larger than losers.";
+
+export const HELP_PROFIT_FACTOR =
+  "Total profits divided by total losses. Above 1.0 means the strategy is profitable overall. For example, 1.5 means you made $1.50 for every $1.00 lost.";
+
+export const HELP_TOTAL_TRADES =
+  "How many round-trip trades (buy then sell, or short then cover) the strategy made during the backtest period.";
+
+export const HELP_AVG_TRADE_PNL =
+  "The average profit or loss per trade, as a percentage. Positive means trades are profitable on average.";
+
+export const HELP_BEST_TRADE =
+  "The single most profitable trade during the backtest, shown as a percentage gain.";
+
+export const HELP_WORST_TRADE =
+  "The single biggest losing trade during the backtest, shown as a percentage loss.";
+
+export const HELP_AVG_BARS_HELD =
+  "On average, how many trading days each position was held before being closed. Shorter = more active trading.";
+
+export const HELP_EQUITY_CURVE =
+  "A chart showing how your portfolio value changed over time. An upward-sloping line means the strategy was making money; dips show drawdown periods.";
+
+export const HELP_TRADE_LOG =
+  "A detailed list of every trade the strategy made — when it entered, when it exited, whether it won or lost, and why it exited (signal change, stop loss, or take profit).";

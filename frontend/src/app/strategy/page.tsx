@@ -1,37 +1,755 @@
 "use client";
 
-export default function StrategyPage() {
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createChart, ColorType, LineData, Time } from "lightweight-charts";
+import HelpTip from "@/components/HelpTip";
+import {
+  runBacktest,
+  type BacktestResult,
+  type BacktestRequest,
+  type BacktestTrade,
+  type EquityPoint,
+} from "@/lib/api";
+import {
+  HELP_BACKTEST,
+  HELP_INITIAL_CASH,
+  HELP_COMMISSION,
+  HELP_SLIPPAGE,
+  HELP_STOP_LOSS,
+  HELP_TAKE_PROFIT,
+  HELP_BT_TOTAL_RETURN,
+  HELP_ANNUALIZED_RETURN,
+  HELP_MAX_DRAWDOWN,
+  HELP_SHARPE_RATIO,
+  HELP_WIN_RATE,
+  HELP_PROFIT_FACTOR,
+  HELP_TOTAL_TRADES,
+  HELP_AVG_TRADE_PNL,
+  HELP_BEST_TRADE,
+  HELP_WORST_TRADE,
+  HELP_AVG_BARS_HELD,
+  HELP_EQUITY_CURVE,
+  HELP_TRADE_LOG,
+} from "@/lib/helpText";
+
+// ---------------------------------------------------------------------------
+// Equity curve chart (lightweight-charts line series)
+// ---------------------------------------------------------------------------
+
+function EquityCurveChart({
+  data,
+  warmupBars,
+  height = 350,
+}: {
+  data: EquityPoint[];
+  warmupBars: number;
+  height?: number;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || data.length === 0) return;
+
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "#111827" },
+        textColor: "#9CA3AF",
+      },
+      grid: {
+        vertLines: { color: "#1F2937" },
+        horzLines: { color: "#1F2937" },
+      },
+      width: containerRef.current.clientWidth,
+      height,
+      handleScroll: { mouseWheel: false },
+      handleScale: { mouseWheel: false },
+      rightPriceScale: {
+        borderColor: "#374151",
+      },
+      timeScale: {
+        borderColor: "#374151",
+      },
+    });
+
+    // Post-warmup equity data
+    const lineData: LineData[] = data.slice(warmupBars).map((pt) => ({
+      time: pt.date as Time,
+      value: pt.equity,
+    }));
+
+    const series = chart.addLineSeries({
+      color: "#10B981",
+      lineWidth: 2,
+      crosshairMarkerVisible: true,
+      priceFormat: {
+        type: "custom",
+        formatter: (price: number) => `$${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      },
+    });
+    series.setData(lineData);
+    chart.timeScale().fitContent();
+
+    const handleResize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+    };
+  }, [data, warmupBars, height]);
+
+  return <div ref={containerRef} />;
+}
+
+// ---------------------------------------------------------------------------
+// Metric card component
+// ---------------------------------------------------------------------------
+
+function MetricCard({
+  label,
+  value,
+  helpText,
+  color,
+}: {
+  label: string;
+  value: string;
+  helpText?: string;
+  color?: "green" | "red" | "yellow" | "default";
+}) {
+  const colorClass =
+    color === "green"
+      ? "text-emerald-400"
+      : color === "red"
+        ? "text-red-400"
+        : color === "yellow"
+          ? "text-yellow-400"
+          : "text-white";
+
+  return (
+    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+      <div className="text-xs text-gray-400 flex items-center gap-1 mb-1">
+        {label}
+        {helpText && <HelpTip text={helpText} />}
+      </div>
+      <div className={`text-lg font-semibold ${colorClass}`}>{value}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trade log table
+// ---------------------------------------------------------------------------
+
+function TradeLogTable({ trades }: { trades: BacktestTrade[] }) {
+  const [sortCol, setSortCol] = useState<string>("entry_date");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [page, setPage] = useState(0);
+  const perPage = 20;
+
+  const sorted = [...trades].sort((a, b) => {
+    const aVal = (a as unknown as Record<string, unknown>)[sortCol];
+    const bVal = (b as unknown as Record<string, unknown>)[sortCol];
+    if (typeof aVal === "number" && typeof bVal === "number") {
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    return sortAsc
+      ? String(aVal).localeCompare(String(bVal))
+      : String(bVal).localeCompare(String(aVal));
+  });
+
+  const paged = sorted.slice(page * perPage, (page + 1) * perPage);
+  const totalPages = Math.ceil(trades.length / perPage);
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortCol(col);
+      setSortAsc(true);
+    }
+  };
+
+  const cols: { key: string; label: string; align?: string }[] = [
+    { key: "entry_date", label: "Entry" },
+    { key: "exit_date", label: "Exit" },
+    { key: "side", label: "Side" },
+    { key: "entry_price", label: "Entry $", align: "right" },
+    { key: "exit_price", label: "Exit $", align: "right" },
+    { key: "quantity", label: "Qty", align: "right" },
+    { key: "pnl_pct", label: "P&L %", align: "right" },
+    { key: "pnl", label: "P&L $", align: "right" },
+    { key: "bars_held", label: "Bars", align: "right" },
+    { key: "exit_reason", label: "Exit Reason" },
+  ];
+
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-white">Strategy Lab</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-700 text-gray-400">
+              {cols.map((c) => (
+                <th
+                  key={c.key}
+                  onClick={() => handleSort(c.key)}
+                  className={`py-2 px-2 cursor-pointer hover:text-gray-200 select-none ${
+                    c.align === "right" ? "text-right" : "text-left"
+                  }`}
+                >
+                  {c.label}
+                  {sortCol === c.key && (sortAsc ? " \u25B2" : " \u25BC")}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((t, i) => (
+              <tr
+                key={i}
+                className="border-b border-gray-800 hover:bg-gray-800/40"
+              >
+                <td className="py-1.5 px-2 text-gray-300">{t.entry_date}</td>
+                <td className="py-1.5 px-2 text-gray-300">{t.exit_date}</td>
+                <td className="py-1.5 px-2">
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                      t.side === "long"
+                        ? "bg-emerald-900/50 text-emerald-400"
+                        : "bg-red-900/50 text-red-400"
+                    }`}
+                  >
+                    {t.side.toUpperCase()}
+                  </span>
+                </td>
+                <td className="py-1.5 px-2 text-right text-gray-300">
+                  ${t.entry_price.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-right text-gray-300">
+                  ${t.exit_price.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-right text-gray-300">
+                  {t.quantity}
+                </td>
+                <td
+                  className={`py-1.5 px-2 text-right font-medium ${
+                    t.pnl_pct >= 0 ? "text-emerald-400" : "text-red-400"
+                  }`}
+                >
+                  {t.pnl_pct >= 0 ? "+" : ""}
+                  {(t.pnl_pct * 100).toFixed(2)}%
+                </td>
+                <td
+                  className={`py-1.5 px-2 text-right font-medium ${
+                    t.pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  }`}
+                >
+                  {t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-right text-gray-300">
+                  {t.bars_held}
+                </td>
+                <td className="py-1.5 px-2 text-gray-400 capitalize">
+                  {t.exit_reason.replace(/_/g, " ")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
+          <span>
+            Showing {page * perPage + 1}-
+            {Math.min((page + 1) * perPage, trades.length)} of {trades.length}{" "}
+            trades
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="px-2 py-1 bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700"
+            >
+              Prev
+            </button>
+            <button
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-2 py-1 bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page component
+// ---------------------------------------------------------------------------
+
+export default function StrategyPage() {
+  // Form state
+  const [ticker, setTicker] = useState("AAPL");
+  const [period, setPeriod] = useState("2y");
+  const [initialCash, setInitialCash] = useState(100_000);
+  const [commissionPct, setCommissionPct] = useState(0);
+  const [slippagePct, setSlippagePct] = useState(0.1);
+  const [stopLossPct, setStopLossPct] = useState(5);
+  const [takeProfitPct, setTakeProfitPct] = useState(15);
+
+  // Result state
+  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Active tab: "metrics" | "trades"
+  const [activeTab, setActiveTab] = useState<"metrics" | "trades">("metrics");
+
+  const handleRun = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const req: BacktestRequest = {
+        ticker: ticker.trim().toUpperCase(),
+        period,
+        initial_cash: initialCash,
+        commission_pct: commissionPct / 100,   // UI shows %, API wants decimal
+        slippage_pct: slippagePct / 100,
+        stop_loss_pct: stopLossPct / 100,
+        take_profit_pct: takeProfitPct / 100,
+      };
+      const res = await runBacktest(req);
+      setResult(res);
+      setActiveTab("metrics");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Backtest failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [ticker, period, initialCash, commissionPct, slippagePct, stopLossPct, takeProfitPct]);
+
+  // Determine metric colors
+  const metricColor = (val: number | null | undefined): "green" | "red" | "default" =>
+    val == null ? "default" : val > 0 ? "green" : val < 0 ? "red" : "default";
+
+  const fmtPct = (v: number | null | undefined) =>
+    v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const fmtNum = (v: number | null | undefined, decimals = 2) =>
+    v == null ? "—" : v.toFixed(decimals);
+  const fmtMoney = (v: number | null | undefined) =>
+    v == null ? "—" : `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+          Strategy Lab
+          <HelpTip text={HELP_BACKTEST} />
+        </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Backtest strategies with walk-forward validation, auto-tune parameters,
-          and browse the strategy library.
+          Backtest the score-based strategy on any ticker with customizable
+          parameters.
         </p>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-        <div className="text-gray-600 text-sm">
-          <svg
-            className="w-12 h-12 mx-auto mb-3 text-gray-700"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M9.75 3v4.5m4.5-4.5v4.5M9.75 7.5h4.5M7.5 12l-3 9h15l-3-9M7.5 12h9"
+      {/* Backtest form */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <h3 className="text-sm font-medium text-gray-300 mb-4">
+          Backtest Configuration
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          {/* Ticker */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Ticker</label>
+            <input
+              type="text"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              placeholder="AAPL"
             />
-          </svg>
-          <p className="text-gray-400 font-medium">Coming in Phase 3</p>
-          <p className="mt-1">
-            Strategy backtester with walk-forward testing, parameter auto-tuner,
-            and a library of built-in strategies.
-          </p>
+          </div>
+
+          {/* Period */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">
+              Period
+            </label>
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              <option value="6mo">6 Months</option>
+              <option value="1y">1 Year</option>
+              <option value="2y">2 Years</option>
+              <option value="5y">5 Years</option>
+            </select>
+          </div>
+
+          {/* Initial Cash */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Starting Capital <HelpTip text={HELP_INITIAL_CASH} />
+            </label>
+            <input
+              type="number"
+              value={initialCash}
+              onChange={(e) => setInitialCash(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              min={1000}
+              step={10000}
+            />
+          </div>
+
+          {/* Commission */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Commission % <HelpTip text={HELP_COMMISSION} />
+            </label>
+            <input
+              type="number"
+              value={commissionPct}
+              onChange={(e) => setCommissionPct(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              min={0}
+              max={5}
+              step={0.01}
+            />
+          </div>
+
+          {/* Slippage */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Slippage % <HelpTip text={HELP_SLIPPAGE} />
+            </label>
+            <input
+              type="number"
+              value={slippagePct}
+              onChange={(e) => setSlippagePct(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              min={0}
+              max={5}
+              step={0.01}
+            />
+          </div>
+
+          {/* Stop Loss */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Stop Loss % <HelpTip text={HELP_STOP_LOSS} />
+            </label>
+            <input
+              type="number"
+              value={stopLossPct}
+              onChange={(e) => setStopLossPct(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              min={0.5}
+              max={50}
+              step={0.5}
+            />
+          </div>
+
+          {/* Take Profit */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Take Profit % <HelpTip text={HELP_TAKE_PROFIT} />
+            </label>
+            <input
+              type="number"
+              value={takeProfitPct}
+              onChange={(e) => setTakeProfitPct(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              min={1}
+              max={100}
+              step={1}
+            />
+          </div>
+
+          {/* Run button */}
+          <div className="flex items-end">
+            <button
+              onClick={handleRun}
+              disabled={loading || !ticker.trim()}
+              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
+                         disabled:text-gray-500 text-white text-sm font-medium rounded-lg
+                         transition-colors"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg
+                    className="animate-spin h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Running...
+                </span>
+              ) : (
+                "Run Backtest"
+              )}
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Results */}
+      {result && (
+        <>
+          {/* Summary banner */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <span className="text-lg font-bold text-white">
+                  {result.ticker}
+                </span>
+                <span className="text-gray-500 text-sm ml-2">
+                  {result.period} &middot; {result.strategy_name}
+                </span>
+                {result.regime && (
+                  <span className="ml-2 px-2 py-0.5 bg-gray-800 text-gray-400 text-xs rounded">
+                    {result.regime.label}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-6 text-sm">
+                <div>
+                  <span className="text-gray-500">Start: </span>
+                  <span className="text-white">{fmtMoney(result.initial_cash)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">End: </span>
+                  <span
+                    className={
+                      result.final_equity >= result.initial_cash
+                        ? "text-emerald-400"
+                        : "text-red-400"
+                    }
+                  >
+                    {fmtMoney(result.final_equity)}
+                  </span>
+                </div>
+                <div
+                  className={`text-lg font-bold ${
+                    result.total_return_pct >= 0
+                      ? "text-emerald-400"
+                      : "text-red-400"
+                  }`}
+                >
+                  {fmtPct(result.total_return_pct)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Equity curve */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-1">
+              Equity Curve <HelpTip text={HELP_EQUITY_CURVE} />
+            </h3>
+            <EquityCurveChart
+              data={result.equity_curve}
+              warmupBars={result.warmup_bars}
+            />
+          </div>
+
+          {/* Tabs: Metrics / Trade Log */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl">
+            <div className="flex border-b border-gray-800">
+              <button
+                onClick={() => setActiveTab("metrics")}
+                className={`px-5 py-3 text-sm font-medium transition-colors ${
+                  activeTab === "metrics"
+                    ? "text-blue-400 border-b-2 border-blue-400"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                Performance Metrics
+              </button>
+              <button
+                onClick={() => setActiveTab("trades")}
+                className={`px-5 py-3 text-sm font-medium transition-colors flex items-center gap-1 ${
+                  activeTab === "trades"
+                    ? "text-blue-400 border-b-2 border-blue-400"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                Trade Log <HelpTip text={HELP_TRADE_LOG} />
+                <span className="ml-1 px-1.5 py-0.5 bg-gray-800 text-gray-400 text-xs rounded">
+                  {result.total_trades}
+                </span>
+              </button>
+            </div>
+
+            <div className="p-5">
+              {activeTab === "metrics" && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  <MetricCard
+                    label="Total Return"
+                    value={fmtPct(result.total_return_pct)}
+                    helpText={HELP_BT_TOTAL_RETURN}
+                    color={metricColor(result.total_return_pct)}
+                  />
+                  <MetricCard
+                    label="Annualized Return"
+                    value={fmtPct(result.annualized_return_pct)}
+                    helpText={HELP_ANNUALIZED_RETURN}
+                    color={metricColor(result.annualized_return_pct)}
+                  />
+                  <MetricCard
+                    label="Max Drawdown"
+                    value={fmtPct(-Math.abs(result.max_drawdown_pct))}
+                    helpText={HELP_MAX_DRAWDOWN}
+                    color={result.max_drawdown_pct > 20 ? "red" : result.max_drawdown_pct > 10 ? "yellow" : "green"}
+                  />
+                  <MetricCard
+                    label="Sharpe Ratio"
+                    value={fmtNum(result.sharpe_ratio)}
+                    helpText={HELP_SHARPE_RATIO}
+                    color={
+                      result.sharpe_ratio >= 1
+                        ? "green"
+                        : result.sharpe_ratio >= 0
+                          ? "yellow"
+                          : "red"
+                    }
+                  />
+                  <MetricCard
+                    label="Win Rate"
+                    value={`${fmtNum(result.win_rate_pct, 1)}%`}
+                    helpText={HELP_WIN_RATE}
+                    color={
+                      result.win_rate_pct >= 50
+                        ? "green"
+                        : result.win_rate_pct >= 40
+                          ? "yellow"
+                          : "red"
+                    }
+                  />
+                  <MetricCard
+                    label="Profit Factor"
+                    value={fmtNum(result.profit_factor)}
+                    helpText={HELP_PROFIT_FACTOR}
+                    color={
+                      result.profit_factor >= 1.5
+                        ? "green"
+                        : result.profit_factor >= 1.0
+                          ? "yellow"
+                          : "red"
+                    }
+                  />
+                  <MetricCard
+                    label="Total Trades"
+                    value={String(result.total_trades)}
+                    helpText={HELP_TOTAL_TRADES}
+                  />
+                  <MetricCard
+                    label="Avg Trade P&L"
+                    value={`${(result.avg_trade_pnl_pct * 100).toFixed(2)}%`}
+                    helpText={HELP_AVG_TRADE_PNL}
+                    color={metricColor(result.avg_trade_pnl_pct)}
+                  />
+                  <MetricCard
+                    label="Best Trade"
+                    value={`+${(result.best_trade_pnl_pct * 100).toFixed(2)}%`}
+                    helpText={HELP_BEST_TRADE}
+                    color="green"
+                  />
+                  <MetricCard
+                    label="Worst Trade"
+                    value={`${(result.worst_trade_pnl_pct * 100).toFixed(2)}%`}
+                    helpText={HELP_WORST_TRADE}
+                    color="red"
+                  />
+                  <MetricCard
+                    label="Avg Bars Held"
+                    value={fmtNum(result.avg_bars_held, 1)}
+                    helpText={HELP_AVG_BARS_HELD}
+                  />
+                </div>
+              )}
+
+              {activeTab === "trades" && (
+                <>
+                  {result.trades.length === 0 ? (
+                    <p className="text-gray-500 text-sm">
+                      No trades were executed during this backtest period.
+                    </p>
+                  ) : (
+                    <TradeLogTable trades={result.trades} />
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Placeholder sections for Walk-Forward, Auto-Tuner, Strategy Library */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {[
+          {
+            title: "Walk-Forward Testing",
+            desc: "Rolling out-of-sample validation to verify strategy robustness.",
+            phase: "Phase 3B",
+          },
+          {
+            title: "Auto-Tuner",
+            desc: "Objective-based parameter optimization with sensitivity analysis.",
+            phase: "Phase 3C",
+          },
+          {
+            title: "Strategy Library",
+            desc: "Save, compare, and export strategies. Built-in presets included.",
+            phase: "Phase 3D",
+          },
+        ].map((item) => (
+          <div
+            key={item.title}
+            className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center"
+          >
+            <p className="text-gray-400 font-medium text-sm">{item.title}</p>
+            <p className="text-gray-600 text-xs mt-1">{item.desc}</p>
+            <span className="inline-block mt-2 px-2 py-0.5 bg-gray-800 text-gray-500 text-xs rounded">
+              {item.phase}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

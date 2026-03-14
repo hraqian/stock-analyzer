@@ -248,6 +248,52 @@ class ScoreBasedStrategy(Strategy):
         self._trading_mode = mode
 
     # ------------------------------------------------------------------
+    # Profile overrides (called by BacktestEngine when strategy profiles
+    # are enabled and a regime-specific profile is selected)
+    # ------------------------------------------------------------------
+
+    def apply_overrides(self, overrides: dict[str, Any]) -> None:
+        """Apply parameter overrides from a strategy profile.
+
+        Updates internal fields based on the provided dict.  Keys match
+        the config.yaml ``strategy`` section (e.g. ``score_thresholds``,
+        ``percent_equity``, ``combination_mode``).
+        """
+        self.params.update(overrides)
+
+        # Score thresholds
+        if "score_thresholds" in overrides:
+            th = overrides["score_thresholds"]
+            if "short_below" in th:
+                self._short_below = float(th["short_below"])
+            if "hold_below" in th:
+                self._hold_below = float(th["hold_below"])
+
+        # Position sizing
+        if "percent_equity" in overrides:
+            self._pct_equity = float(overrides["percent_equity"])
+        if "position_sizing" in overrides:
+            self._sizing = str(overrides["position_sizing"])
+
+        # Combination mode
+        if "combination_mode" in overrides:
+            self._combination_mode = str(overrides["combination_mode"])
+        if "indicator_weight" in overrides:
+            self._indicator_weight = float(overrides["indicator_weight"])
+        if "pattern_weight" in overrides:
+            self._pattern_weight = float(overrides["pattern_weight"])
+
+        # Boost params
+        if "boost_strength" in overrides:
+            self._boost_strength = float(overrides["boost_strength"])
+        if "boost_dead_zone" in overrides:
+            self._boost_dead_zone = float(overrides["boost_dead_zone"])
+
+        # Trend confirmation
+        if "trend_confirm_period" in overrides:
+            self._trend_confirm_period = int(overrides["trend_confirm_period"])
+
+    # ------------------------------------------------------------------
     # Sub-type adaptation
     # ------------------------------------------------------------------
 
