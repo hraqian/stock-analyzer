@@ -790,7 +790,9 @@ _auto_tune_pool = ThreadPoolExecutor(max_workers=1)
 
 
 def _run_auto_tune(
-    ticker: str,
+    ticker: str | None,
+    tickers: list[str] | None,
+    sector: str | None,
     trade_mode: str,
     objective: str,
     n_trials: int,
@@ -803,6 +805,8 @@ def _run_auto_tune(
 
     return run_auto_tune(
         ticker=ticker,
+        tickers=tickers,
+        sector=sector,
         trade_mode=trade_mode,
         objective=objective,
         n_trials=n_trials,
@@ -824,6 +828,25 @@ async def run_auto_tuner(
     against the baseline (default params), and sensitivity analysis
     for power user mode.
     """
+    # Validate that exactly one of ticker, tickers, or sector is provided
+    sources = sum([
+        req.ticker is not None and req.ticker.strip() != "",
+        req.tickers is not None and len(req.tickers) > 0,
+        req.sector is not None and req.sector.strip() != "",
+    ])
+    if sources == 0:
+        raise HTTPException(400, "Must provide one of: ticker, tickers, or sector")
+    if sources > 1:
+        raise HTTPException(400, "Provide only one of: ticker, tickers, or sector")
+
+    # Validate sector name
+    if req.sector:
+        if req.sector not in VALID_SECTORS:
+            raise HTTPException(
+                400,
+                f"Invalid sector '{req.sector}'. Must be one of: {sorted(VALID_SECTORS)}",
+            )
+
     if req.objective not in VALID_TUNER_OBJECTIVES:
         raise HTTPException(
             400,
@@ -839,12 +862,20 @@ async def run_auto_tuner(
     if req.max_windows < 2 or req.max_windows > 10:
         raise HTTPException(400, "max_windows must be between 2 and 10")
 
+    # Prepare params for the thread pool call
+    ticker_val = req.ticker.upper() if req.ticker else None
+    tickers_val = [t.upper() for t in req.tickers] if req.tickers else None
+    sector_val = req.sector if req.sector else None
+    label = sector_val or (", ".join(tickers_val[:3]) if tickers_val else ticker_val)
+
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             _auto_tune_pool,
             _run_auto_tune,
-            req.ticker.upper(),
+            ticker_val,
+            tickers_val,
+            sector_val,
             user.trade_mode,
             req.objective,
             req.n_trials,
@@ -855,7 +886,7 @@ async def run_auto_tuner(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
-        logger.exception("Auto-tune failed for %s", req.ticker)
+        logger.exception("Auto-tune failed for %s", label)
         raise HTTPException(500, f"Auto-tune failed: {exc}") from exc
 
     return result

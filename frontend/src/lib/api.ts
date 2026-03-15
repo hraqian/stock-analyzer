@@ -521,6 +521,9 @@ export interface AutoTuneTrial {
 
 export interface AutoTuneResult {
   ticker: string;
+  tickers: string[];
+  mode: string;  // "single" | "sector" | "custom"
+  sector: string | null;
   objective: string;
   objective_label: string;
   n_trials: number;
@@ -553,7 +556,9 @@ export interface AutoTuneResult {
 }
 
 export interface AutoTuneRequest {
-  ticker: string;
+  ticker?: string;
+  tickers?: string[];
+  sector?: string;
   objective?: string;
   n_trials?: number;
   train_years?: number;

@@ -48,8 +48,20 @@ def _safe(v: Any) -> Any:
     return v
 
 
+# Map sector names to representative tickers (imported from sectors service)
+def _resolve_sector_tickers(sector: str) -> list[str]:
+    """Resolve a sector name to its representative tickers."""
+    from app.services.sectors import SECTOR_HOLDINGS  # late import
+    holdings = SECTOR_HOLDINGS.get(sector)
+    if not holdings:
+        raise ValueError(f"Unknown sector: {sector}")
+    return [ticker for ticker, _name in holdings]
+
+
 def run_auto_tune(
-    ticker: str,
+    ticker: str | None = None,
+    tickers: list[str] | None = None,
+    sector: str | None = None,
     trade_mode: str = "swing",
     objective: str = "balanced",
     n_trials: int = 30,
@@ -59,12 +71,30 @@ def run_auto_tune(
 ) -> dict:
     """Run the auto-tuner and return JSON-safe results.
 
+    Supports three modes:
+      - Single ticker: provide ``ticker``
+      - Sector group: provide ``sector`` (resolved to representative tickers)
+      - Custom group: provide ``tickers`` list
+
     Parameters match the API request schema.  Engine modules are imported
     lazily because they are volume-mounted into the Docker container.
     """
     from config import Config                        # type: ignore[import-untyped]
     from data.yahoo import YahooFinanceProvider      # type: ignore[import-untyped]
     from engine.auto_tuner import AutoTuner          # type: ignore[import-untyped]
+
+    # Determine mode and resolve ticker list
+    if sector:
+        mode = "sector"
+        resolved_tickers = _resolve_sector_tickers(sector)
+    elif tickers and len(tickers) > 0:
+        mode = "custom"
+        resolved_tickers = [t.upper() for t in tickers]
+    elif ticker:
+        mode = "single"
+        resolved_tickers = [ticker.upper()]
+    else:
+        raise ValueError("Must provide ticker, tickers, or sector")
 
     # 1. Build config with the right objective preset
     cfg = Config.defaults()
@@ -78,12 +108,14 @@ def run_auto_tune(
 
     # 3. Run
     result = tuner.run(
-        ticker=ticker.upper(),
+        tickers=resolved_tickers,
         objective=objective,
         n_trials=n_trials,
         train_years=train_years,
         test_years=test_years,
         max_windows=max_windows,
+        mode=mode,
+        sector=sector,
     )
 
     # 4. Convert to JSON-safe dict
@@ -116,6 +148,9 @@ def run_auto_tune(
 
     return {
         "ticker": result.ticker,
+        "tickers": result.tickers,
+        "mode": result.mode,
+        "sector": result.sector,
         "objective": result.objective,
         "objective_label": result.objective_label,
         "n_trials": result.n_trials,

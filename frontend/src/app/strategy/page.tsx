@@ -66,6 +66,10 @@ import {
   HELP_MAX_RISK_ADJUSTED,
   HELP_MIN_DRAWDOWN,
   HELP_BALANCED,
+  HELP_TUNER_MODE,
+  HELP_TUNER_SECTOR,
+  HELP_TUNER_CUSTOM_GROUP,
+  HELP_TUNER_GROUP_BENEFIT,
   HELP_STRATEGY_LIBRARY,
   HELP_STRATEGY_PRESET,
   HELP_STRATEGY_VERSION,
@@ -1063,6 +1067,20 @@ function WalkForwardSection() {
 // Auto-Tuner sub-component
 // ---------------------------------------------------------------------------
 
+const GICS_SECTORS = [
+  "Technology", "Financials", "Energy", "Health Care",
+  "Consumer Discretionary", "Consumer Staples", "Industrials",
+  "Materials", "Real Estate", "Utilities", "Communication Services",
+] as const;
+
+type TuneMode = "single" | "sector" | "custom";
+
+const TUNE_MODE_OPTIONS: { value: TuneMode; label: string }[] = [
+  { value: "single", label: "Single Ticker" },
+  { value: "sector", label: "Sector" },
+  { value: "custom", label: "Custom Group" },
+];
+
 const OBJECTIVE_OPTIONS: { value: string; label: string; help: string }[] = [
   { value: "balanced", label: "Balanced", help: HELP_BALANCED },
   { value: "beat_buy_hold", label: "Beat Buy-and-Hold", help: HELP_BEAT_BUY_HOLD },
@@ -1072,7 +1090,10 @@ const OBJECTIVE_OPTIONS: { value: string; label: string; help: string }[] = [
 ];
 
 function AutoTunerSection() {
+  const [tuneMode, setTuneMode] = useState<TuneMode>("single");
   const [ticker, setTicker] = useState("AAPL");
+  const [sector, setSector] = useState<string>(GICS_SECTORS[0]);
+  const [customTickers, setCustomTickers] = useState("");
   const [objective, setObjective] = useState("balanced");
   const [nTrials, setNTrials] = useState(30);
   const [trainYears, setTrainYears] = useState(3);
@@ -1087,6 +1108,15 @@ function AutoTunerSection() {
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Check if the run button should be enabled
+  const canRun = (() => {
+    if (loading) return false;
+    if (tuneMode === "single") return ticker.trim().length > 0;
+    if (tuneMode === "sector") return true;
+    if (tuneMode === "custom") return customTickers.trim().length > 0;
+    return false;
+  })();
+
   const handleRun = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1095,14 +1125,24 @@ function AutoTunerSection() {
     // Start elapsed timer
     timerRef.current = setInterval(() => setElapsed((t) => t + 1), 1000);
     try {
-      const res = await runAutoTune({
-        ticker: ticker.trim().toUpperCase(),
+      const req: AutoTuneRequest = {
         objective,
         n_trials: nTrials,
         train_years: trainYears,
         test_years: testYears,
         max_windows: maxWindows,
-      });
+      };
+      if (tuneMode === "single") {
+        req.ticker = ticker.trim().toUpperCase();
+      } else if (tuneMode === "sector") {
+        req.sector = sector;
+      } else {
+        req.tickers = customTickers
+          .split(",")
+          .map((t) => t.trim().toUpperCase())
+          .filter((t) => t.length > 0);
+      }
+      const res = await runAutoTune(req);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auto-tune failed");
@@ -1110,7 +1150,7 @@ function AutoTunerSection() {
       setLoading(false);
       if (timerRef.current) clearInterval(timerRef.current);
     }
-  }, [ticker, objective, nTrials, trainYears, testYears, maxWindows]);
+  }, [tuneMode, ticker, sector, customTickers, objective, nTrials, trainYears, testYears, maxWindows]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -1156,21 +1196,83 @@ function AutoTunerSection() {
         <h3 className="text-sm font-medium text-gray-300 mb-4 flex items-center gap-1">
           Auto-Tuner <HelpTip text={HELP_AUTO_TUNER} />
         </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
-          {/* Ticker */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Ticker</label>
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
-                         focus:outline-none focus:border-blue-500"
-            />
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-xs text-gray-400 flex items-center gap-1">
+            Mode <HelpTip text={HELP_TUNER_MODE} />
+          </span>
+          <div className="inline-flex rounded-lg border border-gray-700 overflow-hidden">
+            {TUNE_MODE_OPTIONS.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => setTuneMode(m.value)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  tuneMode === m.value
+                    ? "bg-amber-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-white"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
+          {tuneMode !== "single" && (
+            <span className="text-xs text-amber-400/70 flex items-center gap-1">
+              Group tuning <HelpTip text={HELP_TUNER_GROUP_BENEFIT} />
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
+          {/* Ticker / Sector / Custom input — first column adapts to mode */}
+          {tuneMode === "single" && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Ticker</label>
+              <input
+                type="text"
+                value={ticker}
+                onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                           focus:outline-none focus:border-blue-500"
+                placeholder="AAPL"
+              />
+            </div>
+          )}
+          {tuneMode === "sector" && (
+            <div className="col-span-2 sm:col-span-1">
+              <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+                Sector <HelpTip text={HELP_TUNER_SECTOR} />
+              </label>
+              <select
+                value={sector}
+                onChange={(e) => setSector(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                           focus:outline-none focus:border-blue-500"
+              >
+                {GICS_SECTORS.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {tuneMode === "custom" && (
+            <div className="col-span-2">
+              <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+                Tickers <HelpTip text={HELP_TUNER_CUSTOM_GROUP} />
+              </label>
+              <input
+                type="text"
+                value={customTickers}
+                onChange={(e) => setCustomTickers(e.target.value.toUpperCase())}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                           focus:outline-none focus:border-blue-500"
+                placeholder="TSLA, RIVN, NIO, LCID"
+              />
+            </div>
+          )}
 
           {/* Objective */}
-          <div className="col-span-2 sm:col-span-1">
+          <div className={tuneMode === "custom" ? "" : "col-span-2 sm:col-span-1"}>
             <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
               Objective <HelpTip text={HELP_TUNER_OBJECTIVE} />
             </label>
@@ -1243,7 +1345,7 @@ function AutoTunerSection() {
           <div className="flex items-end">
             <button
               onClick={handleRun}
-              disabled={loading || !ticker.trim()}
+              disabled={!canRun}
               className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700
                          disabled:text-gray-500 text-white text-sm font-medium rounded-lg
                          transition-colors"
@@ -1291,10 +1393,37 @@ function AutoTunerSection() {
           >
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <span className="text-white font-semibold">{result.ticker}</span>
+                {result.mode === "single" ? (
+                  <span className="text-white font-semibold">{result.ticker}</span>
+                ) : (
+                  <span className="text-white font-semibold">
+                    {result.mode === "sector" ? (
+                      <>
+                        <span className="text-amber-400">{result.sector}</span>
+                        <span className="text-gray-400 text-xs ml-1">sector</span>
+                      </>
+                    ) : (
+                      <span className="text-amber-400">Custom Group</span>
+                    )}
+                  </span>
+                )}
                 <span className="text-gray-400 text-sm ml-2">
                   {result.objective_label} &middot; {result.n_trials} trials &middot; {fmtTime(Math.round(result.elapsed_seconds))}
                 </span>
+                {/* Ticker pills for group/sector modes */}
+                {result.mode !== "single" && result.tickers && result.tickers.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {result.tickers.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-block px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                    <HelpTip text={HELP_TUNER_GROUP_BENEFIT} />
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-center">

@@ -377,6 +377,18 @@ export const HELP_MIN_DRAWDOWN =
 export const HELP_BALANCED =
   "A weighted combination of return, risk, drawdown, and win rate. Good default for most users — tries to balance everything.";
 
+export const HELP_TUNER_MODE =
+  "Choose how to tune: Single Ticker optimises for one stock. Sector tunes across all major stocks in a GICS sector (e.g. Technology). Custom Group lets you pick your own list of stocks to optimise together.";
+
+export const HELP_TUNER_SECTOR =
+  "Pick a market sector. The auto-tuner will optimise parameters across the top stocks in that sector, finding settings that work well for the group — not just one stock.";
+
+export const HELP_TUNER_CUSTOM_GROUP =
+  "Enter a comma-separated list of tickers (e.g. TSLA, RIVN, NIO). The auto-tuner will find parameters that perform well across all of them — useful for stocks in the same industry or theme.";
+
+export const HELP_TUNER_GROUP_BENEFIT =
+  "Tuning across a group of similar stocks produces more robust parameters. Instead of overfitting to one stock's history, the optimiser finds settings that generalise across the whole group.";
+
 // ---------------------------------------------------------------------------
 // Strategy Lab — Strategy Library
 // ---------------------------------------------------------------------------

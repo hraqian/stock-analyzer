@@ -449,8 +449,16 @@ VALID_TUNER_OBJECTIVES = {
 
 
 class AutoTuneRequest(BaseModel):
-    """POST body for /api/strategy/auto-tune."""
-    ticker: str
+    """POST body for /api/strategy/auto-tune.
+
+    Supports three modes (provide exactly one of ticker, tickers, or sector):
+      - Single ticker: set ``ticker`` (default mode)
+      - Sector group: set ``sector`` to one of the 11 GICS sector names
+      - Custom group: set ``tickers`` to a list of symbols
+    """
+    ticker: str | None = None
+    tickers: list[str] | None = None
+    sector: str | None = None
     objective: str = "balanced"
     n_trials: int = 30
     train_years: int = 3
@@ -484,6 +492,9 @@ class AutoTuneTrialSchema(BaseModel):
 class AutoTuneResponse(BaseModel):
     """Full auto-tuner result."""
     ticker: str
+    tickers: list[str] = []
+    mode: str = "single"
+    sector: str | None = None
     objective: str
     objective_label: str
     n_trials: int

@@ -79,6 +79,10 @@ class AutoTuneResult:
     objective_label: str
     n_trials: int
     elapsed_seconds: float = 0.0
+    # Multi-ticker / sector tuning
+    tickers: list[str] = field(default_factory=list)
+    mode: str = "single"  # "single", "sector", or "custom"
+    sector: str | None = None
 
     # Best trial
     best_params: dict[str, Any] = field(default_factory=dict)
@@ -214,47 +218,53 @@ def _apply_params_to_config(cfg: "Config", params: dict[str, Any]) -> "Config":
 # Objective scoring functions
 # ---------------------------------------------------------------------------
 
-def _compute_buy_hold_return(provider: "DataProvider", ticker: str,
+def _compute_buy_hold_return(provider: "DataProvider", tickers: list[str],
                               train_years: int, test_years: int) -> float | None:
-    """Estimate buy-and-hold return averaged over walk-forward windows.
+    """Estimate buy-and-hold return averaged over walk-forward windows and tickers.
 
     Uses the same window layout as WalkForwardEngine.  Returns average
-    annualised return, or None if data is unavailable.
+    annualised return across all tickers, or None if data is unavailable.
     """
     from engine.walk_forward import WalkForwardEngine  # type: ignore[import-untyped]
     import pandas as pd
 
-    try:
-        # Fetch a long history
-        total_years = train_years + test_years + 10  # extra buffer
-        df = provider.get_ohlcv(ticker, period=f"{total_years}y", interval="1d")
-        if df is None or len(df) < 252:
-            return None
+    all_ticker_returns: list[float] = []
 
-        # Generate windows
-        engine = WalkForwardEngine.__new__(WalkForwardEngine)
-        engine._provider = provider
-        engine._strategy_factory = lambda: None  # unused
-        engine._cfg = None  # unused
-        windows = engine._generate_windows(train_years, test_years, max_windows=10)
-
-        if not windows:
-            return None
-
-        returns = []
-        for w in windows:
-            start = pd.Timestamp(w["test_start"])
-            end = pd.Timestamp(w["test_end"])
-            mask = (df.index >= start) & (df.index <= end)
-            window_df = df[mask]
-            if len(window_df) < 20:
+    for ticker in tickers:
+        try:
+            # Fetch a long history
+            total_years = train_years + test_years + 10  # extra buffer
+            df = provider.get_ohlcv(ticker, period=f"{total_years}y", interval="1d")
+            if df is None or len(df) < 252:
                 continue
-            ret = (window_df["Close"].iloc[-1] / window_df["Close"].iloc[0] - 1) * 100
-            returns.append(ret)
 
-        return statistics.mean(returns) if returns else None
-    except Exception:
-        return None
+            # Generate windows
+            engine = WalkForwardEngine.__new__(WalkForwardEngine)
+            engine._provider = provider
+            engine._strategy_factory = lambda: None  # unused
+            engine._cfg = None  # unused
+            windows = engine._generate_windows(train_years, test_years, max_windows=10)
+
+            if not windows:
+                continue
+
+            returns = []
+            for w in windows:
+                start = pd.Timestamp(w["test_start"])
+                end = pd.Timestamp(w["test_end"])
+                mask = (df.index >= start) & (df.index <= end)
+                window_df = df[mask]
+                if len(window_df) < 20:
+                    continue
+                ret = (window_df["Close"].iloc[-1] / window_df["Close"].iloc[0] - 1) * 100
+                returns.append(ret)
+
+            if returns:
+                all_ticker_returns.append(statistics.mean(returns))
+        except Exception:
+            continue
+
+    return statistics.mean(all_ticker_returns) if all_ticker_returns else None
 
 
 def _score_trial(
@@ -331,22 +341,26 @@ class AutoTuner:
 
     def run(
         self,
-        ticker: str,
+        tickers: list[str],
         objective: str = "balanced",
         n_trials: int = 30,
         train_years: int = 3,
         test_years: int = 1,
         max_windows: int = 3,
+        mode: str = "single",
+        sector: str | None = None,
     ) -> AutoTuneResult:
         """Run the auto-tuner and return results.
 
         Args:
-            ticker:       Stock symbol.
+            tickers:      List of stock symbols (single-element for single mode).
             objective:    One of the 5 objective keys.
             n_trials:     Number of Optuna trials (more = better but slower).
             train_years:  Walk-forward training window length.
             test_years:   Walk-forward test window length.
             max_windows:  Walk-forward windows per trial (fewer = faster).
+            mode:         "single", "sector", or "custom".
+            sector:       Sector name (only when mode == "sector").
 
         Returns:
             :class:`AutoTuneResult` with best params, metrics, and sensitivity.
@@ -355,26 +369,32 @@ class AutoTuner:
         from engine.score_strategy import ScoreBasedStrategy  # type: ignore[import-untyped]
         from engine.suitability import TradingMode  # type: ignore[import-untyped]
 
-        ticker = ticker.upper()
+        tickers = [t.upper() for t in tickers]
+        display_ticker = tickers[0] if len(tickers) == 1 else ", ".join(tickers[:5])
+        if len(tickers) > 5:
+            display_ticker += f" (+{len(tickers) - 5} more)"
         start_time = time.time()
 
         result = AutoTuneResult(
-            ticker=ticker,
+            ticker=display_ticker,
             objective=objective,
             objective_label=OBJECTIVE_LABELS.get(objective, objective),
             n_trials=n_trials,
+            tickers=tickers,
+            mode=mode,
+            sector=sector,
         )
 
         # Pre-compute buy-and-hold return for the "beat_buy_hold" objective
         buy_hold_ret = _compute_buy_hold_return(
-            self._provider, ticker, train_years, test_years
+            self._provider, tickers, train_years, test_years
         )
         result.buy_hold_return_pct = buy_hold_ret
 
         # --- Run baseline (default params) ---
-        logger.info("Running baseline walk-forward for %s ...", ticker)
+        logger.info("Running baseline walk-forward for %s ...", display_ticker)
         baseline_wf = self._run_walk_forward(
-            ticker, self._base_cfg, train_years, test_years, max_windows,
+            tickers, self._base_cfg, train_years, test_years, max_windows,
         )
         result.baseline_avg_return_pct = baseline_wf["avg_return_pct"]
         result.baseline_avg_annualized_return_pct = baseline_wf["avg_annualized_return_pct"]
@@ -401,7 +421,7 @@ class AutoTuner:
             trial_cfg = _apply_params_to_config(self._base_cfg, params)
 
             wf = self._run_walk_forward(
-                ticker, trial_cfg, train_years, test_years, max_windows,
+                tickers, trial_cfg, train_years, test_years, max_windows,
             )
 
             score = _score_trial(
@@ -498,13 +518,18 @@ class AutoTuner:
 
     def _run_walk_forward(
         self,
-        ticker: str,
+        tickers: list[str],
         cfg: "Config",
         train_years: int,
         test_years: int,
         max_windows: int,
     ) -> dict[str, Any]:
-        """Run walk-forward testing with the given config and return metric dict."""
+        """Run walk-forward testing across all tickers and return averaged metrics.
+
+        For a single ticker this behaves identically to before.  For multiple
+        tickers (sector/custom group), it runs walk-forward on each ticker
+        independently and averages the aggregate metrics.
+        """
         from engine.walk_forward import WalkForwardEngine  # type: ignore[import-untyped]
         from engine.score_strategy import ScoreBasedStrategy  # type: ignore[import-untyped]
         from engine.suitability import TradingMode  # type: ignore[import-untyped]
@@ -517,29 +542,42 @@ class AutoTuner:
                 trading_mode=TradingMode.LONG_SHORT,
             )
 
-        wf_engine = WalkForwardEngine(
-            data_provider=self._provider,
-            strategy_factory=factory,
-            cfg=cfg,
-        )
+        metric_keys = [
+            "avg_return_pct", "avg_annualized_return_pct",
+            "avg_max_drawdown_pct", "avg_sharpe_ratio",
+            "avg_win_rate_pct", "avg_profit_factor",
+            "stability_score",
+        ]
+        accum: dict[str, list[float]] = {k: [] for k in metric_keys}
+        total_windows = 0
 
-        wf_result = wf_engine.run(
-            ticker=ticker,
-            train_years=train_years,
-            test_years=test_years,
-            max_windows=max_windows,
-        )
+        for tkr in tickers:
+            try:
+                wf_engine = WalkForwardEngine(
+                    data_provider=self._provider,
+                    strategy_factory=factory,
+                    cfg=cfg,
+                )
+                wf_result = wf_engine.run(
+                    ticker=tkr,
+                    train_years=train_years,
+                    test_years=test_years,
+                    max_windows=max_windows,
+                )
+                for k in metric_keys:
+                    accum[k].append(getattr(wf_result, k, 0.0))
+                total_windows += wf_result.total_windows
+            except Exception as exc:
+                logger.warning("Walk-forward failed for %s, skipping: %s", tkr, exc)
+                continue
+
+        if not accum["avg_return_pct"]:
+            # All tickers failed — return zeroes
+            return {k: 0.0 for k in metric_keys} | {"total_windows": 0}
 
         return {
-            "avg_return_pct": wf_result.avg_return_pct,
-            "avg_annualized_return_pct": wf_result.avg_annualized_return_pct,
-            "avg_max_drawdown_pct": wf_result.avg_max_drawdown_pct,
-            "avg_sharpe_ratio": wf_result.avg_sharpe_ratio,
-            "avg_win_rate_pct": wf_result.avg_win_rate_pct,
-            "avg_profit_factor": wf_result.avg_profit_factor,
-            "stability_score": wf_result.stability_score,
-            "total_windows": wf_result.total_windows,
-        }
+            k: statistics.mean(accum[k]) for k in metric_keys
+        } | {"total_windows": total_windows}
 
     @staticmethod
     def _make_verdict(result: AutoTuneResult) -> str:
