@@ -24,6 +24,8 @@ from app.models.schemas import (
     SectorDetailResponse,
     SectorOverviewResponse,
     UniverseListResponse,
+    WalkForwardRequest,
+    WalkForwardResponse,
     VALID_PRESETS,
     VALID_UNIVERSES,
 )
@@ -613,6 +615,67 @@ async def list_strategies(user: User = Depends(get_current_user)):
         "strategies": [],
         "status": "coming_in_phase_3d",
     }
+
+
+# Walk-forward pool (multiple windows = very long running)
+_walk_forward_pool = ThreadPoolExecutor(max_workers=1)
+
+
+def _run_walk_forward(
+    ticker: str,
+    trade_mode: str,
+    train_years: int,
+    test_years: int,
+    max_windows: int,
+) -> dict:
+    """Run walk-forward testing synchronously (called from thread pool)."""
+    from app.services.walk_forward import run_walk_forward  # late import
+
+    return run_walk_forward(
+        ticker=ticker,
+        trade_mode=trade_mode,
+        train_years=train_years,
+        test_years=test_years,
+        max_windows=max_windows,
+    )
+
+
+@strategy_router.post("/walk-forward", response_model=WalkForwardResponse)
+async def run_walk_forward_test(
+    req: WalkForwardRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run walk-forward (rolling out-of-sample) testing on a ticker.
+
+    Splits history into rolling train/test windows and backtests each
+    window independently.  Returns per-window metrics and an aggregate
+    stability score.
+    """
+    if req.train_years < 1 or req.train_years > 20:
+        raise HTTPException(400, "train_years must be between 1 and 20")
+    if req.test_years < 1 or req.test_years > 5:
+        raise HTTPException(400, "test_years must be between 1 and 5")
+    if req.max_windows < 1 or req.max_windows > 20:
+        raise HTTPException(400, "max_windows must be between 1 and 20")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _walk_forward_pool,
+            _run_walk_forward,
+            req.ticker.upper(),
+            user.trade_mode,
+            req.train_years,
+            req.test_years,
+            req.max_windows,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Walk-forward failed for %s", req.ticker)
+        raise HTTPException(500, f"Walk-forward test failed: {exc}") from exc
+
+    return result
 
 
 # ---------------------------------------------------------------------------

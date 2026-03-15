@@ -439,3 +439,57 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
     body: JSON.stringify(req),
   });
 }
+
+// -------------------------------------------------------------------
+// Strategy Lab — Walk-Forward Testing
+// -------------------------------------------------------------------
+
+export interface WalkForwardWindow {
+  window_index: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  total_return_pct: number;
+  annualized_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  win_rate_pct: number;
+  profit_factor: number;
+  total_trades: number;
+  error: string | null;
+}
+
+export interface WalkForwardResult {
+  ticker: string;
+  train_years: number;
+  test_years: number;
+  total_windows: number;
+  windows: WalkForwardWindow[];
+  avg_return_pct: number;
+  avg_annualized_return_pct: number;
+  avg_max_drawdown_pct: number;
+  avg_sharpe_ratio: number;
+  avg_win_rate_pct: number;
+  avg_profit_factor: number;
+  worst_return_pct: number;
+  worst_drawdown_pct: number;
+  worst_window_index: number;
+  return_std_dev: number;
+  stability_score: number;
+  verdict: string;
+}
+
+export interface WalkForwardRequest {
+  ticker: string;
+  train_years?: number;
+  test_years?: number;
+  max_windows?: number;
+}
+
+export async function runWalkForward(req: WalkForwardRequest): Promise<WalkForwardResult> {
+  return apiFetch<WalkForwardResult>("/api/strategy/walk-forward", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}

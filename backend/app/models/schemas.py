@@ -386,6 +386,56 @@ class StrategyMeta(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Strategy — Walk-Forward (Phase 3B)
+# ---------------------------------------------------------------------------
+
+class WalkForwardRequest(BaseModel):
+    """POST body for /api/strategy/walk-forward."""
+    ticker: str
+    train_years: int = 5
+    test_years: int = 1
+    max_windows: int = 10
+
+
+class WalkForwardWindowSchema(BaseModel):
+    """Metrics for one walk-forward window."""
+    window_index: int
+    train_start: str
+    train_end: str
+    test_start: str
+    test_end: str
+    total_return_pct: float = 0.0
+    annualized_return_pct: float = 0.0
+    max_drawdown_pct: float = 0.0
+    sharpe_ratio: float = 0.0
+    win_rate_pct: float = 0.0
+    profit_factor: float = 0.0
+    total_trades: int = 0
+    error: str | None = None
+
+
+class WalkForwardResponse(BaseModel):
+    """Full walk-forward analysis response."""
+    ticker: str
+    train_years: int
+    test_years: int
+    total_windows: int
+    windows: list[WalkForwardWindowSchema]
+    avg_return_pct: float = 0.0
+    avg_annualized_return_pct: float = 0.0
+    avg_max_drawdown_pct: float = 0.0
+    avg_sharpe_ratio: float = 0.0
+    avg_win_rate_pct: float = 0.0
+    avg_profit_factor: float = 0.0
+    worst_return_pct: float = 0.0
+    worst_drawdown_pct: float = 0.0
+    worst_window_index: int = 0
+    return_std_dev: float = 0.0
+    stability_score: float = 0.0
+    verdict: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Portfolio Simulation (stubs — expanded in Phase 4)
 # ---------------------------------------------------------------------------
 

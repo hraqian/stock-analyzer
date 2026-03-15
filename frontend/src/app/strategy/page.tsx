@@ -5,10 +5,14 @@ import { createChart, ColorType, LineData, Time } from "lightweight-charts";
 import HelpTip from "@/components/HelpTip";
 import {
   runBacktest,
+  runWalkForward,
   type BacktestResult,
   type BacktestRequest,
   type BacktestTrade,
   type EquityPoint,
+  type WalkForwardResult,
+  type WalkForwardRequest,
+  type WalkForwardWindow,
 } from "@/lib/api";
 import {
   HELP_BACKTEST,
@@ -30,6 +34,12 @@ import {
   HELP_AVG_BARS_HELD,
   HELP_EQUITY_CURVE,
   HELP_TRADE_LOG,
+  HELP_WALK_FORWARD,
+  HELP_TRAIN_YEARS,
+  HELP_TEST_YEARS,
+  HELP_STABILITY_SCORE,
+  HELP_WORST_WINDOW,
+  HELP_RETURN_STD_DEV,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -720,14 +730,14 @@ export default function StrategyPage() {
         </>
       )}
 
-      {/* Placeholder sections for Walk-Forward, Auto-Tuner, Strategy Library */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* ================================================================= */}
+      {/* Walk-Forward Testing Section                                      */}
+      {/* ================================================================= */}
+      <WalkForwardSection />
+
+      {/* Placeholder sections for Auto-Tuner, Strategy Library */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[
-          {
-            title: "Walk-Forward Testing",
-            desc: "Rolling out-of-sample validation to verify strategy robustness.",
-            phase: "Phase 3B",
-          },
           {
             title: "Auto-Tuner",
             desc: "Objective-based parameter optimization with sensitivity analysis.",
@@ -751,6 +761,282 @@ export default function StrategyPage() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Walk-Forward Testing sub-component
+// ---------------------------------------------------------------------------
+
+function WalkForwardSection() {
+  const [ticker, setTicker] = useState("AAPL");
+  const [trainYears, setTrainYears] = useState(5);
+  const [testYears, setTestYears] = useState(1);
+  const [maxWindows, setMaxWindows] = useState(5);
+
+  const [result, setResult] = useState<WalkForwardResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRun = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await runWalkForward({
+        ticker: ticker.trim().toUpperCase(),
+        train_years: trainYears,
+        test_years: testYears,
+        max_windows: maxWindows,
+      });
+      setResult(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Walk-forward test failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [ticker, trainYears, testYears, maxWindows]);
+
+  const fmtPct = (v: number | null | undefined) =>
+    v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const fmtNum = (v: number | null | undefined, d = 2) =>
+    v == null ? "—" : v.toFixed(d);
+
+  // Stability color
+  const stabilityColor = (score: number) =>
+    score >= 70 ? "text-emerald-400" : score >= 40 ? "text-yellow-400" : "text-red-400";
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <h3 className="text-sm font-medium text-gray-300 mb-4 flex items-center gap-1">
+          Walk-Forward Testing <HelpTip text={HELP_WALK_FORWARD} />
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Ticker</label>
+            <input
+              type="text"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Train Years <HelpTip text={HELP_TRAIN_YEARS} />
+            </label>
+            <select
+              value={trainYears}
+              onChange={(e) => setTrainYears(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[2, 3, 4, 5, 7, 10].map((n) => (
+                <option key={n} value={n}>{n} years</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Test Years <HelpTip text={HELP_TEST_YEARS} />
+            </label>
+            <select
+              value={testYears}
+              onChange={(e) => setTestYears(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[1, 2, 3].map((n) => (
+                <option key={n} value={n}>{n} year{n > 1 ? "s" : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Max Windows</label>
+            <select
+              value={maxWindows}
+              onChange={(e) => setMaxWindows(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[3, 5, 7, 10].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleRun}
+              disabled={loading || !ticker.trim()}
+              className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700
+                         disabled:text-gray-500 text-white text-sm font-medium rounded-lg
+                         transition-colors"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Running...
+                </span>
+              ) : (
+                "Run Walk-Forward"
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+          {/* Verdict banner */}
+          <div
+            className={`p-4 rounded-lg border ${
+              result.stability_score >= 70
+                ? "bg-emerald-900/20 border-emerald-800"
+                : result.stability_score >= 40
+                  ? "bg-yellow-900/20 border-yellow-800"
+                  : "bg-red-900/20 border-red-800"
+            }`}
+          >
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <span className="text-white font-semibold">{result.ticker}</span>
+                <span className="text-gray-400 text-sm ml-2">
+                  {result.total_windows} windows &middot; {result.train_years}Y train / {result.test_years}Y test
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-center">
+                  <div className="text-xs text-gray-400 flex items-center gap-1">
+                    Stability <HelpTip text={HELP_STABILITY_SCORE} />
+                  </div>
+                  <div className={`text-xl font-bold ${stabilityColor(result.stability_score)}`}>
+                    {result.stability_score.toFixed(0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300 mt-2">{result.verdict}</p>
+          </div>
+
+          {/* Aggregate metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <MetricCard
+              label="Avg Return"
+              value={fmtPct(result.avg_return_pct)}
+              color={result.avg_return_pct >= 0 ? "green" : "red"}
+            />
+            <MetricCard
+              label="Avg Sharpe"
+              value={fmtNum(result.avg_sharpe_ratio)}
+              helpText={HELP_SHARPE_RATIO}
+              color={result.avg_sharpe_ratio >= 1 ? "green" : result.avg_sharpe_ratio >= 0 ? "yellow" : "red"}
+            />
+            <MetricCard
+              label="Avg Win Rate"
+              value={`${fmtNum(result.avg_win_rate_pct, 1)}%`}
+              helpText={HELP_WIN_RATE}
+              color={result.avg_win_rate_pct >= 50 ? "green" : "yellow"}
+            />
+            <MetricCard
+              label="Avg Drawdown"
+              value={fmtPct(-Math.abs(result.avg_max_drawdown_pct))}
+              helpText={HELP_MAX_DRAWDOWN}
+              color={result.avg_max_drawdown_pct > 20 ? "red" : "yellow"}
+            />
+            <MetricCard
+              label="Worst Return"
+              value={fmtPct(result.worst_return_pct)}
+              helpText={HELP_WORST_WINDOW}
+              color={result.worst_return_pct >= 0 ? "green" : "red"}
+            />
+            <MetricCard
+              label="Return Std Dev"
+              value={`${result.return_std_dev.toFixed(1)}%`}
+              helpText={HELP_RETURN_STD_DEV}
+              color={result.return_std_dev < 10 ? "green" : result.return_std_dev < 25 ? "yellow" : "red"}
+            />
+          </div>
+
+          {/* Per-window table */}
+          <div>
+            <h4 className="text-xs font-medium text-gray-400 mb-2">Per-Window Results</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-700 text-gray-400">
+                    <th className="py-2 px-2 text-left">#</th>
+                    <th className="py-2 px-2 text-left">Test Period</th>
+                    <th className="py-2 px-2 text-right">Return</th>
+                    <th className="py-2 px-2 text-right">Sharpe</th>
+                    <th className="py-2 px-2 text-right">Win Rate</th>
+                    <th className="py-2 px-2 text-right">Profit Factor</th>
+                    <th className="py-2 px-2 text-right">Max DD</th>
+                    <th className="py-2 px-2 text-right">Trades</th>
+                    <th className="py-2 px-2 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.windows.map((w) => (
+                    <tr
+                      key={w.window_index}
+                      className={`border-b border-gray-800 ${
+                        w.window_index === result.worst_window_index
+                          ? "bg-red-900/10"
+                          : "hover:bg-gray-800/40"
+                      }`}
+                    >
+                      <td className="py-1.5 px-2 text-gray-400">{w.window_index + 1}</td>
+                      <td className="py-1.5 px-2 text-gray-300">
+                        {w.test_start.slice(0, 7)} → {w.test_end.slice(0, 7)}
+                      </td>
+                      <td className={`py-1.5 px-2 text-right font-medium ${
+                        w.error ? "text-gray-600" : w.total_return_pct >= 0 ? "text-emerald-400" : "text-red-400"
+                      }`}>
+                        {w.error ? "—" : fmtPct(w.total_return_pct)}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-300">
+                        {w.error ? "—" : fmtNum(w.sharpe_ratio)}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-300">
+                        {w.error ? "—" : `${fmtNum(w.win_rate_pct, 1)}%`}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-300">
+                        {w.error ? "—" : fmtNum(w.profit_factor)}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-300">
+                        {w.error ? "—" : fmtPct(-Math.abs(w.max_drawdown_pct))}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-300">
+                        {w.error ? "—" : w.total_trades}
+                      </td>
+                      <td className="py-1.5 px-2">
+                        {w.error ? (
+                          <span className="text-red-400 text-xs" title={w.error}>Failed</span>
+                        ) : (
+                          <span className="text-emerald-400 text-xs">OK</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

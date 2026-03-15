@@ -314,3 +314,25 @@ export const HELP_EQUITY_CURVE =
 
 export const HELP_TRADE_LOG =
   "A detailed list of every trade the strategy made — when it entered, when it exited, whether it won or lost, and why it exited (signal change, stop loss, or take profit).";
+
+// ---------------------------------------------------------------------------
+// Strategy Lab — Walk-Forward Testing
+// ---------------------------------------------------------------------------
+
+export const HELP_WALK_FORWARD =
+  "Walk-forward testing splits history into rolling windows and tests the strategy on each one independently. It's the gold standard for checking if a strategy works across different market conditions — not just one lucky period.";
+
+export const HELP_TRAIN_YEARS =
+  "How many years of data to use as the 'training' period in each window. The strategy uses this data to warm up its indicators before trading begins.";
+
+export const HELP_TEST_YEARS =
+  "How many years each out-of-sample test window covers. The strategy is evaluated only on this period — it's data the strategy hasn't 'seen' during warmup.";
+
+export const HELP_STABILITY_SCORE =
+  "A score from 0-100 measuring how consistent the strategy is across windows. High (70+) = reliable performance. Low (<40) = results vary wildly, strategy may be overfit.";
+
+export const HELP_WORST_WINDOW =
+  "The single worst-performing test window. This is your 'stress test' — it shows the strategy's performance during its most challenging market period.";
+
+export const HELP_RETURN_STD_DEV =
+  "Standard deviation of returns across windows. Lower means the strategy performs consistently; higher means it's feast-or-famine.";
