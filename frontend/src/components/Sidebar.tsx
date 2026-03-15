@@ -12,8 +12,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/scanner", label: "Market Scanner", icon: "search" },
-  { href: "/analysis", label: "Stock Analysis", icon: "chart" },
-  { href: "/sectors", label: "Sectors", icon: "grid" },
+  { href: "/analysis", label: "Analysis", icon: "chart" },
   { href: "/strategy", label: "Strategy Lab", icon: "flask" },
   { href: "/portfolio", label: "Portfolio Sim", icon: "briefcase" },
   { href: "/settings", label: "Settings", icon: "gear" },
