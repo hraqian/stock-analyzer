@@ -17,6 +17,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import HelpTip from "@/components/HelpTip";
+import ErrorBanner from "@/components/ErrorBanner";
+import { fmtDecimalPct } from "@/lib/format";
 import {
   HELP_SECTORS,
   HELP_SECTOR_HEATMAP,
@@ -41,12 +43,7 @@ import {
 
 type TimeWindow = "1w" | "1m" | "3m";
 
-/** Format a decimal return (0.05 = 5%) as a percentage string. */
-function fmtPct(v: number): string {
-  const pct = v * 100;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(2)}%`;
-}
+// fmtDecimalPct imported from @/lib/format
 
 /** Pick the return for the selected time window. */
 function pickReturn(s: SectorMomentum, w: TimeWindow): number {
@@ -108,7 +105,7 @@ function BenchmarkBar({
         <HelpTip text={HELP_BENCHMARK} />
       </span>
       <span className={`font-mono font-medium ${retColor(ret)}`}>
-        {fmtPct(ret)}
+        {fmtDecimalPct(ret)}
       </span>
       <span className="text-gray-600 text-xs">
         {window === "1w" ? "1 Week" : window === "1m" ? "1 Month" : "3 Months"}
@@ -150,7 +147,7 @@ function SectorTile({
 
       {/* Return */}
       <div className={`text-lg font-mono font-bold ${retColor(ret)}`}>
-        {fmtPct(ret)}
+        {fmtDecimalPct(ret)}
       </div>
 
       {/* Momentum score + RS */}
@@ -159,7 +156,7 @@ function SectorTile({
           Score: {sector.momentum_score.toFixed(1)}
         </span>
         <span className={`font-mono ${retColor(rs)}`}>
-          RS {fmtPct(rs)}
+          RS {fmtDecimalPct(rs)}
         </span>
       </div>
 
@@ -581,7 +578,7 @@ function SectorDetailPanel({
         </div>
         <div className="text-right">
           <div className={`text-xl font-mono font-bold ${retColor(ret)}`}>
-            {fmtPct(ret)}
+            {fmtDecimalPct(ret)}
           </div>
           <div className="text-xs text-gray-500">
             {window === "1w" ? "1 Week" : window === "1m" ? "1 Month" : "3 Months"}
@@ -606,7 +603,7 @@ function SectorDetailPanel({
             <HelpTip text={HELP_RELATIVE_STRENGTH} />
           </div>
           <div className={`font-mono font-medium ${retColor(rs)}`}>
-            {fmtPct(rs)}
+            {fmtDecimalPct(rs)}
           </div>
         </div>
         <div>
@@ -631,7 +628,7 @@ function SectorDetailPanel({
             1 Week <HelpTip text={HELP_RETURN_1W} />
           </div>
           <div className={`font-mono font-medium ${retColor(detail.return_1w)}`}>
-            {fmtPct(detail.return_1w)}
+            {fmtDecimalPct(detail.return_1w)}
           </div>
         </div>
         <div className="bg-gray-800/50 rounded-lg p-3">
@@ -639,7 +636,7 @@ function SectorDetailPanel({
             1 Month <HelpTip text={HELP_RETURN_1M} />
           </div>
           <div className={`font-mono font-medium ${retColor(detail.return_1m)}`}>
-            {fmtPct(detail.return_1m)}
+            {fmtDecimalPct(detail.return_1m)}
           </div>
         </div>
         <div className="bg-gray-800/50 rounded-lg p-3">
@@ -647,7 +644,7 @@ function SectorDetailPanel({
             3 Months <HelpTip text={HELP_RETURN_3M} />
           </div>
           <div className={`font-mono font-medium ${retColor(detail.return_3m)}`}>
-            {fmtPct(detail.return_3m)}
+            {fmtDecimalPct(detail.return_3m)}
           </div>
         </div>
       </div>
@@ -761,7 +758,7 @@ function SectorDetailPanel({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-mono text-xs ${retColor(m.return_1m)}`}>
-                      {fmtPct(m.return_1m)}
+                      {fmtDecimalPct(m.return_1m)}
                     </span>
                     <span className="text-gray-400 font-mono text-xs">
                       ${m.current_price.toFixed(2)}
@@ -802,7 +799,7 @@ function SectorDetailPanel({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-mono text-xs ${retColor(m.return_1m)}`}>
-                      {fmtPct(m.return_1m)}
+                      {fmtDecimalPct(m.return_1m)}
                     </span>
                     <span className="text-gray-400 font-mono text-xs">
                       ${m.current_price.toFixed(2)}
@@ -963,11 +960,7 @@ export default function SectorsTab({ onAnalyzeTicker }: SectorsTabProps) {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded-lg p-3 text-sm text-red-400">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} />
 
       {/* Loading skeleton */}
       {loading && !overview && (
@@ -1058,16 +1051,16 @@ export default function SectorsTab({ onAnalyzeTicker }: SectorsTabProps) {
                       <span className="text-gray-600 ml-2 text-xs">{s.etf}</span>
                     </td>
                     <td className={`text-right py-2 px-2 font-mono ${retColor(s.return_1w)}`}>
-                      {fmtPct(s.return_1w)}
+                      {fmtDecimalPct(s.return_1w)}
                     </td>
                     <td className={`text-right py-2 px-2 font-mono ${retColor(s.return_1m)}`}>
-                      {fmtPct(s.return_1m)}
+                      {fmtDecimalPct(s.return_1m)}
                     </td>
                     <td className={`text-right py-2 px-2 font-mono ${retColor(s.return_3m)}`}>
-                      {fmtPct(s.return_3m)}
+                      {fmtDecimalPct(s.return_3m)}
                     </td>
                     <td className={`text-right py-2 px-2 font-mono ${retColor(s.rs_1m)}`}>
-                      {fmtPct(s.rs_1m)}
+                      {fmtDecimalPct(s.rs_1m)}
                     </td>
                     <td className="text-right py-2 px-2 font-mono text-white">
                       {s.momentum_score.toFixed(1)}

@@ -7,26 +7,12 @@ a plain dict suitable for JSON serialisation.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_TRADE_MODE_OBJECTIVES = {
-    "swing": "swing_trade",
-    "long_term": "long_term",
-}
+from app.services.shared import TRADE_MODE_OBJECTIVES, safe
 
-
-def _safe(v: Any) -> Any:
-    """Recursively sanitise for JSON."""
-    if isinstance(v, float):
-        return None if (math.isnan(v) or math.isinf(v)) else v
-    if isinstance(v, dict):
-        return {str(k): _safe(val) for k, val in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_safe(item) for item in v]
-    return v
 
 
 def run_walk_forward(
@@ -44,7 +30,7 @@ def run_walk_forward(
     from engine.suitability import TradingMode           # type: ignore[import-untyped]
 
     cfg = Config.defaults()
-    objective = _TRADE_MODE_OBJECTIVES.get(trade_mode)
+    objective = TRADE_MODE_OBJECTIVES.get(trade_mode)
     if objective and objective in cfg.available_objectives():
         cfg.apply_objective(objective)
 
@@ -77,12 +63,12 @@ def run_walk_forward(
             "train_end": w.train_end,
             "test_start": w.test_start,
             "test_end": w.test_end,
-            "total_return_pct": _safe(w.total_return_pct),
-            "annualized_return_pct": _safe(w.annualized_return_pct),
-            "max_drawdown_pct": _safe(w.max_drawdown_pct),
-            "sharpe_ratio": _safe(w.sharpe_ratio),
-            "win_rate_pct": _safe(w.win_rate_pct),
-            "profit_factor": _safe(w.profit_factor),
+            "total_return_pct": safe(w.total_return_pct),
+            "annualized_return_pct": safe(w.annualized_return_pct),
+            "max_drawdown_pct": safe(w.max_drawdown_pct),
+            "sharpe_ratio": safe(w.sharpe_ratio),
+            "win_rate_pct": safe(w.win_rate_pct),
+            "profit_factor": safe(w.profit_factor),
             "total_trades": w.total_trades,
             "error": w.error,
         }
@@ -95,16 +81,16 @@ def run_walk_forward(
         "test_years": result.test_years,
         "total_windows": result.total_windows,
         "windows": windows,
-        "avg_return_pct": _safe(result.avg_return_pct),
-        "avg_annualized_return_pct": _safe(result.avg_annualized_return_pct),
-        "avg_max_drawdown_pct": _safe(result.avg_max_drawdown_pct),
-        "avg_sharpe_ratio": _safe(result.avg_sharpe_ratio),
-        "avg_win_rate_pct": _safe(result.avg_win_rate_pct),
-        "avg_profit_factor": _safe(result.avg_profit_factor),
-        "worst_return_pct": _safe(result.worst_return_pct),
-        "worst_drawdown_pct": _safe(result.worst_drawdown_pct),
+        "avg_return_pct": safe(result.avg_return_pct),
+        "avg_annualized_return_pct": safe(result.avg_annualized_return_pct),
+        "avg_max_drawdown_pct": safe(result.avg_max_drawdown_pct),
+        "avg_sharpe_ratio": safe(result.avg_sharpe_ratio),
+        "avg_win_rate_pct": safe(result.avg_win_rate_pct),
+        "avg_profit_factor": safe(result.avg_profit_factor),
+        "worst_return_pct": safe(result.worst_return_pct),
+        "worst_drawdown_pct": safe(result.worst_drawdown_pct),
         "worst_window_index": result.worst_window_index,
-        "return_std_dev": _safe(result.return_std_dev),
-        "stability_score": _safe(result.stability_score),
+        "return_std_dev": safe(result.return_std_dev),
+        "stability_score": safe(result.stability_score),
         "verdict": result.verdict,
     }

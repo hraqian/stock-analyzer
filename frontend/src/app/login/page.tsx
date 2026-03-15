@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { register } from "@/lib/api";
+import ErrorBanner from "@/components/ErrorBanner";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -90,11 +91,7 @@ export default function LoginPage() {
               />
             </div>
 
-            {error && (
-              <div className="text-sm text-red-400 bg-red-900/20 border border-red-800/30 rounded-lg px-3 py-2">
-                {error}
-              </div>
-            )}
+            {error && <ErrorBanner message={error} />}
 
             <button
               type="submit"

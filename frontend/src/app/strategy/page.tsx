@@ -4,6 +4,9 @@ import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createChart, ColorType, LineData, Time } from "lightweight-charts";
 import HelpTip from "@/components/HelpTip";
+import Spinner from "@/components/Spinner";
+import ErrorBanner from "@/components/ErrorBanner";
+import { fmtPct, fmtNum, fmtMoney } from "@/lib/format";
 import {
   runBacktest,
   runAutoTune,
@@ -454,12 +457,7 @@ function StrategyPageContent() {
   const metricColor = (val: number | null | undefined): "green" | "red" | "default" =>
     val == null ? "default" : val > 0 ? "green" : val < 0 ? "red" : "default";
 
-  const fmtPct = (v: number | null | undefined) =>
-    v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-  const fmtNum = (v: number | null | undefined, decimals = 2) =>
-    v == null ? "—" : v.toFixed(decimals);
-  const fmtMoney = (v: number | null | undefined) =>
-    v == null ? "—" : `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  // formatting: fmtPct, fmtNum, fmtMoney imported from @/lib/format
 
   return (
     <div className="space-y-6">
@@ -622,25 +620,7 @@ function StrategyPageContent() {
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <svg
-                    className="animate-spin h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
+                  <Spinner />
                   Running...
                 </span>
               ) : (
@@ -652,15 +632,10 @@ function StrategyPageContent() {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className={`border rounded-lg p-4 text-sm ${
-          error.includes("Try reducing")
-            ? "bg-amber-900/20 border-amber-800 text-amber-300"
-            : "bg-red-900/30 border-red-800 text-red-300"
-        }`}>
-          {error}
-        </div>
-      )}
+      <ErrorBanner
+        message={error}
+        variant={error?.includes("Try reducing") ? "warning" : "error"}
+      />
 
       {/* Results */}
       {result && (
@@ -1158,10 +1133,7 @@ function AutoTunerSection({
     };
   }, []);
 
-  const fmtPct = (v: number | null | undefined) =>
-    v == null ? "\u2014" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-  const fmtNum = (v: number | null | undefined, d = 2) =>
-    v == null ? "\u2014" : v.toFixed(d);
+  // formatting: fmtPct, fmtNum imported from @/lib/format
   const fmtTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -1387,10 +1359,7 @@ function AutoTunerSection({
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  <Spinner />
                   {fmtTime(elapsed)}
                 </span>
               ) : (
@@ -1407,11 +1376,7 @@ function AutoTunerSection({
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} />
 
       {/* Results */}
       {result && (
@@ -2133,10 +2098,7 @@ function StrategyLibrarySection({ refreshTrigger }: { refreshTrigger?: number })
   const comparedStrategies = strategies.filter((s) => compareIds.has(s.id));
 
   // Formatting helpers
-  const fmtPct = (v: number | null | undefined) =>
-    v == null ? "\u2014" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-  const fmtNum = (v: number | null | undefined, d = 2) =>
-    v == null ? "\u2014" : v.toFixed(d);
+  // formatting: fmtPct, fmtNum imported from @/lib/format
 
   const metricColor = (
     v: number | null | undefined,
@@ -2203,40 +2165,12 @@ function StrategyLibrarySection({ refreshTrigger }: { refreshTrigger?: number })
         </div>
 
         {/* Error */}
-        {error && (
-          <div className="bg-red-900/30 border border-red-800 rounded-lg p-3 text-red-300 text-sm mb-4">
-            {error}
-            <button
-              onClick={() => setError(null)}
-              className="ml-2 text-red-400 hover:text-red-300 text-xs"
-            >
-              dismiss
-            </button>
-          </div>
-        )}
+        <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
         {/* Loading */}
         {loading && (
           <div className="text-center py-8">
-            <svg
-              className="animate-spin h-6 w-6 text-gray-400 mx-auto"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
+            <Spinner size="h-6 w-6" className="text-gray-400 mx-auto" />
             <p className="text-gray-500 text-sm mt-2">Loading strategies...</p>
           </div>
         )}

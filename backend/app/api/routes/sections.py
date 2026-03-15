@@ -53,11 +53,7 @@ _scanner_pool = ThreadPoolExecutor(max_workers=1)
 # Separate pool for sector analysis
 _sector_pool = ThreadPoolExecutor(max_workers=1)
 
-# Trade mode → engine objective mapping
-_TRADE_MODE_OBJECTIVES = {
-    "swing": "swing_trade",
-    "long_term": "long_term",
-}
+from app.services.shared import TRADE_MODE_OBJECTIVES
 
 # ---------------------------------------------------------------------------
 # Section 1: Market Scanner
@@ -242,7 +238,7 @@ def _run_analysis(ticker: str, period: str, interval: str, trade_mode: str) -> d
 
     # Build config with objective preset
     cfg = Config.defaults()
-    objective = _TRADE_MODE_OBJECTIVES.get(trade_mode)
+    objective = TRADE_MODE_OBJECTIVES.get(trade_mode)
     if objective and objective in cfg.available_objectives():
         cfg.apply_objective(objective)
 
@@ -481,11 +477,9 @@ async def sector_overview(user: User = Depends(get_current_user)):
     return result
 
 
-VALID_SECTORS = {
-    "Technology", "Financials", "Energy", "Health Care",
-    "Consumer Discretionary", "Consumer Staples", "Industrials",
-    "Materials", "Real Estate", "Utilities", "Communication Services",
-}
+from app.services.sectors import SECTOR_ETF_MAP  # noqa: E402
+
+VALID_SECTORS = set(SECTOR_ETF_MAP.values())
 
 
 @sectors_router.get("/detail/{sector_name}", response_model=SectorDetailResponse)

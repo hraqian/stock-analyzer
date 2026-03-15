@@ -6,6 +6,8 @@ import { analyzeStock } from "@/lib/api";
 import type { AnalysisResult } from "@/lib/api";
 import CandlestickChart from "@/components/CandlestickChart";
 import HelpTip from "@/components/HelpTip";
+import ErrorBanner from "@/components/ErrorBanner";
+import { fmtMarketCap } from "@/lib/format";
 import {
   HELP_COMPOSITE_SCORES,
   HELP_OVERALL_SCORE,
@@ -59,16 +61,7 @@ function scoreBarStyle(score: number): React.CSSProperties {
   };
 }
 
-/** Format large numbers. */
-function fmtNum(n: unknown): string {
-  if (n == null) return "N/A";
-  const v = Number(n);
-  if (isNaN(v)) return "N/A";
-  if (v >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
-  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
-  return v.toLocaleString();
-}
+// fmtMarketCap imported from @/lib/format
 
 interface SingleStockTabProps {
   /** Ticker passed from URL params (e.g. from scanner click). */
@@ -191,11 +184,7 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} />
 
       {/* Loading */}
       {loading && (
@@ -322,7 +311,7 @@ function TickerInfoBar({ result }: { result: AnalysisResult }) {
         <div className="flex gap-4 text-xs text-gray-500 ml-auto">
           {info.sector && <span>{String(info.sector)}</span>}
           {info.industry && <span>{String(info.industry)}</span>}
-          {info.marketCap && <span>MCap: {fmtNum(info.marketCap)}</span>}
+          {info.marketCap && <span>MCap: {fmtMarketCap(info.marketCap)}</span>}
         </div>
       </div>
     </div>

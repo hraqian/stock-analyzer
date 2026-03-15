@@ -7,15 +7,11 @@ a plain dict suitable for JSON serialisation.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_TRADE_MODE_OBJECTIVES = {
-    "swing": "swing_trade",
-    "long_term": "long_term",
-}
+from app.services.shared import TRADE_MODE_OBJECTIVES, safe
 
 VALID_OBJECTIVES = {
     "beat_buy_hold",
@@ -25,27 +21,6 @@ VALID_OBJECTIVES = {
     "balanced",
 }
 
-
-def _safe(v: Any) -> Any:
-    """Recursively sanitise for JSON (NaN/Inf → None, numpy/pandas → native)."""
-    import numpy as np
-
-    if isinstance(v, (np.integer,)):
-        return int(v)
-    if isinstance(v, (np.floating,)):
-        val = float(v)
-        return None if (math.isnan(val) or math.isinf(val)) else val
-    if isinstance(v, np.ndarray):
-        return [_safe(x) for x in v.tolist()]
-    if isinstance(v, np.bool_):
-        return bool(v)
-    if isinstance(v, float):
-        return None if (math.isnan(v) or math.isinf(v)) else v
-    if isinstance(v, dict):
-        return {str(k): _safe(val) for k, val in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_safe(item) for item in v]
-    return v
 
 
 # Map sector names to representative tickers (imported from sectors service)
@@ -98,7 +73,7 @@ def run_auto_tune(
 
     # 1. Build config with the right objective preset
     cfg = Config.defaults()
-    obj_key = _TRADE_MODE_OBJECTIVES.get(trade_mode)
+    obj_key = TRADE_MODE_OBJECTIVES.get(trade_mode)
     if obj_key and obj_key in cfg.available_objectives():
         cfg.apply_objective(obj_key)
 
@@ -122,9 +97,9 @@ def run_auto_tune(
     sensitivity = [
         {
             "param_name": s.param_name,
-            "importance": _safe(s.importance),
-            "best_value": _safe(s.best_value),
-            "value_range": _safe(s.value_range),
+            "importance": safe(s.importance),
+            "best_value": safe(s.best_value),
+            "value_range": safe(s.value_range),
         }
         for s in result.sensitivity
     ]
@@ -132,15 +107,15 @@ def run_auto_tune(
     trials = [
         {
             "trial_number": t.trial_number,
-            "params": _safe(t.params),
-            "objective_value": _safe(t.objective_value),
-            "avg_return_pct": _safe(t.avg_return_pct),
-            "avg_annualized_return_pct": _safe(t.avg_annualized_return_pct),
-            "avg_max_drawdown_pct": _safe(t.avg_max_drawdown_pct),
-            "avg_sharpe_ratio": _safe(t.avg_sharpe_ratio),
-            "avg_win_rate_pct": _safe(t.avg_win_rate_pct),
-            "avg_profit_factor": _safe(t.avg_profit_factor),
-            "stability_score": _safe(t.stability_score),
+            "params": safe(t.params),
+            "objective_value": safe(t.objective_value),
+            "avg_return_pct": safe(t.avg_return_pct),
+            "avg_annualized_return_pct": safe(t.avg_annualized_return_pct),
+            "avg_max_drawdown_pct": safe(t.avg_max_drawdown_pct),
+            "avg_sharpe_ratio": safe(t.avg_sharpe_ratio),
+            "avg_win_rate_pct": safe(t.avg_win_rate_pct),
+            "avg_profit_factor": safe(t.avg_profit_factor),
+            "stability_score": safe(t.stability_score),
             "total_windows": t.total_windows,
         }
         for t in result.trials
@@ -154,30 +129,30 @@ def run_auto_tune(
         "objective": result.objective,
         "objective_label": result.objective_label,
         "n_trials": result.n_trials,
-        "elapsed_seconds": _safe(result.elapsed_seconds),
+        "elapsed_seconds": safe(result.elapsed_seconds),
         # Best trial
-        "best_params": _safe(result.best_params),
-        "best_objective_value": _safe(result.best_objective_value),
-        "best_avg_return_pct": _safe(result.best_avg_return_pct),
-        "best_avg_annualized_return_pct": _safe(result.best_avg_annualized_return_pct),
-        "best_avg_max_drawdown_pct": _safe(result.best_avg_max_drawdown_pct),
-        "best_avg_sharpe_ratio": _safe(result.best_avg_sharpe_ratio),
-        "best_avg_win_rate_pct": _safe(result.best_avg_win_rate_pct),
-        "best_avg_profit_factor": _safe(result.best_avg_profit_factor),
-        "best_stability_score": _safe(result.best_stability_score),
+        "best_params": safe(result.best_params),
+        "best_objective_value": safe(result.best_objective_value),
+        "best_avg_return_pct": safe(result.best_avg_return_pct),
+        "best_avg_annualized_return_pct": safe(result.best_avg_annualized_return_pct),
+        "best_avg_max_drawdown_pct": safe(result.best_avg_max_drawdown_pct),
+        "best_avg_sharpe_ratio": safe(result.best_avg_sharpe_ratio),
+        "best_avg_win_rate_pct": safe(result.best_avg_win_rate_pct),
+        "best_avg_profit_factor": safe(result.best_avg_profit_factor),
+        "best_stability_score": safe(result.best_stability_score),
         # Baseline
-        "baseline_avg_return_pct": _safe(result.baseline_avg_return_pct),
-        "baseline_avg_annualized_return_pct": _safe(result.baseline_avg_annualized_return_pct),
-        "baseline_avg_max_drawdown_pct": _safe(result.baseline_avg_max_drawdown_pct),
-        "baseline_avg_sharpe_ratio": _safe(result.baseline_avg_sharpe_ratio),
-        "baseline_avg_win_rate_pct": _safe(result.baseline_avg_win_rate_pct),
-        "baseline_objective_value": _safe(result.baseline_objective_value),
+        "baseline_avg_return_pct": safe(result.baseline_avg_return_pct),
+        "baseline_avg_annualized_return_pct": safe(result.baseline_avg_annualized_return_pct),
+        "baseline_avg_max_drawdown_pct": safe(result.baseline_avg_max_drawdown_pct),
+        "baseline_avg_sharpe_ratio": safe(result.baseline_avg_sharpe_ratio),
+        "baseline_avg_win_rate_pct": safe(result.baseline_avg_win_rate_pct),
+        "baseline_objective_value": safe(result.baseline_objective_value),
         # Buy-and-hold
-        "buy_hold_return_pct": _safe(result.buy_hold_return_pct),
+        "buy_hold_return_pct": safe(result.buy_hold_return_pct),
         # Sensitivity & trials (for power user mode)
         "sensitivity": sensitivity,
         "trials": trials,
         # Verdict
         "verdict": result.verdict,
-        "improvement_pct": _safe(result.improvement_pct),
+        "improvement_pct": safe(result.improvement_pct),
     }
