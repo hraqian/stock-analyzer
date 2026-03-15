@@ -397,7 +397,19 @@ async def analyze_stock(
             result["ai_analysis"] = ai_text
         except Exception as exc:
             logger.warning("LLM analysis failed for %s: %s", ticker, exc)
-            result["ai_analysis"] = f"AI analysis unavailable: {exc}"
+            err_str = str(exc)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "rate" in err_str.lower():
+                result["ai_analysis"] = (
+                    "AI analysis rate-limited — please wait a minute and try again. "
+                    "Free-tier APIs have per-minute request limits."
+                )
+            elif "API key" in err_str or "api_key" in err_str.lower():
+                result["ai_analysis"] = (
+                    "AI analysis unavailable — API key not configured. "
+                    "Add your key to backend/.env (see Settings page for details)."
+                )
+            else:
+                result["ai_analysis"] = f"AI analysis unavailable: {exc}"
 
     return result
 

@@ -87,7 +87,7 @@ class OpenAIProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     """Google Gemini provider (free tier: 15 req/min)."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
         if not api_key:
             raise ValueError("Google Gemini API key is required")
         self._api_key = api_key
