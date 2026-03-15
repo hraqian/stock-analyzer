@@ -111,43 +111,64 @@ class GeminiProvider(LLMProvider):
 # Factory
 # ---------------------------------------------------------------------------
 
-def get_llm_provider(provider_name: str) -> LLMProvider:
-    """Create an LLM provider instance using env-var API keys.
+def get_llm_provider(
+    provider_name: str,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> LLMProvider:
+    """Create an LLM provider instance.
+
+    User-level ``api_key`` and ``model`` take precedence when provided;
+    otherwise env-var keys and provider defaults are used.
 
     Args:
-        provider_name: "anthropic" or "openai"
+        provider_name: "anthropic", "openai", or "gemini"
+        api_key: Optional user-level API key override.
+        model: Optional model name override.
 
     Returns:
         An LLMProvider instance.
 
     Raises:
-        ValueError: If the provider is unknown or API key is missing.
+        ValueError: If the provider is unknown or no API key is available.
     """
     from app.core.config import settings
 
     if provider_name == "anthropic":
-        if not settings.anthropic_api_key:
+        key = api_key or settings.anthropic_api_key
+        if not key:
             raise ValueError(
                 "Anthropic API key not configured. "
-                "Set the ANTHROPIC_API_KEY environment variable."
+                "Add your key in Settings or set ANTHROPIC_API_KEY env var."
             )
-        return AnthropicProvider(api_key=settings.anthropic_api_key)
+        kwargs: dict = {"api_key": key}
+        if model:
+            kwargs["model"] = model
+        return AnthropicProvider(**kwargs)
 
     if provider_name == "openai":
-        if not settings.openai_api_key:
+        key = api_key or settings.openai_api_key
+        if not key:
             raise ValueError(
                 "OpenAI API key not configured. "
-                "Set the OPENAI_API_KEY environment variable."
+                "Add your key in Settings or set OPENAI_API_KEY env var."
             )
-        return OpenAIProvider(api_key=settings.openai_api_key)
+        kwargs = {"api_key": key}
+        if model:
+            kwargs["model"] = model
+        return OpenAIProvider(**kwargs)
 
     if provider_name == "gemini":
-        if not settings.gemini_api_key:
+        key = api_key or settings.gemini_api_key
+        if not key:
             raise ValueError(
                 "Google Gemini API key not configured. "
-                "Set the GEMINI_API_KEY environment variable."
+                "Add your key in Settings or set GEMINI_API_KEY env var."
             )
-        return GeminiProvider(api_key=settings.gemini_api_key)
+        kwargs = {"api_key": key}
+        if model:
+            kwargs["model"] = model
+        return GeminiProvider(**kwargs)
 
     raise ValueError(
         f"Unknown LLM provider '{provider_name}'. "
@@ -275,17 +296,21 @@ Keep it under 150 words."""
 async def generate_analysis(
     analysis_data: dict[str, Any],
     provider_name: str,
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate a qualitative LLM analysis for a ticker.
 
     Args:
         analysis_data: The full analysis result dict (from _run_analysis).
-        provider_name: "anthropic" or "openai".
+        provider_name: "anthropic", "openai", or "gemini".
+        api_key: Optional user-level API key (overrides env var).
+        model: Optional model name override.
 
     Returns:
         The LLM-generated analysis text.
     """
-    provider = get_llm_provider(provider_name)
+    provider = get_llm_provider(provider_name, api_key=api_key, model=model)
     prompt = _build_analysis_prompt(analysis_data)
     logger.info(
         "Generating LLM analysis for %s via %s",

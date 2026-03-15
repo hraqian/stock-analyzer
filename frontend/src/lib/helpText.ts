@@ -450,7 +450,13 @@ export const HELP_AFTER_TAX_RETURN =
 // ---------------------------------------------------------------------------
 
 export const HELP_LLM_PROVIDER =
-  "Which AI model generates the qualitative analysis. Anthropic (Claude) and OpenAI (GPT) are supported. API keys are set as environment variables on the server — you just pick which one to use.";
+  "Which AI model generates the qualitative analysis. Gemini has a free tier, Anthropic (Claude) and OpenAI (GPT) require paid API keys. You can add your key below or set it as a server environment variable.";
 
 export const HELP_AI_ANALYSIS =
   "An AI-generated plain-English summary of all the technical data above. It highlights the key takeaways so you don't have to interpret every indicator yourself. This costs one API call each time you request it.";
+
+export const HELP_LLM_API_KEY =
+  "Your personal API key for the selected provider. Get one from the provider's website (e.g. aistudio.google.com for Gemini). Your key is stored securely on the server and never shown in full after saving.";
+
+export const HELP_LLM_MODEL =
+  "Which specific model to use from your chosen provider. 'Provider default' uses the recommended model. More capable models (like GPT-4o or Claude Sonnet) produce better analysis but cost more per call.";

@@ -157,6 +157,26 @@ async def update_me(
                 f"Invalid llm_provider '{prov}'. Must be one of: {sorted(VALID_LLM_PROVIDERS)}",
             )
 
+    # Validate LLM API key (allow empty string to clear)
+    if "llm_api_key" in updates:
+        key = updates["llm_api_key"]
+        if key is not None:
+            key = key.strip()
+            if len(key) == 0:
+                updates["llm_api_key"] = None  # treat empty as "clear"
+            elif len(key) > 500:
+                raise HTTPException(400, "llm_api_key is too long (max 500 chars)")
+
+    # Validate LLM model name
+    if "llm_model" in updates:
+        model = updates["llm_model"]
+        if model is not None:
+            model = model.strip()
+            if len(model) == 0:
+                updates["llm_model"] = None  # treat empty as "clear"
+            elif len(model) > 100:
+                raise HTTPException(400, "llm_model is too long (max 100 chars)")
+
     for field, value in updates.items():
         setattr(user, field, value)
 

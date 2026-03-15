@@ -10,6 +10,8 @@ import {
   HELP_TAX_TREATMENT,
   HELP_TAX_MARGINAL_RATE,
   HELP_LLM_PROVIDER,
+  HELP_LLM_API_KEY,
+  HELP_LLM_MODEL,
 } from "@/lib/helpText";
 
 /** Province options for the dropdown. */
@@ -46,7 +48,9 @@ export default function SettingsPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   // LLM provider state
-  const [llmProvider, setLlmProvider] = useState<string>("anthropic");
+  const [llmProvider, setLlmProvider] = useState<string>("gemini");
+  const [llmApiKey, setLlmApiKey] = useState<string>("");
+  const [llmModel, setLlmModel] = useState<string>("");
   const [savingLlm, setSavingLlm] = useState(false);
   const [llmMsg, setLlmMsg] = useState<string | null>(null);
 
@@ -56,8 +60,14 @@ export default function SettingsPage() {
       setTaxProvince(user.tax_province ?? "");
       setTaxIncome(user.tax_annual_income ? String(user.tax_annual_income) : "");
       setTaxTreatment(user.tax_treatment ?? "auto");
-      setLlmProvider(user.llm_provider ?? "anthropic");
+      setLlmProvider(user.llm_provider ?? "gemini");
+      // Don't overwrite the key input with the masked value if user is typing
+      if (!llmApiKey) {
+        setLlmApiKey(user.llm_api_key ?? "");
+      }
+      setLlmModel(user.llm_model ?? "");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   async function handleSaveTax() {
@@ -293,24 +303,83 @@ export default function SettingsPage() {
           </h3>
           <p className="text-xs text-gray-500 mb-4">
             Choose which LLM provider powers the qualitative AI analysis on
-            the Single Stock Analysis page. API keys are configured via
-            environment variables (ANTHROPIC_API_KEY / OPENAI_API_KEY).
+            the Analysis page. You can add your own API key here, or fall
+            back to the server&apos;s environment variable if one is set.
           </p>
 
-          <div className="mb-4">
-            <div className="flex items-center gap-1 mb-1">
-              <span className="text-xs text-gray-400">LLM Provider</span>
-              <HelpTip text={HELP_LLM_PROVIDER} size={12} />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            {/* Provider */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">LLM Provider</span>
+                <HelpTip text={HELP_LLM_PROVIDER} size={12} />
+              </div>
+              <select
+                value={llmProvider}
+                onChange={(e) => {
+                  setLlmProvider(e.target.value);
+                  setLlmModel("");  // reset model when provider changes
+                }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="gemini">Google Gemini (Free tier)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (GPT)</option>
+              </select>
             </div>
-            <select
-              value={llmProvider}
-              onChange={(e) => setLlmProvider(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="gemini">Google Gemini (Free tier)</option>
-              <option value="anthropic">Anthropic (Claude)</option>
-              <option value="openai">OpenAI (GPT)</option>
-            </select>
+
+            {/* API Key */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">API Key</span>
+                <HelpTip text={HELP_LLM_API_KEY} size={12} />
+              </div>
+              <input
+                type="password"
+                value={llmApiKey}
+                onChange={(e) => setLlmApiKey(e.target.value)}
+                placeholder={user?.llm_api_key ? user.llm_api_key : "Paste your key"}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+              />
+              <p className="text-xs text-gray-600 mt-1">
+                {user?.llm_api_key ? "Key configured" : "No key set"} — leave blank to keep current
+              </p>
+            </div>
+
+            {/* Model */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">Model</span>
+                <HelpTip text={HELP_LLM_MODEL} size={12} />
+              </div>
+              <select
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Provider default</option>
+                {llmProvider === "gemini" && (
+                  <>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                  </>
+                )}
+                {llmProvider === "anthropic" && (
+                  <>
+                    <option value="claude-sonnet-4-20250514">claude-sonnet-4-20250514</option>
+                    <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022</option>
+                  </>
+                )}
+                {llmProvider === "openai" && (
+                  <>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4-turbo">gpt-4-turbo</option>
+                  </>
+                )}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -319,8 +388,19 @@ export default function SettingsPage() {
                 setSavingLlm(true);
                 setLlmMsg(null);
                 try {
-                  await updateUser({ llm_provider: llmProvider } as Partial<User>);
+                  const updates: Partial<User> = {
+                    llm_provider: llmProvider,
+                  };
+                  // Only send api_key if user typed something new
+                  // (don't send the masked placeholder back)
+                  if (llmApiKey && !llmApiKey.includes("...")) {
+                    (updates as Record<string, unknown>).llm_api_key = llmApiKey;
+                  }
+                  // Send model (empty string -> null on backend)
+                  (updates as Record<string, unknown>).llm_model = llmModel || null;
+                  await updateUser(updates);
                   setLlmMsg("Saved!");
+                  setLlmApiKey("");  // clear the input after save
                   setTimeout(() => setLlmMsg(null), 3000);
                 } catch (e: unknown) {
                   setLlmMsg(e instanceof Error ? e.message : "Save failed");

@@ -393,7 +393,12 @@ async def analyze_stock(
     if ai:
         try:
             from app.services.llm import generate_analysis
-            ai_text = await generate_analysis(result, user.llm_provider)
+            ai_text = await generate_analysis(
+                result,
+                user.llm_provider,
+                api_key=user.llm_api_key,
+                model=user.llm_model,
+            )
             result["ai_analysis"] = ai_text
         except Exception as exc:
             logger.warning("LLM analysis failed for %s: %s", ticker, exc)
@@ -406,7 +411,8 @@ async def analyze_stock(
             elif "API key" in err_str or "api_key" in err_str.lower():
                 result["ai_analysis"] = (
                     "AI analysis unavailable — API key not configured. "
-                    "Add your key to backend/.env (see Settings page for details)."
+                    "Go to Settings to add your API key, or set the "
+                    "environment variable on the server."
                 )
             else:
                 result["ai_analysis"] = f"AI analysis unavailable: {exc}"

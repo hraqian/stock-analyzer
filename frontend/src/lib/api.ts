@@ -82,7 +82,9 @@ export interface User {
   tax_province: string | null;
   tax_annual_income: number;
   tax_treatment: string;  // "auto" | "capital_gains" | "business_income"
-  llm_provider: string;   // "anthropic" | "openai"
+  llm_provider: string;   // "anthropic" | "openai" | "gemini"
+  llm_api_key: string | null;  // masked value from server (e.g. "sk-ant...****")
+  llm_model: string | null;    // user-chosen model override
 }
 
 export async function login(

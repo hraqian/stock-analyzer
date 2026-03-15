@@ -50,8 +50,12 @@ class User(Base):
     tax_treatment: Mapped[str] = mapped_column(String(20), default="auto")
 
     # AI / LLM settings
-    # Provider: "anthropic", "openai", or "gemini" (keys come from env vars)
+    # Provider: "anthropic", "openai", or "gemini"
     llm_provider: Mapped[str] = mapped_column(String(20), default="gemini")
+    # User-level API key (overrides server env var when set)
+    llm_api_key: Mapped[str | None] = mapped_column(String(500), default=None)
+    # User-level model override (e.g. "gpt-4o", "claude-sonnet-4-20250514")
+    llm_model: Mapped[str | None] = mapped_column(String(100), default=None)
 
     # Serialised JSON blobs for complex preferences
     # (custom watchlists, filter defaults, display prefs, etc.)

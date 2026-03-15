@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +34,21 @@ class UserResponse(BaseModel):
     tax_annual_income: float = 0.0
     tax_treatment: str = "auto"
     # AI / LLM settings
-    llm_provider: str = "anthropic"
+    llm_provider: str = "gemini"
+    llm_api_key: str | None = None       # masked value for display
+    llm_model: str | None = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def mask_api_key(self) -> "UserResponse":
+        """Never expose the full API key — mask all but prefix + last 4."""
+        raw = self.llm_api_key
+        if raw and len(raw) > 8:
+            self.llm_api_key = raw[:6] + "..." + raw[-4:]
+        elif raw:
+            self.llm_api_key = "****"
+        return self
 
 
 class UserUpdate(BaseModel):
@@ -53,6 +65,8 @@ class UserUpdate(BaseModel):
     tax_treatment: str | None = None
     # AI / LLM settings
     llm_provider: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
 
 
 class RegisterRequest(BaseModel):
