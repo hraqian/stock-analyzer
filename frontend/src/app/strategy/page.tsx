@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createChart, ColorType, LineData, Time } from "lightweight-charts";
 import HelpTip from "@/components/HelpTip";
 import {
@@ -338,6 +339,30 @@ function TradeLogTable({ trades }: { trades: BacktestTrade[] }) {
 // ---------------------------------------------------------------------------
 
 export default function StrategyPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Read URL params for cross-section navigation
+  const urlTab = searchParams.get("tab"); // "autotune" | "backtest"
+  const urlTicker = searchParams.get("ticker");
+  const urlSector = searchParams.get("sector");
+
+  // Refs for scrolling to sections
+  const backtestRef = useRef<HTMLDivElement>(null);
+  const autoTunerRef = useRef<HTMLDivElement>(null);
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const autoRanRef = useRef(false);
+
+  // Library refresh trigger (incremented to force re-fetch)
+  const [libraryRefreshTrigger, setLibraryRefreshTrigger] = useState(0);
+  const triggerLibraryRefresh = useCallback(() => {
+    setLibraryRefreshTrigger((n) => n + 1);
+    // Scroll to library after a short delay
+    setTimeout(() => {
+      libraryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 300);
+  }, []);
+
   // Form state
   const [ticker, setTicker] = useState("AAPL");
   const [initialCash, setInitialCash] = useState(100_000);
@@ -383,6 +408,39 @@ export default function StrategyPage() {
     }
   }, [ticker, initialCash, commissionPct, slippagePct, stopLossPct, takeProfitPct, trainYears, testYears]);
 
+  // Handler: pre-fill backtest form from auto-tuner results
+  const handleVerifyWithBacktest = useCallback((btTicker: string, params: Record<string, unknown>) => {
+    setTicker(btTicker);
+    // Pre-fill stop loss / take profit if available in the tuned params
+    if (typeof params["risk.stop_loss_pct"] === "number") {
+      setStopLossPct(params["risk.stop_loss_pct"] * 100);
+    }
+    if (typeof params["risk.take_profit_pct"] === "number") {
+      setTakeProfitPct(params["risk.take_profit_pct"] * 100);
+    }
+    // Scroll to backtest section
+    setTimeout(() => {
+      backtestRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, []);
+
+  // Auto-navigate to auto-tuner if URL has ?tab=autotune
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (urlTab === "autotune" && autoTunerRef.current) {
+      autoRanRef.current = true;
+      setTimeout(() => {
+        autoTunerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 300);
+    } else if (urlTab === "backtest" && urlTicker) {
+      autoRanRef.current = true;
+      setTicker(urlTicker.trim().toUpperCase());
+      setTimeout(() => {
+        backtestRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 300);
+    }
+  }, [urlTab, urlTicker]);
+
   // Determine metric colors
   const metricColor = (val: number | null | undefined): "green" | "red" | "default" =>
     val == null ? "default" : val > 0 ? "green" : val < 0 ? "red" : "default";
@@ -409,7 +467,7 @@ export default function StrategyPage() {
       </div>
 
       {/* Backtest form */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div ref={backtestRef} className="bg-gray-900 border border-gray-800 rounded-xl p-5">
         <h3 className="text-sm font-medium text-gray-300 mb-4">
           Backtest Configuration
         </h3>
@@ -935,18 +993,33 @@ export default function StrategyPage() {
               </div>
             </div>
           )}
+
+          {/* Save Backtest to Library */}
+          <BacktestSaveToLibrary
+            result={result}
+            onSaved={triggerLibraryRefresh}
+          />
         </>
       )}
 
       {/* ================================================================= */}
       {/* Auto-Tuner Section                                                */}
       {/* ================================================================= */}
-      <AutoTunerSection />
+      <div ref={autoTunerRef}>
+        <AutoTunerSection
+          initialSector={urlTab === "autotune" ? urlSector ?? undefined : undefined}
+          initialTicker={urlTab === "autotune" ? urlTicker ?? undefined : undefined}
+          onVerifyWithBacktest={handleVerifyWithBacktest}
+          onSavedToLibrary={triggerLibraryRefresh}
+        />
+      </div>
 
       {/* ================================================================= */}
       {/* Strategy Library Section                                          */}
       {/* ================================================================= */}
-      <StrategyLibrarySection />
+      <div ref={libraryRef}>
+        <StrategyLibrarySection refreshTrigger={libraryRefreshTrigger} />
+      </div>
     </div>
   );
 }
@@ -979,10 +1052,26 @@ const OBJECTIVE_OPTIONS: { value: string; label: string; help: string }[] = [
   { value: "min_drawdown", label: "Minimize Drawdown", help: HELP_MIN_DRAWDOWN },
 ];
 
-function AutoTunerSection() {
-  const [tuneMode, setTuneMode] = useState<TuneMode>("single");
-  const [ticker, setTicker] = useState("AAPL");
-  const [sector, setSector] = useState<string>(GICS_SECTORS[0]);
+function AutoTunerSection({
+  initialSector,
+  initialTicker,
+  onVerifyWithBacktest,
+  onSavedToLibrary,
+}: {
+  initialSector?: string;
+  initialTicker?: string;
+  onVerifyWithBacktest?: (ticker: string, params: Record<string, unknown>) => void;
+  onSavedToLibrary?: () => void;
+}) {
+  const [tuneMode, setTuneMode] = useState<TuneMode>(
+    initialSector ? "sector" : initialTicker ? "single" : "single"
+  );
+  const [ticker, setTicker] = useState(initialTicker?.toUpperCase() || "AAPL");
+  const [sector, setSector] = useState<string>(
+    initialSector && (GICS_SECTORS as readonly string[]).includes(initialSector)
+      ? initialSector
+      : GICS_SECTORS[0]
+  );
   const [customTickers, setCustomTickers] = useState("");
   const [objective, setObjective] = useState("balanced");
   const [nTrials, setNTrials] = useState(30);
@@ -1119,6 +1208,7 @@ function AutoTunerSection() {
       });
       setSaved(true);
       setShowSaveForm(false);
+      onSavedToLibrary?.();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -1707,8 +1797,156 @@ function AutoTunerSection() {
                 Save to Library
               </button>
             )}
+
+            {/* Verify with Backtest button */}
+            {onVerifyWithBacktest && (
+              <button
+                onClick={() => {
+                  const btTicker =
+                    result.mode === "single"
+                      ? result.ticker
+                      : result.tickers?.[0] ?? "AAPL";
+                  onVerifyWithBacktest(btTicker, result.best_params);
+                }}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium
+                           rounded-lg transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Verify with Backtest
+              </button>
+            )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Backtest Save-to-Library sub-component
+// ---------------------------------------------------------------------------
+
+function BacktestSaveToLibrary({
+  result,
+  onSaved,
+}: {
+  result: BacktestResult;
+  onSaved?: () => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDesc, setSaveDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!saveName.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await createStrategy({
+        name: saveName.trim(),
+        description:
+          saveDesc.trim() ||
+          `Backtest on ${result.ticker} — ${result.strategy_name}`,
+        ticker: result.ticker,
+        params: {},
+        annualized_return_pct: result.annualized_return_pct,
+        sharpe_ratio: result.sharpe_ratio,
+        max_drawdown_pct: result.max_drawdown_pct,
+        win_rate_pct: result.win_rate_pct,
+        profit_factor: result.profit_factor,
+        stability_score: result.stability_score,
+      });
+      setSaved(true);
+      setShowForm(false);
+      onSaved?.();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      {saved ? (
+        <div className="flex items-center gap-2 text-emerald-400 text-sm">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          Saved to Strategy Library
+        </div>
+      ) : showForm ? (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Strategy Name *</label>
+            <input
+              type="text"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              placeholder="e.g. AAPL Walk-Forward Verified"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Description (optional)</label>
+            <input
+              type="text"
+              value={saveDesc}
+              onChange={(e) => setSaveDesc(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+              placeholder="Auto-generated if left blank"
+            />
+          </div>
+          {saveError && (
+            <p className="text-xs text-red-400">{saveError}</p>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || !saveName.trim()}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
+                         disabled:text-gray-500 text-white text-sm font-medium rounded-lg
+                         transition-colors"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setSaveError(null); }}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm
+                         rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => {
+            setSaveName(`${result.ticker} ${result.strategy_name}`);
+            setSaveDesc("");
+            setSaved(false);
+            setSaveError(null);
+            setShowForm(true);
+          }}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium
+                     rounded-lg transition-colors flex items-center gap-2"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+          </svg>
+          Save to Library
+        </button>
       )}
     </div>
   );
@@ -1721,7 +1959,7 @@ function AutoTunerSection() {
 
 type LibraryView = "list" | "create" | "compare";
 
-function StrategyLibrarySection() {
+function StrategyLibrarySection({ refreshTrigger }: { refreshTrigger?: number }) {
   const [strategies, setStrategies] = useState<StrategyItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1762,6 +2000,13 @@ function StrategyLibrarySection() {
   useEffect(() => {
     fetchStrategies();
   }, [fetchStrategies]);
+
+  // Re-fetch when refresh trigger changes (e.g. after saving from backtest/auto-tuner)
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) {
+      fetchStrategies();
+    }
+  }, [refreshTrigger, fetchStrategies]);
 
   // Toggle active state
   const handleToggleActive = async (s: StrategyItem) => {

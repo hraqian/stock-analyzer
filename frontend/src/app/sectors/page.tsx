@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   getSectorOverview,
   getSectorDetail,
@@ -511,6 +512,7 @@ function SectorDetailPanel({
   onDetailUpdate?: (d: SectorDetailResponse) => void;
   isPowerUser: boolean;
 }) {
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshed, setRefreshed] = useState(false);
@@ -648,6 +650,55 @@ function SectorDetailPanel({
         </div>
       </div>
 
+      {/* Action buttons: cross-section navigation */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() =>
+            router.push(
+              `/strategy?tab=autotune&sector=${encodeURIComponent(detail.sector)}`
+            )
+          }
+          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium
+                     rounded-lg transition-colors flex items-center gap-1.5"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          Tune this Sector
+        </button>
+        <button
+          onClick={() =>
+            router.push(
+              `/strategy?tab=backtest&ticker=${encodeURIComponent(detail.etf)}`
+            )
+          }
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium
+                     rounded-lg transition-colors flex items-center gap-1.5"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Backtest {detail.etf}
+        </button>
+        <button
+          onClick={() =>
+            router.push(
+              `/analysis?ticker=${encodeURIComponent(detail.etf)}`
+            )
+          }
+          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium
+                     rounded-lg transition-colors flex items-center gap-1.5"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Analyze {detail.etf}
+        </button>
+      </div>
+
       {/* Holdings section */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -711,11 +762,19 @@ function SectorDetailPanel({
               {detail.top_movers.map((m) => (
                 <div
                   key={m.ticker}
-                  className="flex items-center justify-between bg-gray-800/40 rounded px-3 py-1.5 text-sm"
+                  className="flex items-center justify-between bg-gray-800/40 rounded px-3 py-1.5 text-sm group"
                 >
-                  <div>
+                  <div className="flex items-center gap-1.5">
                     <span className="text-white font-medium">{m.ticker}</span>
-                    <span className="text-gray-500 ml-2 text-xs">{m.name}</span>
+                    <span className="text-gray-500 text-xs">{m.name}</span>
+                    <button
+                      onClick={() => router.push(`/analysis?ticker=${encodeURIComponent(m.ticker)}`)}
+                      className="opacity-0 group-hover:opacity-100 text-blue-400 hover:text-blue-300
+                                 text-[10px] transition-opacity px-1"
+                      title={`Analyze ${m.ticker}`}
+                    >
+                      Analyze
+                    </button>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-mono text-xs ${retColor(m.return_1m)}`}>
@@ -744,11 +803,19 @@ function SectorDetailPanel({
               {detail.worst_movers.map((m) => (
                 <div
                   key={m.ticker}
-                  className="flex items-center justify-between bg-gray-800/40 rounded px-3 py-1.5 text-sm"
+                  className="flex items-center justify-between bg-gray-800/40 rounded px-3 py-1.5 text-sm group"
                 >
-                  <div>
+                  <div className="flex items-center gap-1.5">
                     <span className="text-white font-medium">{m.ticker}</span>
-                    <span className="text-gray-500 ml-2 text-xs">{m.name}</span>
+                    <span className="text-gray-500 text-xs">{m.name}</span>
+                    <button
+                      onClick={() => router.push(`/analysis?ticker=${encodeURIComponent(m.ticker)}`)}
+                      className="opacity-0 group-hover:opacity-100 text-blue-400 hover:text-blue-300
+                                 text-[10px] transition-opacity px-1"
+                      title={`Analyze ${m.ticker}`}
+                    >
+                      Analyze
+                    </button>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-mono text-xs ${retColor(m.return_1m)}`}>
