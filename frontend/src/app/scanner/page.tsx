@@ -200,20 +200,21 @@ export default function ScannerPage() {
             </label>
             <div className="grid grid-cols-2 gap-2">
               {PRESETS.map((p) => (
-                <button
-                  key={p.value}
-                  onClick={() => setPreset(p.value)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm
-                    transition-colors ${
-                      preset === p.value
-                        ? "border-blue-500 bg-blue-500/10 text-blue-400"
-                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600 hover:text-gray-300"
-                    }`}
-                >
-                  <span>{p.icon}</span>
-                  <span>{p.label}</span>
+                <div key={p.value} className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPreset(p.value)}
+                    className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border text-sm
+                      transition-colors ${
+                        preset === p.value
+                          ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                          : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                      }`}
+                  >
+                    <span>{p.icon}</span>
+                    <span>{p.label}</span>
+                  </button>
                   <HelpTip text={p.help} size={12} />
-                </button>
+                </div>
               ))}
             </div>
           </div>
