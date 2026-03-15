@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { analyzeStock } from "@/lib/api";
 import type { AnalysisResult } from "@/lib/api";
 import CandlestickChart from "@/components/CandlestickChart";
@@ -72,6 +72,7 @@ function fmtNum(n: unknown): string {
 
 export default function AnalysisPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [ticker, setTicker] = useState("");
   const [period, setPeriod] = useState("6mo");
   const [interval, setInterval] = useState("1d");
@@ -217,6 +218,40 @@ export default function AnalysisPage() {
         <div className="space-y-6">
           {/* Ticker Info Bar */}
           <TickerInfoBar result={result} />
+
+          {/* Action buttons: cross-section navigation */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() =>
+                router.push(
+                  `/strategy?tab=autotune&ticker=${encodeURIComponent(result.ticker)}`
+                )
+              }
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium
+                         rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+              Auto-Tune Strategy
+            </button>
+            <button
+              onClick={() =>
+                router.push(
+                  `/strategy?tab=backtest&ticker=${encodeURIComponent(result.ticker)}`
+                )
+              }
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium
+                         rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              Backtest Strategy
+            </button>
+          </div>
 
           {/* Composite Scores */}
           <CompositeScoreCard result={result} />
