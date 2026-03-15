@@ -269,46 +269,15 @@ def run_backtest(
 
         window_results.append(wr)
 
-    # 4. If no windows were generated, fall back to a simple single backtest
+    # 4. If no windows were generated, raise an error prompting the user to reduce window sizes
     if not windows:
-        logger.info("No walk-forward windows generated, running single backtest")
-        strategy = ScoreBasedStrategy(
-            params=dict(strat_section),
-            trading_mode=TradingMode.LONG_SHORT,
+        total_needed = train_years + test_years
+        raise ValueError(
+            f"Not enough historical data for walk-forward analysis. "
+            f"Your settings require at least {total_needed} years of data "
+            f"(train={train_years}Y + test={test_years}Y) going back before year 2000. "
+            f"Try reducing Train Years or Test Years."
         )
-        engine = BacktestEngine(
-            data_provider=provider,
-            strategy=strategy,
-            cfg=cfg,
-            trading_mode=TradingMode.LONG_SHORT,
-        )
-        bt = engine.run(
-            ticker=ticker_upper,
-            period=period if not start else None,
-            interval=interval,
-            start=start,
-            end=end,
-        )
-        result_dict = _backtest_result_to_dict(bt)
-        result_dict.update({
-            "train_years": train_years,
-            "test_years": test_years,
-            "total_windows": 0,
-            "windows": [],
-            "wf_avg_return_pct": 0.0,
-            "wf_avg_annualized_return_pct": 0.0,
-            "wf_avg_max_drawdown_pct": 0.0,
-            "wf_avg_sharpe_ratio": 0.0,
-            "wf_avg_win_rate_pct": 0.0,
-            "wf_avg_profit_factor": 0.0,
-            "wf_worst_return_pct": 0.0,
-            "wf_worst_drawdown_pct": 0.0,
-            "wf_worst_window_index": 0,
-            "wf_return_std_dev": 0.0,
-            "stability_score": 0.0,
-            "verdict": "Not enough historical data for walk-forward analysis.",
-        })
-        return result_dict
 
     # 5. Build detailed result from the latest window
     if latest_bt_result is not None:

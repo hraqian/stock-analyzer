@@ -484,7 +484,6 @@ export interface BacktestResult {
 
 export interface BacktestRequest {
   ticker: string;
-  period?: string;
   interval?: string;
   start?: string;
   end?: string;

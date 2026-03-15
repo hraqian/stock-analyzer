@@ -340,7 +340,6 @@ function TradeLogTable({ trades }: { trades: BacktestTrade[] }) {
 export default function StrategyPage() {
   // Form state
   const [ticker, setTicker] = useState("AAPL");
-  const [period, setPeriod] = useState("2y");
   const [initialCash, setInitialCash] = useState(100_000);
   const [commissionPct, setCommissionPct] = useState(0);
   const [slippagePct, setSlippagePct] = useState(0.1);
@@ -366,7 +365,6 @@ export default function StrategyPage() {
     try {
       const req: BacktestRequest = {
         ticker: ticker.trim().toUpperCase(),
-        period,
         initial_cash: initialCash,
         commission_pct: commissionPct / 100,   // UI shows %, API wants decimal
         slippage_pct: slippagePct / 100,
@@ -383,7 +381,7 @@ export default function StrategyPage() {
     } finally {
       setLoading(false);
     }
-  }, [ticker, period, initialCash, commissionPct, slippagePct, stopLossPct, takeProfitPct, trainYears, testYears]);
+  }, [ticker, initialCash, commissionPct, slippagePct, stopLossPct, takeProfitPct, trainYears, testYears]);
 
   // Determine metric colors
   const metricColor = (val: number | null | undefined): "green" | "red" | "default" =>
@@ -427,24 +425,6 @@ export default function StrategyPage() {
                          focus:outline-none focus:border-blue-500"
               placeholder="AAPL"
             />
-          </div>
-
-          {/* Period */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">
-              Period
-            </label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
-                         focus:outline-none focus:border-blue-500"
-            >
-              <option value="6mo">6 Months</option>
-              <option value="1y">1 Year</option>
-              <option value="2y">2 Years</option>
-              <option value="5y">5 Years</option>
-            </select>
           </div>
 
           {/* Initial Cash */}
@@ -606,7 +586,11 @@ export default function StrategyPage() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
+        <div className={`border rounded-lg p-4 text-sm ${
+          error.includes("Try reducing")
+            ? "bg-amber-900/20 border-amber-800 text-amber-300"
+            : "bg-red-900/30 border-red-800 text-red-300"
+        }`}>
           {error}
         </div>
       )}
