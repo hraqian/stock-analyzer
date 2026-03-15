@@ -13,8 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
+from app.core.database import get_db
 from app.models.schemas import (
     AnalysisResponse,
     AutoTuneRequest,
@@ -25,6 +27,12 @@ from app.models.schemas import (
     ScanResponse,
     SectorDetailResponse,
     SectorOverviewResponse,
+    StrategyCreateRequest,
+    StrategyExportResponse,
+    StrategyImportRequest,
+    StrategyListResponse,
+    StrategyResponse,
+    StrategyUpdateRequest,
     UniverseListResponse,
     WalkForwardRequest,
     WalkForwardResponse,
@@ -612,12 +620,108 @@ async def strategy_lab_status(user: User = Depends(get_current_user)):
     }
 
 
-@strategy_router.get("/library")
-async def list_strategies(user: User = Depends(get_current_user)):
-    return {
-        "strategies": [],
-        "status": "coming_in_phase_3d",
-    }
+@strategy_router.get("/library", response_model=StrategyListResponse)
+async def list_strategies_endpoint(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all strategies for the current user (including built-in presets)."""
+    from app.services.strategy_library import list_strategies  # late import
+
+    strategies = await list_strategies(db, user.id)
+    return {"strategies": strategies}
+
+
+@strategy_router.get("/library/{strategy_id}", response_model=StrategyResponse)
+async def get_strategy_endpoint(
+    strategy_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single strategy by ID."""
+    from app.services.strategy_library import get_strategy
+
+    result = await get_strategy(db, user.id, strategy_id)
+    if not result:
+        raise HTTPException(404, "Strategy not found")
+    return result
+
+
+@strategy_router.post("/library", response_model=StrategyResponse)
+async def create_strategy_endpoint(
+    req: StrategyCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a new strategy."""
+    from app.services.strategy_library import create_strategy
+
+    if not req.name or not req.name.strip():
+        raise HTTPException(400, "Strategy name is required")
+    result = await create_strategy(db, user.id, req.model_dump())
+    return result
+
+
+@strategy_router.patch("/library/{strategy_id}", response_model=StrategyResponse)
+async def update_strategy_endpoint(
+    strategy_id: int,
+    req: StrategyUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an existing strategy.  Presets can only have is_active toggled."""
+    from app.services.strategy_library import update_strategy
+
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    result = await update_strategy(db, user.id, strategy_id, data)
+    if not result:
+        raise HTTPException(404, "Strategy not found or cannot be modified")
+    return result
+
+
+@strategy_router.delete("/library/{strategy_id}")
+async def delete_strategy_endpoint(
+    strategy_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a user strategy.  Presets cannot be deleted."""
+    from app.services.strategy_library import delete_strategy
+
+    success = await delete_strategy(db, user.id, strategy_id)
+    if not success:
+        raise HTTPException(404, "Strategy not found or is a built-in preset")
+    return {"status": "deleted", "id": strategy_id}
+
+
+@strategy_router.get("/library/{strategy_id}/export", response_model=StrategyExportResponse)
+async def export_strategy_endpoint(
+    strategy_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a strategy as a portable JSON document."""
+    from app.services.strategy_library import export_strategy
+
+    result = await export_strategy(db, user.id, strategy_id)
+    if not result:
+        raise HTTPException(404, "Strategy not found")
+    return result
+
+
+@strategy_router.post("/library/import", response_model=StrategyResponse)
+async def import_strategy_endpoint(
+    req: StrategyImportRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import a strategy from a JSON document."""
+    from app.services.strategy_library import import_strategy
+
+    if not req.name or not req.name.strip():
+        raise HTTPException(400, "Strategy name is required")
+    result = await import_strategy(db, user.id, req.model_dump())
+    return result
 
 
 # Walk-forward pool (multiple windows = very long running)

@@ -516,6 +516,92 @@ class AutoTuneResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Strategy Library (Phase 3D)
+# ---------------------------------------------------------------------------
+
+class StrategyCreateRequest(BaseModel):
+    """POST body for creating/saving a strategy."""
+    name: str
+    description: str | None = None
+    trade_mode: str = "swing"
+    ticker: str | None = None
+    params: dict = {}
+    # Optional metrics (from a backtest or auto-tuner run)
+    total_return_pct: float | None = None
+    annualized_return_pct: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+    win_rate_pct: float | None = None
+    profit_factor: float | None = None
+    stability_score: float | None = None
+
+
+class StrategyUpdateRequest(BaseModel):
+    """PATCH body for updating a strategy."""
+    name: str | None = None
+    description: str | None = None
+    trade_mode: str | None = None
+    ticker: str | None = None
+    params: dict | None = None
+    is_active: bool | None = None
+    total_return_pct: float | None = None
+    annualized_return_pct: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+    win_rate_pct: float | None = None
+    profit_factor: float | None = None
+    stability_score: float | None = None
+
+
+class StrategyResponse(BaseModel):
+    """Single strategy in API responses."""
+    id: int
+    name: str
+    description: str | None = None
+    version: int = 1
+    is_preset: bool = False
+    trade_mode: str = "swing"
+    ticker: str | None = None
+    params: dict = {}
+    total_return_pct: float | None = None
+    annualized_return_pct: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+    win_rate_pct: float | None = None
+    profit_factor: float | None = None
+    stability_score: float | None = None
+    is_active: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class StrategyListResponse(BaseModel):
+    """Response for listing strategies."""
+    strategies: list[StrategyResponse] = []
+
+
+class StrategyExportResponse(BaseModel):
+    """Export format for a strategy (JSON-serializable snapshot)."""
+    name: str
+    description: str | None = None
+    version: int = 1
+    trade_mode: str = "swing"
+    ticker: str | None = None
+    params: dict = {}
+    metrics: dict = {}
+
+
+class StrategyImportRequest(BaseModel):
+    """Import a strategy from JSON."""
+    name: str
+    description: str | None = None
+    trade_mode: str = "swing"
+    ticker: str | None = None
+    params: dict = {}
+    metrics: dict = {}
+
+
+# ---------------------------------------------------------------------------
 # Portfolio Simulation (stubs — expanded in Phase 4)
 # ---------------------------------------------------------------------------
 

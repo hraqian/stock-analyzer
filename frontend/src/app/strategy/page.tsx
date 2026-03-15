@@ -7,6 +7,12 @@ import {
   runBacktest,
   runWalkForward,
   runAutoTune,
+  listStrategies,
+  createStrategy,
+  updateStrategy,
+  deleteStrategy,
+  exportStrategy,
+  importStrategy,
   type BacktestResult,
   type BacktestRequest,
   type BacktestTrade,
@@ -18,6 +24,9 @@ import {
   type AutoTuneRequest,
   type SensitivityEntry,
   type AutoTuneTrial,
+  type StrategyItem,
+  type StrategyCreateRequest,
+  type StrategyExport,
 } from "@/lib/api";
 import {
   HELP_BACKTEST,
@@ -57,6 +66,14 @@ import {
   HELP_MAX_RISK_ADJUSTED,
   HELP_MIN_DRAWDOWN,
   HELP_BALANCED,
+  HELP_STRATEGY_LIBRARY,
+  HELP_STRATEGY_PRESET,
+  HELP_STRATEGY_VERSION,
+  HELP_STRATEGY_ACTIVE,
+  HELP_STRATEGY_PARAMS,
+  HELP_STRATEGY_COMPARE,
+  HELP_STRATEGY_EXPORT,
+  HELP_STRATEGY_IMPORT,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -757,16 +774,10 @@ export default function StrategyPage() {
       {/* ================================================================= */}
       <AutoTunerSection />
 
-      {/* Placeholder for Strategy Library */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center">
-        <p className="text-gray-400 font-medium text-sm">Strategy Library</p>
-        <p className="text-gray-600 text-xs mt-1">
-          Save, compare, and export strategies. Built-in presets included.
-        </p>
-        <span className="inline-block mt-2 px-2 py-0.5 bg-gray-800 text-gray-500 text-xs rounded">
-          Phase 3D
-        </span>
-      </div>
+      {/* ================================================================= */}
+      {/* Strategy Library Section                                          */}
+      {/* ================================================================= */}
+      <StrategyLibrarySection />
     </div>
   );
 }
@@ -1549,6 +1560,680 @@ function AutoTunerSection() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Strategy Library sub-component
+// ---------------------------------------------------------------------------
+
+type LibraryView = "list" | "create" | "compare";
+
+function StrategyLibrarySection() {
+  const [strategies, setStrategies] = useState<StrategyItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<LibraryView>("list");
+
+  // Create form state
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newTradeMode, setNewTradeMode] = useState("swing");
+  const [newTicker, setNewTicker] = useState("");
+  const [newParamsJson, setNewParamsJson] = useState("{}");
+  const [saving, setSaving] = useState(false);
+
+  // Compare state
+  const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
+
+  // Import state
+  const importRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Confirmation dialog state
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  // Fetch strategies on mount
+  const fetchStrategies = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listStrategies();
+      setStrategies(res.strategies);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load strategies");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStrategies();
+  }, [fetchStrategies]);
+
+  // Toggle active state
+  const handleToggleActive = async (s: StrategyItem) => {
+    try {
+      const updated = await updateStrategy(s.id, { is_active: !s.is_active });
+      setStrategies((prev) =>
+        prev.map((x) => (x.id === updated.id ? updated : x))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update strategy");
+    }
+  };
+
+  // Delete strategy
+  const handleDelete = async (id: number) => {
+    try {
+      await deleteStrategy(id);
+      setStrategies((prev) => prev.filter((x) => x.id !== id));
+      setCompareIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setDeleteId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete strategy");
+    }
+  };
+
+  // Export strategy
+  const handleExport = async (id: number) => {
+    try {
+      const data = await exportStrategy(id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `strategy-${data.name.replace(/\s+/g, "-").toLowerCase()}-v${data.version}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export strategy");
+    }
+  };
+
+  // Import strategy
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const text = await file.text();
+      const data: StrategyExport = JSON.parse(text);
+      await importStrategy(data);
+      await fetchStrategies();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to import strategy"
+      );
+    } finally {
+      setImporting(false);
+      if (importRef.current) importRef.current.value = "";
+    }
+  };
+
+  // Create strategy
+  const handleCreate = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      let params = {};
+      if (newParamsJson.trim()) {
+        params = JSON.parse(newParamsJson);
+      }
+      const req: StrategyCreateRequest = {
+        name: newName.trim(),
+        description: newDescription.trim() || undefined,
+        trade_mode: newTradeMode,
+        ticker: newTicker.trim() || undefined,
+        params,
+      };
+      await createStrategy(req);
+      await fetchStrategies();
+      setNewName("");
+      setNewDescription("");
+      setNewTradeMode("swing");
+      setNewTicker("");
+      setNewParamsJson("{}");
+      setView("list");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save strategy");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Toggle compare selection
+  const toggleCompare = (id: number) => {
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const comparedStrategies = strategies.filter((s) => compareIds.has(s.id));
+
+  // Formatting helpers
+  const fmtPct = (v: number | null | undefined) =>
+    v == null ? "\u2014" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const fmtNum = (v: number | null | undefined, d = 2) =>
+    v == null ? "\u2014" : v.toFixed(d);
+
+  const metricColor = (
+    v: number | null | undefined,
+    higherIsBetter = true
+  ): string => {
+    if (v == null) return "text-gray-500";
+    if (higherIsBetter) return v > 0 ? "text-emerald-400" : v < 0 ? "text-red-400" : "text-gray-300";
+    return v < 0 ? "text-emerald-400" : v > 0 ? "text-red-400" : "text-gray-300";
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header + actions */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <h3 className="text-sm font-medium text-gray-300 flex items-center gap-1">
+            Strategy Library <HelpTip text={HELP_STRATEGY_LIBRARY} />
+          </h3>
+          <div className="flex items-center gap-2">
+            {view === "list" && compareIds.size >= 2 && (
+              <button
+                onClick={() => setView("compare")}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                Compare ({compareIds.size})
+              </button>
+            )}
+            {view === "compare" && (
+              <button
+                onClick={() => setView("list")}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                Back to List
+              </button>
+            )}
+            <button
+              onClick={() => setView(view === "create" ? "list" : "create")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                view === "create"
+                  ? "bg-gray-700 hover:bg-gray-600 text-white"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
+              }`}
+            >
+              {view === "create" ? "Cancel" : "+ New Strategy"}
+            </button>
+            <label
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer
+                          ${importing ? "bg-gray-700 text-gray-500" : "bg-gray-700 hover:bg-gray-600 text-white"}`}
+            >
+              {importing ? "Importing..." : "Import"}
+              <HelpTip text={HELP_STRATEGY_IMPORT} />
+              <input
+                ref={importRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleImportFile}
+                disabled={importing}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-900/30 border border-red-800 rounded-lg p-3 text-red-300 text-sm mb-4">
+            {error}
+            <button
+              onClick={() => setError(null)}
+              className="ml-2 text-red-400 hover:text-red-300 text-xs"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && (
+          <div className="text-center py-8">
+            <svg
+              className="animate-spin h-6 w-6 text-gray-400 mx-auto"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+            <p className="text-gray-500 text-sm mt-2">Loading strategies...</p>
+          </div>
+        )}
+
+        {/* ---- CREATE VIEW ---- */}
+        {view === "create" && (
+          <div className="space-y-4">
+            <h4 className="text-xs font-medium text-gray-400">
+              Save a New Strategy
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Name *
+                </label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                             focus:outline-none focus:border-blue-500"
+                  placeholder="My Momentum Strategy"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Ticker (optional)
+                </label>
+                <input
+                  type="text"
+                  value={newTicker}
+                  onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                             focus:outline-none focus:border-blue-500"
+                  placeholder="AAPL"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-gray-400 mb-1">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                             focus:outline-none focus:border-blue-500"
+                  placeholder="Optimized for high-momentum large-cap stocks"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Trade Mode
+                </label>
+                <select
+                  value={newTradeMode}
+                  onChange={(e) => setNewTradeMode(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                             focus:outline-none focus:border-blue-500"
+                >
+                  <option value="swing">Swing Trade</option>
+                  <option value="long_term">Long-Term</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+                  Parameters (JSON) <HelpTip text={HELP_STRATEGY_PARAMS} />
+                </label>
+                <textarea
+                  value={newParamsJson}
+                  onChange={(e) => setNewParamsJson(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                             font-mono focus:outline-none focus:border-blue-500 min-h-[80px]"
+                  rows={3}
+                  placeholder='{"score_thresholds": {"strong_buy": 7.5}, ...}'
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleCreate}
+                disabled={saving || !newName.trim()}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700
+                           disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {saving ? "Saving..." : "Save Strategy"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ---- COMPARE VIEW ---- */}
+        {view === "compare" && comparedStrategies.length >= 2 && (
+          <div className="space-y-4">
+            <h4 className="text-xs font-medium text-gray-400 flex items-center gap-1">
+              Strategy Comparison <HelpTip text={HELP_STRATEGY_COMPARE} />
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700 text-gray-400 text-xs">
+                    <th className="py-2 px-3 text-left">Metric</th>
+                    {comparedStrategies.map((s) => (
+                      <th key={s.id} className="py-2 px-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {s.name}
+                          {s.is_preset && (
+                            <span className="px-1 py-0.5 bg-blue-900/50 text-blue-400 text-[10px] rounded">
+                              PRESET
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    { label: "Total Return", key: "total_return_pct" as const, fmt: "pct", higher: true },
+                    { label: "Annualized Return", key: "annualized_return_pct" as const, fmt: "pct", higher: true },
+                    { label: "Sharpe Ratio", key: "sharpe_ratio" as const, fmt: "num", higher: true },
+                    { label: "Max Drawdown", key: "max_drawdown_pct" as const, fmt: "pct_neg", higher: false },
+                    { label: "Win Rate", key: "win_rate_pct" as const, fmt: "pct_plain", higher: true },
+                    { label: "Profit Factor", key: "profit_factor" as const, fmt: "num", higher: true },
+                    { label: "Stability Score", key: "stability_score" as const, fmt: "num0", higher: true },
+                    { label: "Trade Mode", key: "trade_mode" as const, fmt: "text", higher: true },
+                    { label: "Version", key: "version" as const, fmt: "num0", higher: true },
+                  ] as const).map((row) => {
+                    // Find best value for highlighting
+                    const numValues = comparedStrategies
+                      .map((s) => s[row.key])
+                      .filter((v): v is number => typeof v === "number");
+                    const bestVal = numValues.length > 0
+                      ? (row.higher ? Math.max(...numValues) : Math.min(...numValues))
+                      : null;
+
+                    return (
+                      <tr
+                        key={row.label}
+                        className="border-b border-gray-800 hover:bg-gray-800/40"
+                      >
+                        <td className="py-2 px-3 text-gray-400 text-xs">
+                          {row.label}
+                        </td>
+                        {comparedStrategies.map((s) => {
+                          const val = s[row.key];
+                          const isBest = typeof val === "number" && val === bestVal;
+                          let display: string;
+                          if (row.fmt === "text") {
+                            display = String(val ?? "\u2014");
+                          } else if (row.fmt === "pct") {
+                            display = fmtPct(val as number | null);
+                          } else if (row.fmt === "pct_neg") {
+                            display =
+                              val == null
+                                ? "\u2014"
+                                : `-${Math.abs(val as number).toFixed(2)}%`;
+                          } else if (row.fmt === "pct_plain") {
+                            display =
+                              val == null ? "\u2014" : `${(val as number).toFixed(1)}%`;
+                          } else if (row.fmt === "num0") {
+                            display =
+                              val == null ? "\u2014" : (val as number).toFixed(0);
+                          } else {
+                            display = fmtNum(val as number | null);
+                          }
+
+                          return (
+                            <td
+                              key={s.id}
+                              className={`py-2 px-3 text-right text-sm ${
+                                isBest ? "text-emerald-400 font-semibold" : "text-gray-300"
+                              }`}
+                            >
+                              {display}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ---- LIST VIEW ---- */}
+        {view === "list" && !loading && (
+          <>
+            {strategies.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4 text-center">
+                No strategies saved yet. Create one or run a backtest to get started.
+              </p>
+            ) : (
+              <>
+                {compareIds.size > 0 && compareIds.size < 2 && (
+                  <p className="text-xs text-gray-500 mb-3">
+                    Select at least 2 strategies to compare.
+                  </p>
+                )}
+                <div className="space-y-3">
+                  {strategies.map((s) => (
+                    <div
+                      key={s.id}
+                      className={`border rounded-lg p-4 transition-colors ${
+                        compareIds.has(s.id)
+                          ? "border-indigo-500 bg-indigo-900/10"
+                          : "border-gray-700 bg-gray-800/30 hover:bg-gray-800/50"
+                      }`}
+                    >
+                      {/* Card header row */}
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-white truncate">
+                              {s.name}
+                            </span>
+                            {s.is_preset && (
+                              <span className="px-1.5 py-0.5 bg-blue-900/50 text-blue-400 text-[10px] rounded flex items-center gap-0.5">
+                                PRESET <HelpTip text={HELP_STRATEGY_PRESET} />
+                              </span>
+                            )}
+                            <span className="text-[10px] text-gray-500 flex items-center gap-0.5">
+                              v{s.version} <HelpTip text={HELP_STRATEGY_VERSION} />
+                            </span>
+                            <span className="px-1.5 py-0.5 bg-gray-800 text-gray-400 text-[10px] rounded">
+                              {s.trade_mode === "long_term" ? "Long-Term" : "Swing"}
+                            </span>
+                            {s.ticker && (
+                              <span className="px-1.5 py-0.5 bg-gray-800 text-gray-300 text-[10px] rounded font-mono">
+                                {s.ticker}
+                              </span>
+                            )}
+                          </div>
+                          {s.description && (
+                            <p className="text-xs text-gray-500 mt-1 truncate">
+                              {s.description}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {/* Compare checkbox */}
+                          <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={compareIds.has(s.id)}
+                              onChange={() => toggleCompare(s.id)}
+                              className="rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 h-3.5 w-3.5"
+                            />
+                            Compare
+                          </label>
+
+                          {/* Active toggle */}
+                          <button
+                            onClick={() => handleToggleActive(s)}
+                            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors flex items-center gap-0.5 ${
+                              s.is_active
+                                ? "bg-emerald-900/50 text-emerald-400 hover:bg-emerald-900/70"
+                                : "bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+                            }`}
+                            title={s.is_active ? "Deactivate strategy" : "Activate for Portfolio Simulation"}
+                          >
+                            {s.is_active ? "Active" : "Inactive"}
+                            <HelpTip text={HELP_STRATEGY_ACTIVE} />
+                          </button>
+
+                          {/* Export */}
+                          <button
+                            onClick={() => handleExport(s.id)}
+                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-[10px] rounded transition-colors flex items-center gap-0.5"
+                            title="Export as JSON"
+                          >
+                            Export <HelpTip text={HELP_STRATEGY_EXPORT} />
+                          </button>
+
+                          {/* Delete (user strategies only) */}
+                          {!s.is_preset && (
+                            <button
+                              onClick={() => setDeleteId(s.id)}
+                              className="px-2 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-500 hover:text-red-400 text-[10px] rounded transition-colors"
+                              title="Delete strategy"
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Metrics row */}
+                      {s.total_return_pct != null && (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                          <div>
+                            <div className="text-[10px] text-gray-500">Return</div>
+                            <div
+                              className={`text-xs font-medium ${metricColor(s.total_return_pct)}`}
+                            >
+                              {fmtPct(s.total_return_pct)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">Annual</div>
+                            <div
+                              className={`text-xs font-medium ${metricColor(s.annualized_return_pct)}`}
+                            >
+                              {fmtPct(s.annualized_return_pct)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">Sharpe</div>
+                            <div
+                              className={`text-xs font-medium ${metricColor(s.sharpe_ratio)}`}
+                            >
+                              {fmtNum(s.sharpe_ratio)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">Max DD</div>
+                            <div
+                              className={`text-xs font-medium ${metricColor(
+                                s.max_drawdown_pct != null ? -s.max_drawdown_pct : null
+                              )}`}
+                            >
+                              {s.max_drawdown_pct != null
+                                ? `-${Math.abs(s.max_drawdown_pct).toFixed(2)}%`
+                                : "\u2014"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">Win Rate</div>
+                            <div className="text-xs font-medium text-gray-300">
+                              {s.win_rate_pct != null
+                                ? `${s.win_rate_pct.toFixed(1)}%`
+                                : "\u2014"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">P.Factor</div>
+                            <div
+                              className={`text-xs font-medium ${metricColor(
+                                s.profit_factor != null ? s.profit_factor - 1 : null
+                              )}`}
+                            >
+                              {fmtNum(s.profit_factor)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">Stability</div>
+                            <div
+                              className={`text-xs font-medium ${
+                                s.stability_score == null
+                                  ? "text-gray-500"
+                                  : s.stability_score >= 70
+                                    ? "text-emerald-400"
+                                    : s.stability_score >= 40
+                                      ? "text-yellow-400"
+                                      : "text-red-400"
+                              }`}
+                            >
+                              {s.stability_score != null
+                                ? s.stability_score.toFixed(0)
+                                : "\u2014"}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Delete confirmation dialog */}
+      {deleteId != null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full mx-4">
+            <h4 className="text-white font-medium mb-2">Delete Strategy?</h4>
+            <p className="text-gray-400 text-sm mb-4">
+              This action cannot be undone. The strategy and all its data will be
+              permanently removed.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteId(null)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteId)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

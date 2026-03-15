@@ -567,3 +567,107 @@ export async function runAutoTune(req: AutoTuneRequest): Promise<AutoTuneResult>
     body: JSON.stringify(req),
   });
 }
+
+
+// ---------------------------------------------------------------------------
+// Strategy Library
+// ---------------------------------------------------------------------------
+
+export interface StrategyItem {
+  id: number;
+  name: string;
+  description: string | null;
+  version: number;
+  is_preset: boolean;
+  trade_mode: string;
+  ticker: string | null;
+  params: Record<string, unknown>;
+  total_return_pct: number | null;
+  annualized_return_pct: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown_pct: number | null;
+  win_rate_pct: number | null;
+  profit_factor: number | null;
+  stability_score: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StrategyCreateRequest {
+  name: string;
+  description?: string;
+  trade_mode?: string;
+  ticker?: string;
+  params?: Record<string, unknown>;
+  total_return_pct?: number;
+  annualized_return_pct?: number;
+  sharpe_ratio?: number;
+  max_drawdown_pct?: number;
+  win_rate_pct?: number;
+  profit_factor?: number;
+  stability_score?: number;
+}
+
+export interface StrategyUpdateRequest {
+  name?: string;
+  description?: string;
+  trade_mode?: string;
+  ticker?: string;
+  params?: Record<string, unknown>;
+  is_active?: boolean;
+  total_return_pct?: number;
+  annualized_return_pct?: number;
+  sharpe_ratio?: number;
+  max_drawdown_pct?: number;
+  win_rate_pct?: number;
+  profit_factor?: number;
+  stability_score?: number;
+}
+
+export interface StrategyExport {
+  name: string;
+  description: string | null;
+  version: number;
+  trade_mode: string;
+  ticker: string | null;
+  params: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+}
+
+export async function listStrategies(): Promise<{ strategies: StrategyItem[] }> {
+  return apiFetch<{ strategies: StrategyItem[] }>("/api/strategy/library");
+}
+
+export async function getStrategy(id: number): Promise<StrategyItem> {
+  return apiFetch<StrategyItem>(`/api/strategy/library/${id}`);
+}
+
+export async function createStrategy(req: StrategyCreateRequest): Promise<StrategyItem> {
+  return apiFetch<StrategyItem>("/api/strategy/library", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateStrategy(id: number, req: StrategyUpdateRequest): Promise<StrategyItem> {
+  return apiFetch<StrategyItem>(`/api/strategy/library/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteStrategy(id: number): Promise<void> {
+  await apiFetch(`/api/strategy/library/${id}`, { method: "DELETE" });
+}
+
+export async function exportStrategy(id: number): Promise<StrategyExport> {
+  return apiFetch<StrategyExport>(`/api/strategy/library/${id}/export`);
+}
+
+export async function importStrategy(data: StrategyExport): Promise<StrategyItem> {
+  return apiFetch<StrategyItem>("/api/strategy/library/import", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

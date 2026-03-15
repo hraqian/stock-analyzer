@@ -376,3 +376,31 @@ export const HELP_MIN_DRAWDOWN =
 
 export const HELP_BALANCED =
   "A weighted combination of return, risk, drawdown, and win rate. Good default for most users — tries to balance everything.";
+
+// ---------------------------------------------------------------------------
+// Strategy Lab — Strategy Library
+// ---------------------------------------------------------------------------
+
+export const HELP_STRATEGY_LIBRARY =
+  "Your saved strategy configurations. Each strategy is a set of parameters that control how the trading algorithm makes decisions. Save winning parameter sets here, compare them, and activate them for portfolio simulation.";
+
+export const HELP_STRATEGY_PRESET =
+  "A built-in strategy template created by experts. You can't edit presets, but you can use them as a starting point, activate them for portfolio simulation, or export them.";
+
+export const HELP_STRATEGY_VERSION =
+  "Each time you update a strategy's parameters, the version number increases. This helps you track changes over time.";
+
+export const HELP_STRATEGY_ACTIVE =
+  "An 'active' strategy will be used in Portfolio Simulation to generate trade signals. You can have multiple strategies active at once.";
+
+export const HELP_STRATEGY_PARAMS =
+  "The specific parameter values that control this strategy — things like score thresholds, indicator weights, stop-loss levels, etc. These are what make each strategy unique.";
+
+export const HELP_STRATEGY_COMPARE =
+  "Compare two or more strategies side-by-side on key metrics like return, Sharpe ratio, drawdown, and win rate. Helps you pick the best one.";
+
+export const HELP_STRATEGY_EXPORT =
+  "Download a strategy as a JSON file that you can share with others or back up. The file contains all parameters and performance metrics.";
+
+export const HELP_STRATEGY_IMPORT =
+  "Load a strategy from a JSON file. This is useful for importing strategies shared by others or restoring from a backup.";
