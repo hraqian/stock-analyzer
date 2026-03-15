@@ -1010,6 +1010,14 @@ function AutoTunerSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Save-to-library state
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDesc, setSaveDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // Track elapsed time while running
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1028,6 +1036,9 @@ function AutoTunerSection() {
     setError(null);
     setResult(null);
     setElapsed(0);
+    setSaved(false);
+    setShowSaveForm(false);
+    setSaveError(null);
     // Start elapsed timer
     timerRef.current = setInterval(() => setElapsed((t) => t + 1), 1000);
     try {
@@ -1095,6 +1106,41 @@ function AutoTunerSection() {
   // Improvement color
   const improvementColor = (pct: number) =>
     pct > 10 ? "text-emerald-400" : pct > 0 ? "text-yellow-400" : "text-red-400";
+
+  // Save auto-tuned result to strategy library
+  const handleSaveToLibrary = async () => {
+    if (!result || !saveName.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const tickerLabel =
+        result.mode === "single"
+          ? result.ticker
+          : result.mode === "sector"
+            ? result.sector
+            : result.tickers?.join(", ") ?? "Custom";
+      await createStrategy({
+        name: saveName.trim(),
+        description:
+          saveDesc.trim() ||
+          `Auto-tuned (${result.objective_label}) on ${tickerLabel} — ${result.n_trials} trials`,
+        ticker: result.mode === "single" ? result.ticker : undefined,
+        params: result.best_params,
+        annualized_return_pct: result.best_avg_annualized_return_pct,
+        sharpe_ratio: result.best_avg_sharpe_ratio,
+        max_drawdown_pct: result.best_avg_max_drawdown_pct,
+        win_rate_pct: result.best_avg_win_rate_pct,
+        profit_factor: result.best_avg_profit_factor,
+        stability_score: result.best_stability_score,
+      });
+      setSaved(true);
+      setShowSaveForm(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -1595,6 +1641,89 @@ function AutoTunerSection() {
               </div>
             </div>
           )}
+
+          {/* Save to Library */}
+          <div className="border-t border-gray-700 pt-4">
+            {saved ? (
+              <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Saved to Strategy Library
+              </div>
+            ) : showSaveForm ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Strategy Name *</label>
+                  <input
+                    type="text"
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                               focus:outline-none focus:border-blue-500"
+                    placeholder="e.g. Optimized AAPL Balanced"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Description (optional)</label>
+                  <input
+                    type="text"
+                    value={saveDesc}
+                    onChange={(e) => setSaveDesc(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                               focus:outline-none focus:border-blue-500"
+                    placeholder="Auto-generated if left blank"
+                  />
+                </div>
+                {saveError && (
+                  <p className="text-xs text-red-400">{saveError}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveToLibrary}
+                    disabled={saving || !saveName.trim()}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
+                               disabled:text-gray-500 text-white text-sm font-medium rounded-lg
+                               transition-colors"
+                  >
+                    {saving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={() => { setShowSaveForm(false); setSaveError(null); }}
+                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm
+                               rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  const tickerLabel =
+                    result.mode === "single"
+                      ? result.ticker
+                      : result.mode === "sector"
+                        ? result.sector
+                        : "Custom";
+                  setSaveName(`${tickerLabel} ${result.objective_label}`);
+                  setSaveDesc("");
+                  setSaved(false);
+                  setSaveError(null);
+                  setShowSaveForm(true);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium
+                           rounded-lg transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                Save to Library
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
