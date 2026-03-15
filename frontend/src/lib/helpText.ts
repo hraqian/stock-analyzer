@@ -325,9 +325,6 @@ export const HELP_TRADE_LOG =
 // Strategy Lab — Walk-Forward Testing
 // ---------------------------------------------------------------------------
 
-export const HELP_WALK_FORWARD =
-  "Walk-forward testing splits history into rolling windows and tests the strategy on each one independently. It's the gold standard for checking if a strategy works across different market conditions — not just one lucky period.";
-
 export const HELP_ROBUSTNESS =
   "Robustness analysis tests your strategy across multiple non-overlapping time periods. If it works consistently across different market conditions, you can be more confident it's not just overfitting to one lucky period.";
 

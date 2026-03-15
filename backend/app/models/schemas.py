@@ -160,14 +160,6 @@ class SectorHoldingsUpdateRequest(BaseModel):
     holdings: list[SectorHoldingItem]
 
 
-# Legacy alias kept for backward compat
-class SectorOverview(BaseModel):
-    sector: str
-    ticker_count: int
-    avg_momentum: float
-    top_tickers: list[str]
-
-
 # ---------------------------------------------------------------------------
 # Single Stock Analysis (Phase 2)
 # ---------------------------------------------------------------------------
@@ -422,15 +414,6 @@ class BacktestResponse(BaseModel):
     wf_return_std_dev: float = 0.0
     stability_score: float = 0.0
     verdict: str = ""
-
-
-class StrategyMeta(BaseModel):
-    id: str
-    name: str
-    trade_mode: str
-    description: str
-    created_at: str
-    backtest_summary: dict | None = None
 
 
 # ---------------------------------------------------------------------------

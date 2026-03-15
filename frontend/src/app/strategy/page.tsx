@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createChart, ColorType, LineData, Time } from "lightweight-charts";
 import HelpTip from "@/components/HelpTip";
 import {
@@ -340,7 +340,6 @@ function TradeLogTable({ trades }: { trades: BacktestTrade[] }) {
 
 export default function StrategyPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   // Read URL params for cross-section navigation
   const urlTab = searchParams.get("tab"); // "autotune" | "backtest"

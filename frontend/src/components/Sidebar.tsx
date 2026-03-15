@@ -14,7 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/scanner", label: "Market Scanner", icon: "search" },
   { href: "/analysis", label: "Analysis", icon: "chart" },
   { href: "/strategy", label: "Strategy Lab", icon: "flask" },
-  { href: "/portfolio", label: "Portfolio Sim", icon: "briefcase" },
+  { href: "/portfolio", label: "Portfolio Sim", icon: "briefcase", status: "coming_soon" as const },
   { href: "/settings", label: "Settings", icon: "gear" },
 ];
 
@@ -27,11 +27,6 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   chart: (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-    </svg>
-  ),
-  grid: (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
     </svg>
   ),
   flask: (
@@ -99,7 +94,7 @@ export function Sidebar() {
       {/* Bottom section */}
       <div className="p-3 border-t border-gray-800">
         <div className="text-xs text-gray-600 text-center">
-          Phase 1 — Foundation
+          Phase 3 — Strategy Engine
         </div>
       </div>
     </aside>

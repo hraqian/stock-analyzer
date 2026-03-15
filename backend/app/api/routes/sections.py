@@ -28,7 +28,6 @@ from app.models.schemas import (
     SectorDetailResponse,
     SectorHoldingsResponse,
     SectorHoldingsUpdateRequest,
-    SectorHoldingItem,
     SectorOverviewResponse,
     StrategyCreateRequest,
     StrategyExportResponse,

@@ -25,6 +25,11 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
 # Project-specific
 *.log
 *.db
@@ -32,3 +37,9 @@ config_slot_*.yaml
 engine_config.py
 watchlist_state.json
 watchlist_tickers.yaml
+config.yaml
+
+# Test / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

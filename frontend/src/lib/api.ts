@@ -5,7 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 /** Stored JWT token (client-side only). */
 let token: string | null = null;
 
-export function setToken(t: string | null) {
+function setToken(t: string | null) {
   token = t;
   if (typeof window !== "undefined") {
     if (t) {
@@ -115,39 +115,8 @@ export function logout() {
 }
 
 // -------------------------------------------------------------------
-// Health
+// Data (types only — unused fetch functions removed)
 // -------------------------------------------------------------------
-
-export async function healthCheck(): Promise<{ status: string; version: string }> {
-  return apiFetch("/api/health");
-}
-
-// -------------------------------------------------------------------
-// Data
-// -------------------------------------------------------------------
-
-export interface Universe {
-  id: string;
-  name: string;
-  description: string;
-  count: number;
-}
-
-export async function getUniverses(): Promise<{ universes: Universe[] }> {
-  return apiFetch("/api/data/universes");
-}
-
-export async function getLivePrice(
-  ticker: string
-): Promise<{ ticker: string; price: number; timestamp: string }> {
-  return apiFetch(`/api/data/price/${ticker}`);
-}
-
-export async function getSectorInfo(
-  ticker: string
-): Promise<{ ticker: string; sector: string; industry: string }> {
-  return apiFetch(`/api/data/sector/${ticker}`);
-}
 
 // -------------------------------------------------------------------
 // Analysis
@@ -297,9 +266,7 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
   });
 }
 
-export async function getUniverseList(): Promise<{ universes: string[] }> {
-  return apiFetch("/api/scanner/universes");
-}
+
 
 // -------------------------------------------------------------------
 // Sectors
@@ -363,9 +330,7 @@ export async function getSectorDetail(
   return apiFetch(`/api/sectors/detail/${encodeURIComponent(sectorName)}`);
 }
 
-export async function getSectorList(): Promise<{ sectors: string[] }> {
-  return apiFetch("/api/sectors/list");
-}
+
 
 export async function refreshSectorHoldings(
   sectorName: string
@@ -505,9 +470,7 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
   });
 }
 
-// -------------------------------------------------------------------
-// Strategy Lab — Walk-Forward Testing
-// -------------------------------------------------------------------
+// Walk-forward types (used by BacktestResult)
 
 export interface WalkForwardWindow {
   window_index: number;
@@ -523,40 +486,6 @@ export interface WalkForwardWindow {
   profit_factor: number;
   total_trades: number;
   error: string | null;
-}
-
-export interface WalkForwardResult {
-  ticker: string;
-  train_years: number;
-  test_years: number;
-  total_windows: number;
-  windows: WalkForwardWindow[];
-  avg_return_pct: number;
-  avg_annualized_return_pct: number;
-  avg_max_drawdown_pct: number;
-  avg_sharpe_ratio: number;
-  avg_win_rate_pct: number;
-  avg_profit_factor: number;
-  worst_return_pct: number;
-  worst_drawdown_pct: number;
-  worst_window_index: number;
-  return_std_dev: number;
-  stability_score: number;
-  verdict: string;
-}
-
-export interface WalkForwardRequest {
-  ticker: string;
-  train_years?: number;
-  test_years?: number;
-  max_windows?: number;
-}
-
-export async function runWalkForward(req: WalkForwardRequest): Promise<WalkForwardResult> {
-  return apiFetch<WalkForwardResult>("/api/strategy/walk-forward", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
 }
 
 // -------------------------------------------------------------------
@@ -707,10 +636,6 @@ export interface StrategyExport {
 
 export async function listStrategies(): Promise<{ strategies: StrategyItem[] }> {
   return apiFetch<{ strategies: StrategyItem[] }>("/api/strategy/library");
-}
-
-export async function getStrategy(id: number): Promise<StrategyItem> {
-  return apiFetch<StrategyItem>(`/api/strategy/library/${id}`);
 }
 
 export async function createStrategy(req: StrategyCreateRequest): Promise<StrategyItem> {
