@@ -1,8 +1,8 @@
 """LLM provider abstraction for qualitative stock analysis.
 
-Supports Anthropic (Claude) and OpenAI (GPT) as backends.
-API keys come from environment variables; the user's profile
-selects which provider to use.
+Supports Anthropic (Claude), OpenAI (GPT), and Google Gemini as backends.
+API keys come from environment variables or user-level settings;
+the user's profile selects which provider to use.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ class OpenAIProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     """Google Gemini provider (free tier: 15 req/min)."""
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         if not api_key:
             raise ValueError("Google Gemini API key is required")
         self._api_key = api_key
@@ -96,7 +96,10 @@ class GeminiProvider(LLMProvider):
     async def generate(self, prompt: str, max_tokens: int = 1024) -> str:
         from google import genai
 
-        client = genai.Client(api_key=self._api_key)
+        client = genai.Client(
+            api_key=self._api_key,
+            http_options=genai.types.HttpOptions(api_version="v1beta"),
+        )
         response = await client.aio.models.generate_content(
             model=self._model,
             contents=prompt,
