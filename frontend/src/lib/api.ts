@@ -367,6 +367,14 @@ export async function getSectorList(): Promise<{ sectors: string[] }> {
   return apiFetch("/api/sectors/list");
 }
 
+export async function refreshSectorHoldings(
+  sectorName: string
+): Promise<SectorDetailResponse> {
+  return apiFetch(`/api/sectors/refresh-holdings/${encodeURIComponent(sectorName)}`, {
+    method: "POST",
+  });
+}
+
 // -------------------------------------------------------------------
 // Strategy Lab — Backtest
 // -------------------------------------------------------------------

@@ -518,6 +518,68 @@ async def list_sectors(user: User = Depends(get_current_user)):
     return {"sectors": sorted(VALID_SECTORS)}
 
 
+def _run_refresh_holdings(sector_name: str) -> dict:
+    """Refresh sector holdings from yfinance (called from thread pool)."""
+    from app.services.sectors import refresh_holdings_from_yfinance, get_sector_detail
+
+    holdings = refresh_holdings_from_yfinance(sector_name)
+    # Return the full detail with refreshed holdings
+    result = get_sector_detail(sector_name)
+    return {
+        "etf": result.etf,
+        "sector": result.sector,
+        "return_1w": result.return_1w,
+        "return_1m": result.return_1m,
+        "return_3m": result.return_3m,
+        "rs_1w": result.rs_1w,
+        "rs_1m": result.rs_1m,
+        "rs_3m": result.rs_3m,
+        "regime": result.regime,
+        "regime_confidence": result.regime_confidence,
+        "momentum_score": result.momentum_score,
+        "top_movers": [
+            {"ticker": m.ticker, "name": m.name, "return_1m": m.return_1m, "current_price": m.current_price}
+            for m in result.top_movers
+        ],
+        "worst_movers": [
+            {"ticker": m.ticker, "name": m.name, "return_1m": m.return_1m, "current_price": m.current_price}
+            for m in result.worst_movers
+        ],
+        "elapsed_seconds": result.elapsed_seconds,
+        "holdings_refreshed": True,
+        "holdings_count": len(holdings),
+    }
+
+
+@sectors_router.post("/refresh-holdings/{sector_name}", response_model=SectorDetailResponse)
+async def refresh_sector_holdings(sector_name: str, user: User = Depends(get_current_user)):
+    """Refresh sector holdings from yfinance and return updated detail.
+
+    Dynamically fetches top ETF holdings from yfinance, falling back to
+    the static list if the API is unavailable or slow.
+    """
+    import urllib.parse
+    sector_decoded = urllib.parse.unquote(sector_name)
+
+    if sector_decoded not in VALID_SECTORS:
+        raise HTTPException(
+            400,
+            f"Invalid sector '{sector_decoded}'. Must be one of: {sorted(VALID_SECTORS)}",
+        )
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _sector_pool, _run_refresh_holdings, sector_decoded,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Refresh holdings failed for %s", sector_decoded)
+        raise HTTPException(500, f"Refresh holdings failed: {exc}") from exc
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Section 4: Strategy Lab
 # ---------------------------------------------------------------------------

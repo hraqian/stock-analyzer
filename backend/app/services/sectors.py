@@ -321,6 +321,87 @@ SECTOR_HOLDINGS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+# Cache for dynamically refreshed holdings (sector -> list of (ticker, name))
+_refreshed_holdings: dict[str, list[tuple[str, str]]] = {}
+
+
+def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
+    """Fetch top holdings for a sector's ETF from yfinance.
+
+    Uses yf.Ticker(etf).info to get the fund's top holdings.
+    Falls back to the static SECTOR_HOLDINGS list if the fetch fails.
+
+    Args:
+        sector_name: GICS sector name (e.g. "Technology").
+
+    Returns:
+        List of (ticker, company_name) tuples.
+    """
+    import yfinance as yf  # type: ignore[import-untyped]
+
+    etf = SECTOR_NAME_TO_ETF.get(sector_name)
+    if not etf:
+        raise ValueError(f"Unknown sector: {sector_name}")
+
+    try:
+        logger.info("Fetching holdings for %s (%s) from yfinance...", sector_name, etf)
+        ticker_obj = yf.Ticker(etf)
+
+        # yfinance exposes fund holdings via .funds_data.top_holdings or similar
+        # The most reliable approach is ticker.funds_data.top_holdings (pandas DF)
+        try:
+            holdings_df = ticker_obj.funds_data.top_holdings
+            if holdings_df is not None and not holdings_df.empty:
+                result: list[tuple[str, str]] = []
+                for sym in holdings_df.index[:8]:  # top 8
+                    sym_str = str(sym).strip()
+                    # Try to get the company name
+                    name = str(holdings_df.loc[sym].get("Name", sym_str))
+                    if name == sym_str or not name or name == "nan":
+                        # Fallback: use a simple lookup from our static data
+                        static = dict(SECTOR_HOLDINGS.get(sector_name, []))
+                        name = static.get(sym_str, sym_str)
+                    result.append((sym_str, name))
+                if result:
+                    _refreshed_holdings[sector_name] = result
+                    logger.info("Refreshed %d holdings for %s", len(result), sector_name)
+                    return result
+        except Exception as exc:
+            logger.warning("funds_data approach failed for %s: %s", etf, exc)
+
+        # Fallback: try .info["holdings"] (older yfinance versions)
+        try:
+            info = ticker_obj.info or {}
+            raw_holdings = info.get("holdings", [])
+            if raw_holdings:
+                result = []
+                static = dict(SECTOR_HOLDINGS.get(sector_name, []))
+                for h in raw_holdings[:8]:
+                    sym_str = str(h.get("symbol", "")).strip()
+                    name = h.get("holdingName", static.get(sym_str, sym_str))
+                    if sym_str:
+                        result.append((sym_str, name))
+                if result:
+                    _refreshed_holdings[sector_name] = result
+                    logger.info("Refreshed %d holdings for %s (via info)", len(result), sector_name)
+                    return result
+        except Exception as exc:
+            logger.warning("info approach failed for %s: %s", etf, exc)
+
+        logger.warning("Could not fetch dynamic holdings for %s, using static fallback", sector_name)
+    except Exception as exc:
+        logger.warning("yfinance holdings fetch failed for %s: %s", sector_name, exc)
+
+    return list(SECTOR_HOLDINGS.get(sector_name, []))
+
+
+def get_effective_holdings(sector_name: str) -> list[tuple[str, str]]:
+    """Get holdings for a sector, preferring refreshed data if available."""
+    if sector_name in _refreshed_holdings:
+        return _refreshed_holdings[sector_name]
+    return list(SECTOR_HOLDINGS.get(sector_name, []))
+
+
 def get_sector_detail(sector_name: str) -> SectorDetailResult:
     """Get detailed view for a single sector: returns, RS, regime, top/worst movers.
 
@@ -339,7 +420,7 @@ def get_sector_detail(sector_name: str) -> SectorDetailResult:
         raise ValueError(f"Unknown sector: {sector_name}")
 
     # Fetch the ETF + SPY + representative holdings
-    holdings = SECTOR_HOLDINGS.get(sector_name, [])
+    holdings = get_effective_holdings(sector_name)
     holding_tickers = [h[0] for h in holdings]
     all_tickers = [etf, BENCHMARK] + holding_tickers
 
