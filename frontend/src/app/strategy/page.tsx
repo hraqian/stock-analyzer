@@ -1780,21 +1780,23 @@ function StrategyLibrarySection() {
             >
               {view === "create" ? "Cancel" : "+ New Strategy"}
             </button>
-            <label
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer
-                          ${importing ? "bg-gray-700 text-gray-500" : "bg-gray-700 hover:bg-gray-600 text-white"}`}
-            >
-              {importing ? "Importing..." : "Import"}
+            <div className="flex items-center gap-0.5">
+              <label
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer
+                            ${importing ? "bg-gray-700 text-gray-500" : "bg-gray-700 hover:bg-gray-600 text-white"}`}
+              >
+                {importing ? "Importing..." : "Import"}
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleImportFile}
+                  disabled={importing}
+                />
+              </label>
               <HelpTip text={HELP_STRATEGY_IMPORT} />
-              <input
-                ref={importRef}
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={handleImportFile}
-                disabled={importing}
-              />
-            </label>
+            </div>
           </div>
         </div>
 
@@ -2089,27 +2091,32 @@ function StrategyLibrarySection() {
                           </label>
 
                           {/* Active toggle */}
-                          <button
-                            onClick={() => handleToggleActive(s)}
-                            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors flex items-center gap-0.5 ${
-                              s.is_active
-                                ? "bg-emerald-900/50 text-emerald-400 hover:bg-emerald-900/70"
-                                : "bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
-                            }`}
-                            title={s.is_active ? "Deactivate strategy" : "Activate for Portfolio Simulation"}
-                          >
-                            {s.is_active ? "Active" : "Inactive"}
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => handleToggleActive(s)}
+                              className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${
+                                s.is_active
+                                  ? "bg-emerald-900/50 text-emerald-400 hover:bg-emerald-900/70"
+                                  : "bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+                              }`}
+                              title={s.is_active ? "Deactivate strategy" : "Activate for Portfolio Simulation"}
+                            >
+                              {s.is_active ? "Active" : "Inactive"}
+                            </button>
                             <HelpTip text={HELP_STRATEGY_ACTIVE} />
-                          </button>
+                          </div>
 
                           {/* Export */}
-                          <button
-                            onClick={() => handleExport(s.id)}
-                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-[10px] rounded transition-colors flex items-center gap-0.5"
-                            title="Export as JSON"
-                          >
-                            Export <HelpTip text={HELP_STRATEGY_EXPORT} />
-                          </button>
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => handleExport(s.id)}
+                              className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-[10px] rounded transition-colors"
+                              title="Export as JSON"
+                            >
+                              Export
+                            </button>
+                            <HelpTip text={HELP_STRATEGY_EXPORT} />
+                          </div>
 
                           {/* Delete (user strategies only) */}
                           {!s.is_preset && (
