@@ -336,3 +336,43 @@ export const HELP_WORST_WINDOW =
 
 export const HELP_RETURN_STD_DEV =
   "Standard deviation of returns across windows. Lower means the strategy performs consistently; higher means it's feast-or-famine.";
+
+// ---------------------------------------------------------------------------
+// Strategy Lab — Auto-Tuner
+// ---------------------------------------------------------------------------
+
+export const HELP_AUTO_TUNER =
+  "The auto-tuner uses AI-driven optimisation to find the best strategy parameters for your chosen objective. It tests many different parameter combinations and validates each one using walk-forward testing — so results are based on out-of-sample data, not just curve-fitting.";
+
+export const HELP_TUNER_OBJECTIVE =
+  "What you want the optimiser to prioritise. 'Beat Buy-and-Hold' tries to outperform simply holding the stock. 'Balanced' aims for a good mix of return, risk, and consistency.";
+
+export const HELP_N_TRIALS =
+  "How many different parameter combinations to test. More trials = better results, but takes longer. 30 is a good balance of speed and quality.";
+
+export const HELP_IMPROVEMENT =
+  "How much better the tuned parameters performed compared to the default settings, as a percentage of the objective score.";
+
+export const HELP_BASELINE =
+  "Performance using the default (un-tuned) parameters. The auto-tuner's job is to beat this baseline.";
+
+export const HELP_BEST_PARAMS =
+  "The parameter values that produced the best objective score across all trials. These can be saved as a strategy in the Strategy Library.";
+
+export const HELP_SENSITIVITY =
+  "Shows which parameters matter most for your chosen objective. Parameters with high importance have the biggest impact on performance — these are the ones worth tuning.";
+
+export const HELP_BEAT_BUY_HOLD =
+  "Optimises for excess return over buy-and-hold. The goal is to outperform simply buying the stock and holding it for the same period.";
+
+export const HELP_MAX_RETURN =
+  "Optimises for the highest possible annual return. Accepts more risk in pursuit of maximum gains.";
+
+export const HELP_MAX_RISK_ADJUSTED =
+  "Optimises for the best Sharpe ratio — high returns relative to the amount of risk taken. Good for consistent performance.";
+
+export const HELP_MIN_DRAWDOWN =
+  "Optimises to minimise the largest peak-to-trough drop while still maintaining positive returns. Best for risk-averse investors.";
+
+export const HELP_BALANCED =
+  "A weighted combination of return, risk, drawdown, and win rate. Good default for most users — tries to balance everything.";

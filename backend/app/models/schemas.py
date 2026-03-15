@@ -436,6 +436,86 @@ class WalkForwardResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Strategy — Auto-Tuner (Phase 3C)
+# ---------------------------------------------------------------------------
+
+VALID_TUNER_OBJECTIVES = {
+    "beat_buy_hold",
+    "max_return",
+    "max_risk_adjusted",
+    "min_drawdown",
+    "balanced",
+}
+
+
+class AutoTuneRequest(BaseModel):
+    """POST body for /api/strategy/auto-tune."""
+    ticker: str
+    objective: str = "balanced"
+    n_trials: int = 30
+    train_years: int = 3
+    test_years: int = 1
+    max_windows: int = 3
+
+
+class SensitivityEntrySchema(BaseModel):
+    """How a single parameter affects the objective."""
+    param_name: str
+    importance: float = 0.0
+    best_value: float | str | bool | None = None
+    value_range: list = []
+
+
+class AutoTuneTrialSchema(BaseModel):
+    """Summary of a single optimisation trial."""
+    trial_number: int
+    params: dict = {}
+    objective_value: float = 0.0
+    avg_return_pct: float = 0.0
+    avg_annualized_return_pct: float = 0.0
+    avg_max_drawdown_pct: float = 0.0
+    avg_sharpe_ratio: float = 0.0
+    avg_win_rate_pct: float = 0.0
+    avg_profit_factor: float = 0.0
+    stability_score: float = 0.0
+    total_windows: int = 0
+
+
+class AutoTuneResponse(BaseModel):
+    """Full auto-tuner result."""
+    ticker: str
+    objective: str
+    objective_label: str
+    n_trials: int
+    elapsed_seconds: float = 0.0
+    # Best trial
+    best_params: dict = {}
+    best_objective_value: float = 0.0
+    best_avg_return_pct: float = 0.0
+    best_avg_annualized_return_pct: float = 0.0
+    best_avg_max_drawdown_pct: float = 0.0
+    best_avg_sharpe_ratio: float = 0.0
+    best_avg_win_rate_pct: float = 0.0
+    best_avg_profit_factor: float = 0.0
+    best_stability_score: float = 0.0
+    # Baseline
+    baseline_avg_return_pct: float = 0.0
+    baseline_avg_annualized_return_pct: float = 0.0
+    baseline_avg_max_drawdown_pct: float = 0.0
+    baseline_avg_sharpe_ratio: float = 0.0
+    baseline_avg_win_rate_pct: float = 0.0
+    baseline_objective_value: float = 0.0
+    # Buy-and-hold
+    buy_hold_return_pct: float | None = None
+    # Sensitivity & trials (power user mode)
+    sensitivity: list[SensitivityEntrySchema] = []
+    trials: list[AutoTuneTrialSchema] = []
+    # Verdict
+    verdict: str = ""
+    improvement_pct: float = 0.0
+
+
+# ---------------------------------------------------------------------------
 # Portfolio Simulation (stubs — expanded in Phase 4)
 # ---------------------------------------------------------------------------
 

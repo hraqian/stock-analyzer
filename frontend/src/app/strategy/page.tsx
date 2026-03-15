@@ -6,6 +6,7 @@ import HelpTip from "@/components/HelpTip";
 import {
   runBacktest,
   runWalkForward,
+  runAutoTune,
   type BacktestResult,
   type BacktestRequest,
   type BacktestTrade,
@@ -13,6 +14,10 @@ import {
   type WalkForwardResult,
   type WalkForwardRequest,
   type WalkForwardWindow,
+  type AutoTuneResult,
+  type AutoTuneRequest,
+  type SensitivityEntry,
+  type AutoTuneTrial,
 } from "@/lib/api";
 import {
   HELP_BACKTEST,
@@ -40,6 +45,18 @@ import {
   HELP_STABILITY_SCORE,
   HELP_WORST_WINDOW,
   HELP_RETURN_STD_DEV,
+  HELP_AUTO_TUNER,
+  HELP_TUNER_OBJECTIVE,
+  HELP_N_TRIALS,
+  HELP_IMPROVEMENT,
+  HELP_BASELINE,
+  HELP_BEST_PARAMS,
+  HELP_SENSITIVITY,
+  HELP_BEAT_BUY_HOLD,
+  HELP_MAX_RETURN,
+  HELP_MAX_RISK_ADJUSTED,
+  HELP_MIN_DRAWDOWN,
+  HELP_BALANCED,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -735,31 +752,20 @@ export default function StrategyPage() {
       {/* ================================================================= */}
       <WalkForwardSection />
 
-      {/* Placeholder sections for Auto-Tuner, Strategy Library */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {[
-          {
-            title: "Auto-Tuner",
-            desc: "Objective-based parameter optimization with sensitivity analysis.",
-            phase: "Phase 3C",
-          },
-          {
-            title: "Strategy Library",
-            desc: "Save, compare, and export strategies. Built-in presets included.",
-            phase: "Phase 3D",
-          },
-        ].map((item) => (
-          <div
-            key={item.title}
-            className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center"
-          >
-            <p className="text-gray-400 font-medium text-sm">{item.title}</p>
-            <p className="text-gray-600 text-xs mt-1">{item.desc}</p>
-            <span className="inline-block mt-2 px-2 py-0.5 bg-gray-800 text-gray-500 text-xs rounded">
-              {item.phase}
-            </span>
-          </div>
-        ))}
+      {/* ================================================================= */}
+      {/* Auto-Tuner Section                                                */}
+      {/* ================================================================= */}
+      <AutoTunerSection />
+
+      {/* Placeholder for Strategy Library */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center">
+        <p className="text-gray-400 font-medium text-sm">Strategy Library</p>
+        <p className="text-gray-600 text-xs mt-1">
+          Save, compare, and export strategies. Built-in presets included.
+        </p>
+        <span className="inline-block mt-2 px-2 py-0.5 bg-gray-800 text-gray-500 text-xs rounded">
+          Phase 3D
+        </span>
       </div>
     </div>
   );
@@ -1035,6 +1041,514 @@ function WalkForwardSection() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Auto-Tuner sub-component
+// ---------------------------------------------------------------------------
+
+const OBJECTIVE_OPTIONS: { value: string; label: string; help: string }[] = [
+  { value: "balanced", label: "Balanced", help: HELP_BALANCED },
+  { value: "beat_buy_hold", label: "Beat Buy-and-Hold", help: HELP_BEAT_BUY_HOLD },
+  { value: "max_return", label: "Maximize Return", help: HELP_MAX_RETURN },
+  { value: "max_risk_adjusted", label: "Max Risk-Adjusted", help: HELP_MAX_RISK_ADJUSTED },
+  { value: "min_drawdown", label: "Minimize Drawdown", help: HELP_MIN_DRAWDOWN },
+];
+
+function AutoTunerSection() {
+  const [ticker, setTicker] = useState("AAPL");
+  const [objective, setObjective] = useState("balanced");
+  const [nTrials, setNTrials] = useState(30);
+  const [trainYears, setTrainYears] = useState(3);
+  const [testYears, setTestYears] = useState(1);
+  const [maxWindows, setMaxWindows] = useState(3);
+
+  const [result, setResult] = useState<AutoTuneResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Track elapsed time while running
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleRun = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setElapsed(0);
+    // Start elapsed timer
+    timerRef.current = setInterval(() => setElapsed((t) => t + 1), 1000);
+    try {
+      const res = await runAutoTune({
+        ticker: ticker.trim().toUpperCase(),
+        objective,
+        n_trials: nTrials,
+        train_years: trainYears,
+        test_years: testYears,
+        max_windows: maxWindows,
+      });
+      setResult(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Auto-tune failed");
+    } finally {
+      setLoading(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  }, [ticker, objective, nTrials, trainYears, testYears, maxWindows]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const fmtPct = (v: number | null | undefined) =>
+    v == null ? "\u2014" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const fmtNum = (v: number | null | undefined, d = 2) =>
+    v == null ? "\u2014" : v.toFixed(d);
+  const fmtTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
+  // Format param value for display
+  const fmtParamValue = (v: unknown): string => {
+    if (v === null || v === undefined) return "\u2014";
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
+    return String(v);
+  };
+
+  // Humanize param name: "score_thresholds.strong_buy" -> "Strong Buy"
+  const humanizeParam = (key: string): string => {
+    return key
+      .split(".")
+      .pop()!
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  // Improvement color
+  const improvementColor = (pct: number) =>
+    pct > 10 ? "text-emerald-400" : pct > 0 ? "text-yellow-400" : "text-red-400";
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <h3 className="text-sm font-medium text-gray-300 mb-4 flex items-center gap-1">
+          Auto-Tuner <HelpTip text={HELP_AUTO_TUNER} />
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
+          {/* Ticker */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Ticker</label>
+            <input
+              type="text"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Objective */}
+          <div className="col-span-2 sm:col-span-1">
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Objective <HelpTip text={HELP_TUNER_OBJECTIVE} />
+            </label>
+            <select
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {OBJECTIVE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* N Trials */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Trials <HelpTip text={HELP_N_TRIALS} />
+            </label>
+            <select
+              value={nTrials}
+              onChange={(e) => setNTrials(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[10, 20, 30, 50, 75, 100].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Train Years */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Train Years <HelpTip text={HELP_TRAIN_YEARS} />
+            </label>
+            <select
+              value={trainYears}
+              onChange={(e) => setTrainYears(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[1, 2, 3, 4, 5, 7, 10].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Test Years */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
+              Test Years <HelpTip text={HELP_TEST_YEARS} />
+            </label>
+            <select
+              value={testYears}
+              onChange={(e) => setTestYears(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm
+                         focus:outline-none focus:border-blue-500"
+            >
+              {[1, 2, 3, 5].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Run button */}
+          <div className="flex items-end">
+            <button
+              onClick={handleRun}
+              disabled={loading || !ticker.trim()}
+              className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700
+                         disabled:text-gray-500 text-white text-sm font-medium rounded-lg
+                         transition-colors"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  {fmtTime(elapsed)}
+                </span>
+              ) : (
+                "Run Auto-Tune"
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Objective description row */}
+        <div className="mt-3 text-xs text-gray-500">
+          {OBJECTIVE_OPTIONS.find((o) => o.value === objective)?.help}
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-800 rounded-lg p-4 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Results */}
+      {result && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+          {/* Verdict banner */}
+          <div
+            className={`p-4 rounded-lg border ${
+              result.improvement_pct > 10
+                ? "bg-emerald-900/20 border-emerald-800"
+                : result.improvement_pct > 0
+                  ? "bg-yellow-900/20 border-yellow-800"
+                  : "bg-red-900/20 border-red-800"
+            }`}
+          >
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <span className="text-white font-semibold">{result.ticker}</span>
+                <span className="text-gray-400 text-sm ml-2">
+                  {result.objective_label} &middot; {result.n_trials} trials &middot; {fmtTime(Math.round(result.elapsed_seconds))}
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-center">
+                  <div className="text-xs text-gray-400 flex items-center gap-1">
+                    Improvement <HelpTip text={HELP_IMPROVEMENT} />
+                  </div>
+                  <div className={`text-xl font-bold ${improvementColor(result.improvement_pct)}`}>
+                    {result.improvement_pct >= 0 ? "+" : ""}{result.improvement_pct.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300 mt-2">{result.verdict}</p>
+          </div>
+
+          {/* Side-by-side comparison: Baseline vs Optimized */}
+          <div>
+            <h4 className="text-xs font-medium text-gray-400 mb-3 flex items-center gap-1">
+              Baseline vs Optimized <HelpTip text={HELP_BASELINE} />
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700 text-gray-400 text-xs">
+                    <th className="py-2 px-3 text-left">Metric</th>
+                    <th className="py-2 px-3 text-right">Baseline (Default)</th>
+                    <th className="py-2 px-3 text-right">Optimized</th>
+                    <th className="py-2 px-3 text-right">Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    {
+                      label: "Avg Annual Return",
+                      baseline: result.baseline_avg_annualized_return_pct,
+                      best: result.best_avg_annualized_return_pct,
+                      fmt: "pct" as const,
+                      higherIsBetter: true,
+                    },
+                    {
+                      label: "Avg Return",
+                      baseline: result.baseline_avg_return_pct,
+                      best: result.best_avg_return_pct,
+                      fmt: "pct" as const,
+                      higherIsBetter: true,
+                    },
+                    {
+                      label: "Sharpe Ratio",
+                      baseline: result.baseline_avg_sharpe_ratio,
+                      best: result.best_avg_sharpe_ratio,
+                      fmt: "num" as const,
+                      higherIsBetter: true,
+                    },
+                    {
+                      label: "Max Drawdown",
+                      baseline: result.baseline_avg_max_drawdown_pct,
+                      best: result.best_avg_max_drawdown_pct,
+                      fmt: "pct_abs" as const,
+                      higherIsBetter: false,
+                    },
+                    {
+                      label: "Win Rate",
+                      baseline: result.baseline_avg_win_rate_pct,
+                      best: result.best_avg_win_rate_pct,
+                      fmt: "pct_plain" as const,
+                      higherIsBetter: true,
+                    },
+                    {
+                      label: "Stability Score",
+                      baseline: null as number | null,
+                      best: result.best_stability_score,
+                      fmt: "num0" as const,
+                      higherIsBetter: true,
+                    },
+                  ]).map((row) => {
+                    const diff = row.baseline != null ? row.best - row.baseline : null;
+                    const improved = diff != null
+                      ? row.higherIsBetter ? diff > 0 : diff < 0
+                      : null;
+                    return (
+                      <tr key={row.label} className="border-b border-gray-800 hover:bg-gray-800/40">
+                        <td className="py-2 px-3 text-gray-300">{row.label}</td>
+                        <td className="py-2 px-3 text-right text-gray-400">
+                          {row.baseline == null
+                            ? "\u2014"
+                            : row.fmt === "pct"
+                              ? fmtPct(row.baseline)
+                              : row.fmt === "pct_abs"
+                                ? `-${Math.abs(row.baseline).toFixed(2)}%`
+                                : row.fmt === "pct_plain"
+                                  ? `${row.baseline.toFixed(1)}%`
+                                  : fmtNum(row.baseline)}
+                        </td>
+                        <td className="py-2 px-3 text-right text-white font-medium">
+                          {row.fmt === "pct"
+                            ? fmtPct(row.best)
+                            : row.fmt === "pct_abs"
+                              ? `-${Math.abs(row.best).toFixed(2)}%`
+                              : row.fmt === "pct_plain"
+                                ? `${row.best.toFixed(1)}%`
+                                : row.fmt === "num0"
+                                  ? row.best.toFixed(0)
+                                  : fmtNum(row.best)}
+                        </td>
+                        <td className={`py-2 px-3 text-right font-medium ${
+                          diff == null ? "text-gray-500" : improved ? "text-emerald-400" : "text-red-400"
+                        }`}>
+                          {diff == null
+                            ? "\u2014"
+                            : row.fmt === "pct" || row.fmt === "pct_abs" || row.fmt === "pct_plain"
+                              ? `${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%`
+                              : `${diff >= 0 ? "+" : ""}${diff.toFixed(2)}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Buy-and-hold comparison row */}
+                  {result.buy_hold_return_pct != null && (
+                    <tr className="border-b border-gray-800 bg-gray-800/20">
+                      <td className="py-2 px-3 text-gray-400 italic">Buy-and-Hold Return</td>
+                      <td className="py-2 px-3 text-right text-gray-500" colSpan={3}>
+                        {fmtPct(result.buy_hold_return_pct)}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Objective score comparison */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <MetricCard
+              label="Baseline Objective"
+              value={fmtNum(result.baseline_objective_value)}
+              helpText={HELP_BASELINE}
+              color="default"
+            />
+            <MetricCard
+              label="Optimized Objective"
+              value={fmtNum(result.best_objective_value)}
+              color={result.best_objective_value > result.baseline_objective_value ? "green" : "red"}
+            />
+            <MetricCard
+              label="Profit Factor"
+              value={fmtNum(result.best_avg_profit_factor)}
+              helpText={HELP_PROFIT_FACTOR}
+              color={result.best_avg_profit_factor >= 1.5 ? "green" : result.best_avg_profit_factor >= 1.0 ? "yellow" : "red"}
+            />
+          </div>
+
+          {/* Best parameters */}
+          <div>
+            <h4 className="text-xs font-medium text-gray-400 mb-2 flex items-center gap-1">
+              Best Parameters <HelpTip text={HELP_BEST_PARAMS} />
+            </h4>
+            <div className="overflow-x-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                {Object.entries(result.best_params).map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2"
+                  >
+                    <div className="text-xs text-gray-400 truncate" title={key}>
+                      {humanizeParam(key)}
+                    </div>
+                    <div className="text-sm text-white font-mono mt-0.5">
+                      {fmtParamValue(value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Sensitivity analysis */}
+          {result.sensitivity.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-400 mb-2 flex items-center gap-1">
+                Parameter Sensitivity <HelpTip text={HELP_SENSITIVITY} />
+              </h4>
+              <div className="space-y-2">
+                {result.sensitivity
+                  .sort((a, b) => b.importance - a.importance)
+                  .map((s) => (
+                    <div key={s.param_name} className="flex items-center gap-3">
+                      <div className="w-40 text-xs text-gray-400 truncate" title={s.param_name}>
+                        {humanizeParam(s.param_name)}
+                      </div>
+                      <div className="flex-1 h-3 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full transition-all"
+                          style={{ width: `${Math.max(s.importance * 100, 1)}%` }}
+                        />
+                      </div>
+                      <div className="w-12 text-xs text-gray-400 text-right">
+                        {(s.importance * 100).toFixed(0)}%
+                      </div>
+                      <div className="w-20 text-xs text-gray-500 text-right font-mono">
+                        {fmtParamValue(s.best_value)}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Top 10 trials table */}
+          {result.trials.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-400 mb-2">
+                Top Trials ({result.trials.length} total)
+              </h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-700 text-gray-400">
+                      <th className="py-2 px-2 text-left">#</th>
+                      <th className="py-2 px-2 text-right">Objective</th>
+                      <th className="py-2 px-2 text-right">Avg Return</th>
+                      <th className="py-2 px-2 text-right">Sharpe</th>
+                      <th className="py-2 px-2 text-right">Win Rate</th>
+                      <th className="py-2 px-2 text-right">Max DD</th>
+                      <th className="py-2 px-2 text-right">Stability</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.trials
+                      .sort((a, b) => b.objective_value - a.objective_value)
+                      .slice(0, 10)
+                      .map((t, i) => (
+                        <tr
+                          key={t.trial_number}
+                          className={`border-b border-gray-800 ${
+                            i === 0 ? "bg-amber-900/10" : "hover:bg-gray-800/40"
+                          }`}
+                        >
+                          <td className="py-1.5 px-2 text-gray-400">{i + 1}</td>
+                          <td className="py-1.5 px-2 text-right text-white font-medium">
+                            {fmtNum(t.objective_value)}
+                          </td>
+                          <td className={`py-1.5 px-2 text-right font-medium ${
+                            t.avg_return_pct >= 0 ? "text-emerald-400" : "text-red-400"
+                          }`}>
+                            {fmtPct(t.avg_return_pct)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">
+                            {fmtNum(t.avg_sharpe_ratio)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">
+                            {fmtNum(t.avg_win_rate_pct, 1)}%
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">
+                            -{Math.abs(t.avg_max_drawdown_pct).toFixed(2)}%
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">
+                            {t.stability_score.toFixed(0)}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

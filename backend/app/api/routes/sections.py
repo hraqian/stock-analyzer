@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.routes.auth import get_current_user
 from app.models.schemas import (
     AnalysisResponse,
+    AutoTuneRequest,
+    AutoTuneResponse,
     BacktestRequest,
     BacktestResponse,
     ScanRequest,
@@ -27,6 +29,7 @@ from app.models.schemas import (
     WalkForwardRequest,
     WalkForwardResponse,
     VALID_PRESETS,
+    VALID_TUNER_OBJECTIVES,
     VALID_UNIVERSES,
 )
 from app.models.user import User
@@ -674,6 +677,82 @@ async def run_walk_forward_test(
     except Exception as exc:
         logger.exception("Walk-forward failed for %s", req.ticker)
         raise HTTPException(500, f"Walk-forward test failed: {exc}") from exc
+
+    return result
+
+
+# Auto-tuner pool (very long running — runs N walk-forward trials)
+_auto_tune_pool = ThreadPoolExecutor(max_workers=1)
+
+
+def _run_auto_tune(
+    ticker: str,
+    trade_mode: str,
+    objective: str,
+    n_trials: int,
+    train_years: int,
+    test_years: int,
+    max_windows: int,
+) -> dict:
+    """Run auto-tuner synchronously (called from thread pool)."""
+    from app.services.auto_tuner import run_auto_tune  # late import
+
+    return run_auto_tune(
+        ticker=ticker,
+        trade_mode=trade_mode,
+        objective=objective,
+        n_trials=n_trials,
+        train_years=train_years,
+        test_years=test_years,
+        max_windows=max_windows,
+    )
+
+
+@strategy_router.post("/auto-tune", response_model=AutoTuneResponse)
+async def run_auto_tuner(
+    req: AutoTuneRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run Bayesian parameter optimisation on a ticker.
+
+    Each trial runs walk-forward testing to validate parameter sets
+    out-of-sample.  Returns the best parameter set, a comparison
+    against the baseline (default params), and sensitivity analysis
+    for power user mode.
+    """
+    if req.objective not in VALID_TUNER_OBJECTIVES:
+        raise HTTPException(
+            400,
+            f"Invalid objective '{req.objective}'. "
+            f"Must be one of: {sorted(VALID_TUNER_OBJECTIVES)}",
+        )
+    if req.n_trials < 5 or req.n_trials > 100:
+        raise HTTPException(400, "n_trials must be between 5 and 100")
+    if req.train_years < 1 or req.train_years > 10:
+        raise HTTPException(400, "train_years must be between 1 and 10")
+    if req.test_years < 1 or req.test_years > 5:
+        raise HTTPException(400, "test_years must be between 1 and 5")
+    if req.max_windows < 2 or req.max_windows > 10:
+        raise HTTPException(400, "max_windows must be between 2 and 10")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _auto_tune_pool,
+            _run_auto_tune,
+            req.ticker.upper(),
+            user.trade_mode,
+            req.objective,
+            req.n_trials,
+            req.train_years,
+            req.test_years,
+            req.max_windows,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Auto-tune failed for %s", req.ticker)
+        raise HTTPException(500, f"Auto-tune failed: {exc}") from exc
 
     return result
 

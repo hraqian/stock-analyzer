@@ -493,3 +493,77 @@ export async function runWalkForward(req: WalkForwardRequest): Promise<WalkForwa
     body: JSON.stringify(req),
   });
 }
+
+// -------------------------------------------------------------------
+// Strategy Lab — Auto-Tuner
+// -------------------------------------------------------------------
+
+export interface SensitivityEntry {
+  param_name: string;
+  importance: number;
+  best_value: number | string | boolean | null;
+  value_range: (number | string | boolean)[];
+}
+
+export interface AutoTuneTrial {
+  trial_number: number;
+  params: Record<string, unknown>;
+  objective_value: number;
+  avg_return_pct: number;
+  avg_annualized_return_pct: number;
+  avg_max_drawdown_pct: number;
+  avg_sharpe_ratio: number;
+  avg_win_rate_pct: number;
+  avg_profit_factor: number;
+  stability_score: number;
+  total_windows: number;
+}
+
+export interface AutoTuneResult {
+  ticker: string;
+  objective: string;
+  objective_label: string;
+  n_trials: number;
+  elapsed_seconds: number;
+  // Best trial
+  best_params: Record<string, unknown>;
+  best_objective_value: number;
+  best_avg_return_pct: number;
+  best_avg_annualized_return_pct: number;
+  best_avg_max_drawdown_pct: number;
+  best_avg_sharpe_ratio: number;
+  best_avg_win_rate_pct: number;
+  best_avg_profit_factor: number;
+  best_stability_score: number;
+  // Baseline
+  baseline_avg_return_pct: number;
+  baseline_avg_annualized_return_pct: number;
+  baseline_avg_max_drawdown_pct: number;
+  baseline_avg_sharpe_ratio: number;
+  baseline_avg_win_rate_pct: number;
+  baseline_objective_value: number;
+  // Buy-and-hold
+  buy_hold_return_pct: number | null;
+  // Sensitivity & trials
+  sensitivity: SensitivityEntry[];
+  trials: AutoTuneTrial[];
+  // Verdict
+  verdict: string;
+  improvement_pct: number;
+}
+
+export interface AutoTuneRequest {
+  ticker: string;
+  objective?: string;
+  n_trials?: number;
+  train_years?: number;
+  test_years?: number;
+  max_windows?: number;
+}
+
+export async function runAutoTune(req: AutoTuneRequest): Promise<AutoTuneResult> {
+  return apiFetch<AutoTuneResult>("/api/strategy/auto-tune", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
