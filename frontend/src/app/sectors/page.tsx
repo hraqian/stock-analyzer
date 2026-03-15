@@ -226,6 +226,16 @@ function HoldingsEditor({
     return () => { cancelled = true; };
   }, [sectorName]);
 
+  // Exit editing mode if user switches away from power user
+  useEffect(() => {
+    if (!isPowerUser && editing) {
+      setEditing(false);
+      setDraft([]);
+      setNewTicker("");
+      setNewName("");
+    }
+  }, [isPowerUser, editing]);
+
   const startEditing = () => {
     setDraft(holdings.map((h) => ({ ...h })));
     setEditing(true);
@@ -774,6 +784,7 @@ export default function SectorsPage() {
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [detail, setDetail] = useState<SectorDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
 
   const isPowerUser = user?.user_mode === "power_user";
 
@@ -834,6 +845,16 @@ export default function SectorsPage() {
   const handleTileClick = (sectorName: string) => {
     setSelectedSector((prev) => (prev === sectorName ? null : sectorName));
   };
+
+  // Scroll to detail panel when a sector is selected
+  useEffect(() => {
+    if (selectedSector && detailRef.current) {
+      // Small delay so the panel renders before scrolling
+      setTimeout(() => {
+        detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, [selectedSector]);
 
   return (
     <div className="space-y-5">
@@ -1009,13 +1030,15 @@ export default function SectorsPage() {
 
       {/* Detail panel */}
       {(selectedSector || detailLoading) && (
-        <SectorDetailPanel
-          detail={detail}
-          loading={detailLoading}
-          window={window}
-          onDetailUpdate={setDetail}
-          isPowerUser={isPowerUser}
-        />
+        <div ref={detailRef}>
+          <SectorDetailPanel
+            detail={detail}
+            loading={detailLoading}
+            window={window}
+            onDetailUpdate={setDetail}
+            isPowerUser={isPowerUser}
+          />
+        </div>
       )}
     </div>
   );
