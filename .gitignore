@@ -27,6 +27,8 @@ Thumbs.db
 
 # Project-specific
 *.log
+*.db
 config_slot_*.yaml
+engine_config.py
 watchlist_state.json
 watchlist_tickers.yaml
