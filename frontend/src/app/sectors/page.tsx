@@ -5,9 +5,14 @@ import {
   getSectorOverview,
   getSectorDetail,
   refreshSectorHoldings,
+  getSectorHoldings,
+  updateSectorHoldings,
+  resetSectorHoldings,
   type SectorMomentum,
   type SectorOverviewResponse,
   type SectorDetailResponse,
+  type SectorHoldingItem,
+  type SectorHoldingsResponse,
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import HelpTip from "@/components/HelpTip";
@@ -25,6 +30,8 @@ import {
   HELP_WORST_MOVERS,
   HELP_SECTOR_ETF,
   HELP_BENCHMARK,
+  HELP_HOLDINGS_EDITOR,
+  HELP_HOLDINGS_SOURCE,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -167,20 +174,337 @@ function SectorTile({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Holdings Editor (shown inside SectorDetailPanel)
+// ---------------------------------------------------------------------------
+
+function HoldingsEditor({
+  sectorName,
+  isPowerUser,
+  onHoldingsChanged,
+}: {
+  sectorName: string;
+  isPowerUser: boolean;
+  onHoldingsChanged: () => void;
+}) {
+  const [holdings, setHoldings] = useState<SectorHoldingItem[]>([]);
+  const [source, setSource] = useState<string>("default");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<SectorHoldingItem[]>([]);
+  const [newTicker, setNewTicker] = useState("");
+  const [newName, setNewName] = useState("");
+
+  // Fetch holdings when sector changes
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+    setEditing(false);
+
+    getSectorHoldings(sectorName)
+      .then((res) => {
+        if (!cancelled) {
+          setHoldings(res.holdings);
+          setSource(res.source);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load holdings");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [sectorName]);
+
+  const startEditing = () => {
+    setDraft(holdings.map((h) => ({ ...h })));
+    setEditing(true);
+    setSuccessMsg(null);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setDraft([]);
+    setNewTicker("");
+    setNewName("");
+  };
+
+  const addHolding = () => {
+    const ticker = newTicker.trim().toUpperCase();
+    const name = newName.trim();
+    if (!ticker) return;
+    if (draft.some((h) => h.ticker === ticker)) {
+      setError(`${ticker} is already in the list`);
+      return;
+    }
+    setDraft([...draft, { ticker, name: name || ticker }]);
+    setNewTicker("");
+    setNewName("");
+    setError(null);
+  };
+
+  const removeHolding = (ticker: string) => {
+    setDraft(draft.filter((h) => h.ticker !== ticker));
+  };
+
+  const moveHolding = (index: number, direction: -1 | 1) => {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= draft.length) return;
+    const newDraft = [...draft];
+    [newDraft[index], newDraft[newIndex]] = [newDraft[newIndex], newDraft[index]];
+    setDraft(newDraft);
+  };
+
+  const saveHoldings = async () => {
+    if (draft.length === 0) {
+      setError("Holdings list cannot be empty");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await updateSectorHoldings(sectorName, draft);
+      setHoldings(res.holdings);
+      setSource(res.source);
+      setEditing(false);
+      setDraft([]);
+      setSuccessMsg("Holdings saved");
+      onHoldingsChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save holdings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      const res = await resetSectorHoldings(sectorName);
+      setHoldings(res.holdings);
+      setSource(res.source);
+      setEditing(false);
+      setDraft([]);
+      setSuccessMsg("Holdings reset to defaults");
+      onHoldingsChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset holdings");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="animate-pulse space-y-2">
+        <div className="h-4 bg-gray-800 rounded w-1/3" />
+        <div className="h-3 bg-gray-800 rounded w-2/3" />
+      </div>
+    );
+  }
+
+  const displayList = editing ? draft : holdings;
+
+  return (
+    <div className="space-y-3">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-medium text-gray-400">
+            Holdings ({displayList.length})
+            <HelpTip text={HELP_HOLDINGS_EDITOR} />
+          </h4>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">
+            {source} <HelpTip text={HELP_HOLDINGS_SOURCE} />
+          </span>
+        </div>
+
+        {isPowerUser && !editing && (
+          <div className="flex items-center gap-2">
+            {source === "configured" && (
+              <button
+                onClick={handleReset}
+                disabled={resetting}
+                className="px-2 py-1 text-xs text-gray-400 hover:text-white
+                           bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg
+                           transition-colors disabled:opacity-50"
+              >
+                {resetting ? "Resetting..." : "Reset to Defaults"}
+              </button>
+            )}
+            <button
+              onClick={startEditing}
+              className="px-2 py-1 text-xs text-blue-400 hover:text-blue-300
+                         bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg
+                         transition-colors"
+            >
+              Edit Holdings
+            </button>
+          </div>
+        )}
+
+        {isPowerUser && editing && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={cancelEditing}
+              className="px-2 py-1 text-xs text-gray-400 hover:text-white
+                         bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg
+                         transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveHoldings}
+              disabled={saving}
+              className="px-2 py-1 text-xs text-emerald-400 hover:text-emerald-300
+                         bg-gray-800 hover:bg-gray-700 border border-emerald-800 rounded-lg
+                         transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Normal user note */}
+      {!isPowerUser && (
+        <p className="text-xs text-gray-600">
+          Holdings can be customized by Power Users — toggle Power User mode
+          in the header.
+        </p>
+      )}
+
+      {/* Error / success */}
+      {error && (
+        <p className="text-xs text-red-400">{error}</p>
+      )}
+      {successMsg && (
+        <p className="text-xs text-emerald-400">{successMsg}</p>
+      )}
+
+      {/* Holdings list */}
+      <div className="space-y-1 max-h-64 overflow-y-auto">
+        {displayList.map((h, i) => (
+          <div
+            key={`${h.ticker}-${i}`}
+            className="flex items-center justify-between bg-gray-800/40 rounded px-3 py-1.5 text-sm"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-white font-medium font-mono text-xs shrink-0">
+                {h.ticker}
+              </span>
+              <span className="text-gray-500 text-xs truncate">{h.name}</span>
+            </div>
+            {editing && (
+              <div className="flex items-center gap-1 shrink-0 ml-2">
+                <button
+                  onClick={() => moveHolding(i, -1)}
+                  disabled={i === 0}
+                  className="text-gray-500 hover:text-white disabled:opacity-30 p-0.5"
+                  title="Move up"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => moveHolding(i, 1)}
+                  disabled={i === displayList.length - 1}
+                  className="text-gray-500 hover:text-white disabled:opacity-30 p-0.5"
+                  title="Move down"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => removeHolding(h.ticker)}
+                  className="text-red-500 hover:text-red-400 p-0.5 ml-1"
+                  title="Remove"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Add new holding (editing mode) */}
+      {editing && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newTicker}
+            onChange={(e) => setNewTicker(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addHolding();
+            }}
+            placeholder="TICKER"
+            className="w-24 px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded
+                       text-white placeholder-gray-600 focus:border-blue-500 focus:outline-none
+                       font-mono uppercase"
+          />
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addHolding();
+            }}
+            placeholder="Company Name (optional)"
+            className="flex-1 px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded
+                       text-white placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+          />
+          <button
+            onClick={addHolding}
+            disabled={!newTicker.trim()}
+            className="px-2 py-1 text-xs text-blue-400 hover:text-blue-300
+                       bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded
+                       transition-colors disabled:opacity-30"
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sector Detail Panel
+// ---------------------------------------------------------------------------
+
 function SectorDetailPanel({
   detail,
   loading,
   window,
   onDetailUpdate,
+  isPowerUser,
 }: {
   detail: SectorDetailResponse | null;
   loading: boolean;
   window: TimeWindow;
   onDetailUpdate?: (d: SectorDetailResponse) => void;
+  isPowerUser: boolean;
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshed, setRefreshed] = useState(false);
+  const [holdingsKey, setHoldingsKey] = useState(0);
 
   const handleRefreshHoldings = async () => {
     if (!detail || refreshing) return;
@@ -190,12 +514,22 @@ function SectorDetailPanel({
       const updated = await refreshSectorHoldings(detail.sector);
       onDetailUpdate?.(updated);
       setRefreshed(true);
+      // Bump key to force HoldingsEditor to re-fetch
+      setHoldingsKey((k) => k + 1);
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Refresh failed");
     } finally {
       setRefreshing(false);
     }
   };
+
+  // Reset refreshed flag when sector changes
+  useEffect(() => {
+    setRefreshed(false);
+    setRefreshError(null);
+    setHoldingsKey(0);
+  }, [detail?.sector]);
+
   if (loading) {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 animate-pulse">
@@ -212,6 +546,13 @@ function SectorDetailPanel({
     window === "1w" ? detail.return_1w : window === "1m" ? detail.return_1m : detail.return_3m;
   const rs =
     window === "1w" ? detail.rs_1w : window === "1m" ? detail.rs_1m : detail.rs_3m;
+
+  const handleHoldingsChanged = () => {
+    // Re-fetch the sector detail to pick up new movers
+    if (detail) {
+      getSectorDetail(detail.sector).then((d) => onDetailUpdate?.(d)).catch(() => {});
+    }
+  };
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
@@ -297,11 +638,11 @@ function SectorDetailPanel({
         </div>
       </div>
 
-      {/* Top & Worst movers */}
+      {/* Holdings section */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-gray-400 flex items-center gap-1">
-            Holdings
+            Sector Holdings
             <HelpTip text={HELP_TOP_MOVERS} />
           </h4>
           <div className="flex items-center gap-2">
@@ -326,21 +667,33 @@ function SectorDetailPanel({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              {refreshing ? "Refreshing..." : "Refresh Holdings"}
+              {refreshing ? "Refreshing..." : "Refresh from yfinance"}
             </button>
           </div>
         </div>
         {refreshing && (
           <p className="text-xs text-amber-400/70 mb-2">
-            Fetching live holdings from yfinance — this may take a few seconds...
+            Fetching live holdings from yfinance \u2014 this may take a few seconds...
           </p>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Top movers */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-400 mb-2">
-              Top Movers (1M)
-            </h4>
+
+        {/* Holdings editor / viewer */}
+        <HoldingsEditor
+          key={`${detail.sector}-${holdingsKey}`}
+          sectorName={detail.sector}
+          isPowerUser={isPowerUser}
+          onHoldingsChanged={handleHoldingsChanged}
+        />
+      </div>
+
+      {/* Top & Worst movers */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Top movers */}
+        <div>
+          <h4 className="text-sm font-medium text-gray-400 mb-2">
+            Top Movers (1M)
+            <HelpTip text={HELP_TOP_MOVERS} />
+          </h4>
           {detail.top_movers.length === 0 ? (
             <p className="text-xs text-gray-600">No data</p>
           ) : (
@@ -400,7 +753,6 @@ function SectorDetailPanel({
             </div>
           )}
         </div>
-        </div>
       </div>
     </div>
   );
@@ -416,12 +768,14 @@ export default function SectorsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default time window based on trade mode: swing → 1w, long_term → 3m
+  // Default time window based on trade mode: swing \u2192 1w, long_term \u2192 3m
   const [window, setWindow] = useState<TimeWindow>("1m");
   const windowSetByUser = useRef(false);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [detail, setDetail] = useState<SectorDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const isPowerUser = user?.user_mode === "power_user";
 
   // Sync default window with trade mode on initial load
   useEffect(() => {
@@ -576,8 +930,8 @@ export default function SectorsPage() {
           <p className="text-xs text-gray-600">
             Data from {overview.sectors.length} SPDR sector ETFs
             <HelpTip text={HELP_SECTOR_ETF} />
-            {" "}&middot; Loaded in {overview.elapsed_seconds.toFixed(1)}s
-            {" "}&middot; Click a sector for details
+            {" "}\u00b7 Loaded in {overview.elapsed_seconds.toFixed(1)}s
+            {" "}\u00b7 Click a sector for details
           </p>
         </>
       )}
@@ -643,7 +997,7 @@ export default function SectorsPage() {
                       {s.momentum_score.toFixed(1)}
                     </td>
                     <td className="py-2 pl-3 text-gray-400 text-xs">
-                      {s.regime || "—"}
+                      {s.regime || "\u2014"}
                     </td>
                   </tr>
                 ))}
@@ -660,6 +1014,7 @@ export default function SectorsPage() {
           loading={detailLoading}
           window={window}
           onDetailUpdate={setDetail}
+          isPowerUser={isPowerUser}
         />
       )}
     </div>

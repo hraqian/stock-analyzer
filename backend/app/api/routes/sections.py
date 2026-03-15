@@ -26,6 +26,9 @@ from app.models.schemas import (
     ScanRequest,
     ScanResponse,
     SectorDetailResponse,
+    SectorHoldingsResponse,
+    SectorHoldingsUpdateRequest,
+    SectorHoldingItem,
     SectorOverviewResponse,
     StrategyCreateRequest,
     StrategyExportResponse,
@@ -578,6 +581,105 @@ async def refresh_sector_holdings(sector_name: str, user: User = Depends(get_cur
         logger.exception("Refresh holdings failed for %s", sector_decoded)
         raise HTTPException(500, f"Refresh holdings failed: {exc}") from exc
     return result
+
+
+@sectors_router.get("/holdings/{sector_name}", response_model=SectorHoldingsResponse)
+async def get_holdings(sector_name: str, user: User = Depends(get_current_user)):
+    """Get the current holdings list for a sector.
+
+    Returns configured holdings if an override exists, otherwise built-in defaults.
+    """
+    import urllib.parse
+    sector_decoded = urllib.parse.unquote(sector_name)
+
+    if sector_decoded not in VALID_SECTORS:
+        raise HTTPException(
+            400,
+            f"Invalid sector '{sector_decoded}'. Must be one of: {sorted(VALID_SECTORS)}",
+        )
+
+    from app.services.holdings_config import get_sector_holdings
+    from app.services.sectors import SECTOR_HOLDINGS
+
+    override = get_sector_holdings(sector_decoded)
+    if override:
+        return {
+            "sector": sector_decoded,
+            "holdings": [{"ticker": h[0], "name": h[1]} for h in override],
+            "source": "configured",
+        }
+    # Fall back to built-in defaults
+    defaults = SECTOR_HOLDINGS.get(sector_decoded, [])
+    return {
+        "sector": sector_decoded,
+        "holdings": [{"ticker": h[0], "name": h[1]} for h in defaults],
+        "source": "default",
+    }
+
+
+@sectors_router.put("/holdings/{sector_name}", response_model=SectorHoldingsResponse)
+async def update_holdings(
+    sector_name: str,
+    req: SectorHoldingsUpdateRequest,
+    user: User = Depends(get_current_user),
+):
+    """Update holdings for a sector (power user only).
+
+    Saves a custom holdings list that overrides the built-in defaults.
+    """
+    import urllib.parse
+    sector_decoded = urllib.parse.unquote(sector_name)
+
+    if sector_decoded not in VALID_SECTORS:
+        raise HTTPException(
+            400,
+            f"Invalid sector '{sector_decoded}'. Must be one of: {sorted(VALID_SECTORS)}",
+        )
+
+    if user.user_mode != "power_user":
+        raise HTTPException(403, "Only power users can edit sector holdings")
+
+    if not req.holdings:
+        raise HTTPException(400, "Holdings list cannot be empty")
+
+    from app.services.holdings_config import set_sector_holdings
+
+    holdings_list = [[h.ticker.upper().strip(), h.name.strip()] for h in req.holdings]
+    set_sector_holdings(sector_decoded, holdings_list)
+
+    return {
+        "sector": sector_decoded,
+        "holdings": [{"ticker": h[0], "name": h[1]} for h in holdings_list],
+        "source": "configured",
+    }
+
+
+@sectors_router.delete("/holdings/{sector_name}", response_model=SectorHoldingsResponse)
+async def reset_holdings(sector_name: str, user: User = Depends(get_current_user)):
+    """Reset holdings for a sector back to built-in defaults (power user only)."""
+    import urllib.parse
+    sector_decoded = urllib.parse.unquote(sector_name)
+
+    if sector_decoded not in VALID_SECTORS:
+        raise HTTPException(
+            400,
+            f"Invalid sector '{sector_decoded}'. Must be one of: {sorted(VALID_SECTORS)}",
+        )
+
+    if user.user_mode != "power_user":
+        raise HTTPException(403, "Only power users can reset sector holdings")
+
+    from app.services.holdings_config import reset_sector_holdings
+    from app.services.sectors import SECTOR_HOLDINGS
+
+    reset_sector_holdings(sector_decoded)
+
+    defaults = SECTOR_HOLDINGS.get(sector_decoded, [])
+    return {
+        "sector": sector_decoded,
+        "holdings": [{"ticker": h[0], "name": h[1]} for h in defaults],
+        "source": "default",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -254,6 +254,12 @@ export const HELP_SECTOR_ETF =
 export const HELP_BENCHMARK =
   "The S&P 500 (SPY) is used as the benchmark. Relative strength compares each sector against this benchmark to see which sectors are outperforming or underperforming the broader market.";
 
+export const HELP_HOLDINGS_EDITOR =
+  "The list of stocks that represent this sector. Power Users can add, remove, or reorder holdings. Changes are saved globally and affect all users. Use 'Refresh' to fetch the latest holdings from yfinance, or 'Reset' to restore the built-in defaults.";
+
+export const HELP_HOLDINGS_SOURCE =
+  "Where the current holdings list came from. 'Default' = built-in list, 'Configured' = customized by a Power User or refreshed from yfinance.";
+
 // ---------------------------------------------------------------------------
 // Strategy Lab — Backtest
 // ---------------------------------------------------------------------------

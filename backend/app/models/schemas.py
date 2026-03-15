@@ -142,6 +142,24 @@ class SectorDetailResponse(BaseModel):
     elapsed_seconds: float = 0.0
 
 
+class SectorHoldingItem(BaseModel):
+    """A single holding entry: ticker + company name."""
+    ticker: str
+    name: str
+
+
+class SectorHoldingsResponse(BaseModel):
+    """Holdings configuration for a sector."""
+    sector: str
+    holdings: list[SectorHoldingItem] = []
+    source: str = "default"  # "default" | "configured" | "refreshed"
+
+
+class SectorHoldingsUpdateRequest(BaseModel):
+    """Request to update holdings for a sector (power user only)."""
+    holdings: list[SectorHoldingItem]
+
+
 # Legacy alias kept for backward compat
 class SectorOverview(BaseModel):
     sector: str

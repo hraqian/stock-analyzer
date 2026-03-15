@@ -321,15 +321,12 @@ SECTOR_HOLDINGS: dict[str, list[tuple[str, str]]] = {
 }
 
 
-# Cache for dynamically refreshed holdings (sector -> list of (ticker, name))
-_refreshed_holdings: dict[str, list[tuple[str, str]]] = {}
-
-
 def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
-    """Fetch top holdings for a sector's ETF from yfinance.
+    """Fetch top holdings for a sector's ETF from yfinance and save to config.
 
     Uses yf.Ticker(etf).info to get the fund's top holdings.
     Falls back to the static SECTOR_HOLDINGS list if the fetch fails.
+    Successful results are persisted to the holdings config file.
 
     Args:
         sector_name: GICS sector name (e.g. "Technology").
@@ -338,6 +335,7 @@ def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
         List of (ticker, company_name) tuples.
     """
     import yfinance as yf  # type: ignore[import-untyped]
+    from app.services.holdings_config import set_sector_holdings
 
     etf = SECTOR_NAME_TO_ETF.get(sector_name)
     if not etf:
@@ -347,8 +345,7 @@ def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
         logger.info("Fetching holdings for %s (%s) from yfinance...", sector_name, etf)
         ticker_obj = yf.Ticker(etf)
 
-        # yfinance exposes fund holdings via .funds_data.top_holdings or similar
-        # The most reliable approach is ticker.funds_data.top_holdings (pandas DF)
+        # yfinance exposes fund holdings via .funds_data.top_holdings (pandas DF)
         try:
             holdings_df = ticker_obj.funds_data.top_holdings
             if holdings_df is not None and not holdings_df.empty:
@@ -363,7 +360,8 @@ def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
                         name = static.get(sym_str, sym_str)
                     result.append((sym_str, name))
                 if result:
-                    _refreshed_holdings[sector_name] = result
+                    # Persist to config file
+                    set_sector_holdings(sector_name, [[t, n] for t, n in result])
                     logger.info("Refreshed %d holdings for %s", len(result), sector_name)
                     return result
         except Exception as exc:
@@ -382,7 +380,8 @@ def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
                     if sym_str:
                         result.append((sym_str, name))
                 if result:
-                    _refreshed_holdings[sector_name] = result
+                    # Persist to config file
+                    set_sector_holdings(sector_name, [[t, n] for t, n in result])
                     logger.info("Refreshed %d holdings for %s (via info)", len(result), sector_name)
                     return result
         except Exception as exc:
@@ -396,9 +395,12 @@ def refresh_holdings_from_yfinance(sector_name: str) -> list[tuple[str, str]]:
 
 
 def get_effective_holdings(sector_name: str) -> list[tuple[str, str]]:
-    """Get holdings for a sector, preferring refreshed data if available."""
-    if sector_name in _refreshed_holdings:
-        return _refreshed_holdings[sector_name]
+    """Get holdings for a sector: config overrides > built-in defaults."""
+    from app.services.holdings_config import get_sector_holdings
+
+    override = get_sector_holdings(sector_name)
+    if override:
+        return [(h[0], h[1]) for h in override]
     return list(SECTOR_HOLDINGS.get(sector_name, []))
 
 

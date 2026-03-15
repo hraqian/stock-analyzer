@@ -375,6 +375,43 @@ export async function refreshSectorHoldings(
   });
 }
 
+// Holdings management
+
+export interface SectorHoldingItem {
+  ticker: string;
+  name: string;
+}
+
+export interface SectorHoldingsResponse {
+  sector: string;
+  holdings: SectorHoldingItem[];
+  source: "default" | "configured" | "refreshed";
+}
+
+export async function getSectorHoldings(
+  sectorName: string
+): Promise<SectorHoldingsResponse> {
+  return apiFetch(`/api/sectors/holdings/${encodeURIComponent(sectorName)}`);
+}
+
+export async function updateSectorHoldings(
+  sectorName: string,
+  holdings: SectorHoldingItem[]
+): Promise<SectorHoldingsResponse> {
+  return apiFetch(`/api/sectors/holdings/${encodeURIComponent(sectorName)}`, {
+    method: "PUT",
+    body: JSON.stringify({ holdings }),
+  });
+}
+
+export async function resetSectorHoldings(
+  sectorName: string
+): Promise<SectorHoldingsResponse> {
+  return apiFetch(`/api/sectors/holdings/${encodeURIComponent(sectorName)}`, {
+    method: "DELETE",
+  });
+}
+
 // -------------------------------------------------------------------
 // Strategy Lab — Backtest
 // -------------------------------------------------------------------
