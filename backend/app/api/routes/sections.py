@@ -108,6 +108,7 @@ def _run_scanner(
                 "volume": r.volume,
                 "price": r.price,
                 "atr_ratio": r.atr_ratio,
+                "ai_rating": r.ai_rating,
             }
             for r in summary.results
         ],
@@ -348,6 +349,13 @@ def _run_analysis(ticker: str, period: str, interval: str, trade_mode: str) -> d
         "composite": composite,
         "pattern_composite": _sanitize_float(result.pattern_composite),
         "regime": regime,
+        # Include raw objects for ML scoring (not serialized — used by caller)
+        "_raw_indicator_results": result.indicator_results,
+        "_raw_pattern_results": result.pattern_results,
+        "_raw_composite": result.composite,
+        "_raw_pattern_composite": result.pattern_composite,
+        "_raw_regime": result.regime,
+        "_raw_df": result.df,
     }
 
 
@@ -416,6 +424,48 @@ async def analyze_stock(
                 )
             else:
                 result["ai_analysis"] = f"AI analysis unavailable: {exc}"
+
+    # ML signal scoring (automatic, no cost — runs if model exists)
+    try:
+        from engine.ml_model import model_exists, predict_signal  # type: ignore[import-untyped]
+
+        if model_exists():
+            raw_inds = result.pop("_raw_indicator_results", None)
+            raw_pats = result.pop("_raw_pattern_results", None)
+            raw_comp = result.pop("_raw_composite", None)
+            raw_pat_comp = result.pop("_raw_pattern_composite", None)
+            raw_regime = result.pop("_raw_regime", None)
+            raw_df = result.pop("_raw_df", None)
+
+            if raw_inds is not None and raw_df is not None:
+                prediction = await loop.run_in_executor(
+                    _analysis_pool,
+                    predict_signal,
+                    raw_inds, raw_pats, raw_comp, raw_pat_comp, raw_regime, raw_df,
+                )
+                if prediction is not None:
+                    result["ml_score"] = {
+                        "ai_rating": prediction.ai_rating,
+                        "probability": prediction.probability,
+                        "label": prediction.label,
+                        "confidence": prediction.confidence,
+                        "top_features": prediction.top_features,
+                    }
+        else:
+            # Clean up raw keys even if no model
+            for k in list(result.keys()):
+                if k.startswith("_raw_"):
+                    del result[k]
+    except ImportError:
+        logger.debug("ML model modules not available, skipping ML scoring")
+        for k in list(result.keys()):
+            if k.startswith("_raw_"):
+                del result[k]
+    except Exception as exc:
+        logger.debug("ML scoring failed for %s: %s", ticker, exc)
+        for k in list(result.keys()):
+            if k.startswith("_raw_"):
+                del result[k]
 
     return result
 
@@ -1180,6 +1230,141 @@ async def portfolio_summary(user: User = Depends(get_current_user)):
         "total_pnl": 0.0,
         "total_pnl_pct": 0.0,
         "status": "coming_in_phase_4",
+    }
+
+
+# ---------------------------------------------------------------------------
+# ML Signal Scoring
+# ---------------------------------------------------------------------------
+
+ml_router = APIRouter(prefix="/ml", tags=["ml"])
+
+
+@ml_router.get("/status")
+async def ml_model_status(user: User = Depends(get_current_user)):
+    """Return the current ML model training status and metadata."""
+    from app.services.ml_scoring import get_model_status
+
+    status = await get_model_status()
+    return status
+
+
+@ml_router.post("/train")
+async def ml_train(
+    universe: str = Query("sp500", description="Universe to train on"),
+    trade_mode: str = Query("swing", description="Trade mode: swing or long_term"),
+    period: str = Query("5y", description="Historical data period"),
+    user: User = Depends(get_current_user),
+):
+    """Train the XGBoost signal scoring model.
+
+    This is a long-running operation (can take several minutes for large
+    universes). The model is trained with walk-forward validation and
+    saved to disk for future predictions.
+    """
+    from app.services.ml_scoring import train_ml_model
+
+    if trade_mode not in ("swing", "long_term"):
+        raise HTTPException(400, "trade_mode must be 'swing' or 'long_term'")
+
+    valid_universes = {
+        "sp500", "nasdaq100", "dow30", "russell1000", "russell2000",
+        "tsx60", "tsx_composite", "sector_etfs", "us_dividend",
+    }
+    if universe not in valid_universes:
+        raise HTTPException(
+            400,
+            f"Invalid universe '{universe}'. Must be one of: {sorted(valid_universes)}",
+        )
+
+    try:
+        result = await train_ml_model(universe=universe, trade_mode=trade_mode, period=period)
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("ML training failed: %s", e, exc_info=True)
+        raise HTTPException(500, f"Training failed: {e}")
+
+
+@ml_router.get("/predict/{ticker}")
+async def ml_predict(
+    ticker: str,
+    period: str = Query("6mo", description="Data period"),
+    user: User = Depends(get_current_user),
+):
+    """Score a single ticker's current signal using the ML model.
+
+    Returns the AI rating (0-100), confidence, label, and top
+    contributing features.
+    """
+    from app.services.ml_scoring import predict_signal_score
+
+    loop = asyncio.get_event_loop()
+
+    def _run_analysis():
+        from config import Config
+        from data import YahooFinanceProvider
+        from indicators.registry import IndicatorRegistry
+        from patterns.registry import PatternRegistry
+        from analysis.scorer import CompositeScorer
+        from analysis.pattern_scorer import PatternCompositeScorer
+        from engine.regime import RegimeClassifier
+
+        cfg = Config.defaults()
+        provider = YahooFinanceProvider()
+        df = provider.fetch(ticker.upper(), period=period, interval="1d")
+
+        if df.empty or len(df) < 20:
+            return None
+
+        ind_registry = IndicatorRegistry(cfg)
+        pat_registry = PatternRegistry(cfg)
+        scorer = CompositeScorer(cfg)
+        pat_scorer = PatternCompositeScorer(cfg)
+        regime_clf = RegimeClassifier(cfg)
+
+        indicator_results = ind_registry.run_all(df)
+        pattern_results = pat_registry.run_all(df)
+        composite = scorer.score(indicator_results)
+        pattern_composite = pat_scorer.score(pattern_results)
+        regime = None
+        try:
+            regime = regime_clf.classify(df)
+        except Exception:
+            pass
+
+        return {
+            "indicator_results": indicator_results,
+            "pattern_results": pattern_results,
+            "composite": composite,
+            "pattern_composite": pattern_composite,
+            "regime": regime,
+            "df": df,
+        }
+
+    analysis = await loop.run_in_executor(_analysis_pool, _run_analysis)
+    if analysis is None:
+        raise HTTPException(400, f"Insufficient data for {ticker.upper()}")
+
+    prediction = await predict_signal_score(
+        indicator_results=analysis["indicator_results"],
+        pattern_results=analysis["pattern_results"],
+        composite=analysis["composite"],
+        pattern_composite=analysis["pattern_composite"],
+        regime=analysis["regime"],
+        df=analysis["df"],
+    )
+
+    if prediction is None:
+        raise HTTPException(
+            404,
+            "No ML model available. Train a model first via Settings > AI Signal Model.",
+        )
+
+    return {
+        "ticker": ticker.upper(),
+        **prediction,
     }
 
 

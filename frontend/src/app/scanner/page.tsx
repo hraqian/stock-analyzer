@@ -27,6 +27,7 @@ import {
   HELP_SCAN_CONFIDENCE,
   HELP_SCAN_PATTERN,
   HELP_REGIME,
+  HELP_AI_RATING,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -55,7 +56,7 @@ const PRESETS = [
   { value: "dividend", label: "Top Dividend", help: HELP_PRESET_DIVIDEND, icon: "💰" },
 ];
 
-type SortField = "rank" | "ticker" | "score" | "price" | "volume" | "confidence";
+type SortField = "rank" | "ticker" | "score" | "price" | "volume" | "confidence" | "ai_rating";
 type SortDir = "asc" | "desc";
 
 // ---------------------------------------------------------------------------
@@ -128,8 +129,11 @@ export default function ScannerPage() {
 
   const sortedResults: ScannerResultRow[] = result
     ? [...result.results].sort((a, b) => {
-        const av = a[sortField];
-        const bv = b[sortField];
+        let av = a[sortField];
+        let bv = b[sortField];
+        // Treat null ai_rating as -1 so nulls sort last in desc order
+        if (av === null || av === undefined) av = -1;
+        if (bv === null || bv === undefined) bv = -1;
         if (typeof av === "string" && typeof bv === "string") {
           return sortDir === "asc"
             ? av.localeCompare(bv)
@@ -367,6 +371,14 @@ export default function ScannerPage() {
                       helpText={HELP_SCAN_SCORE}
                     />
                     <SortHeader
+                      field="ai_rating"
+                      label="AI Rating"
+                      current={sortField}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      helpText={HELP_AI_RATING}
+                    />
+                    <SortHeader
                       field="confidence"
                       label="Confidence"
                       current={sortField}
@@ -415,6 +427,9 @@ export default function ScannerPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <ScoreBadge score={row.score} />
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <AiRatingBadge rating={row.ai_rating} />
                       </td>
                       <td className="px-3 py-2.5 text-gray-400">
                         {(row.confidence * 100).toFixed(0)}%
@@ -505,4 +520,15 @@ function formatVolume(vol: number): string {
   if (vol >= 1_000_000) return `${(vol / 1_000_000).toFixed(1)}M`;
   if (vol >= 1_000) return `${(vol / 1_000).toFixed(0)}K`;
   return vol.toFixed(0);
+}
+
+function AiRatingBadge({ rating }: { rating: number | null }) {
+  if (rating === null || rating === undefined) {
+    return <span className="text-gray-600 text-xs">—</span>;
+  }
+  let color = "text-gray-400";
+  if (rating >= 65) color = "text-green-400";
+  else if (rating <= 35) color = "text-red-400";
+  else if (rating >= 55) color = "text-blue-400";
+  return <span className={`font-medium ${color}`}>{rating.toFixed(0)}</span>;
 }

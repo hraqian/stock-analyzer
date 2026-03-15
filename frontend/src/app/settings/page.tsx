@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import type { User } from "@/lib/api";
+import type { User, MlModelStatus } from "@/lib/api";
+import { getMlModelStatus, trainMlModel } from "@/lib/api";
 import HelpTip from "@/components/HelpTip";
 import {
   HELP_TAX_PROVINCE,
@@ -12,6 +13,9 @@ import {
   HELP_LLM_PROVIDER,
   HELP_LLM_API_KEY,
   HELP_LLM_MODEL,
+  HELP_AI_MODEL_STATUS,
+  HELP_AI_UNIVERSE,
+  HELP_AI_TRADE_MODE,
 } from "@/lib/helpText";
 
 /** Province options for the dropdown. */
@@ -54,6 +58,15 @@ export default function SettingsPage() {
   const [savingLlm, setSavingLlm] = useState(false);
   const [llmMsg, setLlmMsg] = useState<string | null>(null);
 
+  // ML model state
+  const [mlStatus, setMlStatus] = useState<MlModelStatus | null>(null);
+  const [mlLoading, setMlLoading] = useState(false);
+  const [mlTraining, setMlTraining] = useState(false);
+  const [mlUniverse, setMlUniverse] = useState("sp500");
+  const [mlTradeMode, setMlTradeMode] = useState("swing");
+  const [mlPeriod, setMlPeriod] = useState("5y");
+  const [mlMsg, setMlMsg] = useState<string | null>(null);
+
   // Sync form state when user loads
   useEffect(() => {
     if (user) {
@@ -69,6 +82,41 @@ export default function SettingsPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // Fetch ML model status on mount
+  const fetchMlStatus = useCallback(async () => {
+    setMlLoading(true);
+    try {
+      const status = await getMlModelStatus();
+      setMlStatus(status);
+    } catch {
+      // silently ignore — model status is optional
+    } finally {
+      setMlLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMlStatus();
+  }, [fetchMlStatus]);
+
+  async function handleTrainModel() {
+    setMlTraining(true);
+    setMlMsg(null);
+    try {
+      const result = await trainMlModel(mlUniverse, mlTradeMode, mlPeriod);
+      setMlMsg(
+        `Trained! ${result.n_samples} samples, ${result.n_windows} windows. ` +
+        `Accuracy: ${((result.metrics.accuracy ?? 0) * 100).toFixed(1)}%`
+      );
+      // Refresh status
+      await fetchMlStatus();
+    } catch (e: unknown) {
+      setMlMsg(e instanceof Error ? e.message : "Training failed");
+    } finally {
+      setMlTraining(false);
+    }
+  }
 
   async function handleSaveTax() {
     setSaving(true);
@@ -419,6 +467,178 @@ export default function SettingsPage() {
                 }`}
               >
                 {llmMsg}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* AI Signal Model card */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-300">
+              AI Signal Model
+            </h3>
+            <HelpTip text={HELP_AI_MODEL_STATUS} />
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                mlStatus?.trained
+                  ? "bg-green-900/50 text-green-400"
+                  : "bg-gray-800 text-gray-500"
+              }`}
+            >
+              {mlLoading ? "Loading..." : mlStatus?.trained ? "Trained" : "Not Trained"}
+            </span>
+          </div>
+
+          <p className="text-xs text-gray-500 mb-4">
+            Train an XGBoost model on historical signals to predict which
+            setups are most likely to be profitable. Once trained, AI Ratings
+            appear in the Scanner and Analysis pages automatically.
+          </p>
+
+          {/* Model info (if trained) */}
+          {mlStatus?.trained && mlStatus.meta && (
+            <div className="mb-4 space-y-2 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                  <span className="text-gray-500">Universe</span>
+                  <span className="text-gray-300">{mlStatus.meta.universe ?? "—"}</span>
+                </div>
+                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                  <span className="text-gray-500">Trade Mode</span>
+                  <span className="text-gray-300">{mlStatus.meta.trade_mode ?? "—"}</span>
+                </div>
+                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                  <span className="text-gray-500">Samples</span>
+                  <span className="text-gray-300">{mlStatus.meta.n_samples?.toLocaleString() ?? "—"}</span>
+                </div>
+                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                  <span className="text-gray-500">Windows</span>
+                  <span className="text-gray-300">{mlStatus.meta.n_windows ?? "—"}</span>
+                </div>
+                {mlStatus.meta.metrics && (
+                  <>
+                    <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                      <span className="text-gray-500">Accuracy</span>
+                      <span className="text-green-400">
+                        {((mlStatus.meta.metrics.accuracy ?? 0) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                      <span className="text-gray-500">F1 Score</span>
+                      <span className="text-blue-400">
+                        {(mlStatus.meta.metrics.f1 ?? 0).toFixed(3)}
+                      </span>
+                    </div>
+                  </>
+                )}
+                {mlStatus.meta.trained_at && (
+                  <div className="col-span-2 flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                    <span className="text-gray-500">Last Trained</span>
+                    <span className="text-gray-300">
+                      {new Date(mlStatus.meta.trained_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Top feature importances */}
+              {mlStatus.meta.feature_importances && (
+                <div className="mt-2">
+                  <div className="text-xs text-gray-500 mb-1">Top Feature Importances</div>
+                  <div className="space-y-0.5">
+                    {Object.entries(mlStatus.meta.feature_importances)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 8)
+                      .map(([name, imp]) => (
+                        <div
+                          key={name}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <span className="text-gray-400 w-32 truncate">{name.replace(/_/g, " ")}</span>
+                          <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-cyan-500 h-full rounded-full"
+                              style={{ width: `${Math.min(imp * 100 * 5, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-gray-500 w-12 text-right">{(imp * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Training controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">Universe</span>
+                <HelpTip text={HELP_AI_UNIVERSE} size={12} />
+              </div>
+              <select
+                value={mlUniverse}
+                onChange={(e) => setMlUniverse(e.target.value)}
+                disabled={mlTraining}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value="dow30">Dow 30 (fast)</option>
+                <option value="nasdaq100">Nasdaq 100</option>
+                <option value="sp500">S&P 500 (recommended)</option>
+                <option value="tsx60">TSX 60</option>
+                <option value="tsx_composite">TSX Composite</option>
+                <option value="russell1000">Russell 1000 (slow)</option>
+              </select>
+            </div>
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">Trade Mode</span>
+                <HelpTip text={HELP_AI_TRADE_MODE} size={12} />
+              </div>
+              <select
+                value={mlTradeMode}
+                onChange={(e) => setMlTradeMode(e.target.value)}
+                disabled={mlTraining}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value="swing">Swing (10 bars)</option>
+                <option value="long_term">Long-term (60 bars)</option>
+              </select>
+            </div>
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">History Period</span>
+              </div>
+              <select
+                value={mlPeriod}
+                onChange={(e) => setMlPeriod(e.target.value)}
+                disabled={mlTraining}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value="2y">2 Years</option>
+                <option value="5y">5 Years (recommended)</option>
+                <option value="10y">10 Years</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleTrainModel}
+              disabled={mlTraining}
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {mlTraining ? "Training... (this may take minutes)" : "Train Model"}
+            </button>
+            {mlMsg && (
+              <span
+                className={`text-sm ${
+                  mlMsg.startsWith("Trained") ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {mlMsg}
               </span>
             )}
           </div>

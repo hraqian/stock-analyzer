@@ -18,6 +18,7 @@ from app.api.routes.sections import (
     strategy_router,
     portfolio_router,
     settings_router,
+    ml_router,
 )
 
 
@@ -55,6 +56,7 @@ app.include_router(sectors_router, prefix="/api")
 app.include_router(strategy_router, prefix="/api")
 app.include_router(portfolio_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(ml_router, prefix="/api")
 
 
 @app.get("/api/health")

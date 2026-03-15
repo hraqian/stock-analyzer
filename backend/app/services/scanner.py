@@ -46,6 +46,7 @@ class ScannerResult:
     volume: float = 0.0
     price: float = 0.0
     atr_ratio: float = 0.0
+    ai_rating: float | None = None
 
 
 @dataclass
@@ -204,6 +205,45 @@ def _run_technical_scan(
     top = candidates[:top_n]
     for i, r in enumerate(top, 1):
         r.rank = i
+
+    # ── 5. ML scoring (if model exists) ──────────────────────────────
+    try:
+        from engine.ml_model import model_exists, predict_signal  # type: ignore[import-untyped]
+        from analysis.pattern_scorer import PatternCompositeScorer  # type: ignore[import-untyped]
+
+        if model_exists():
+            pat_scorer = PatternCompositeScorer(cfg)
+            # Full indicator registry for ML (scanner may use a subset)
+            ml_ind_registry = IndicatorRegistry(cfg)
+            ml_pat_registry = PatternRegistry(cfg)
+            ml_scorer = CompositeScorer(cfg)
+            ml_regime_clf = RegimeClassifier(cfg)
+
+            for r in top:
+                try:
+                    ticker_df = data.get(r.ticker)
+                    if ticker_df is None or ticker_df.empty or len(ticker_df) < 20:
+                        continue
+                    ml_indicators = ml_ind_registry.run_all(ticker_df)
+                    ml_patterns = ml_pat_registry.run_all(ticker_df)
+                    ml_composite = ml_scorer.score(ml_indicators)
+                    ml_pat_composite = pat_scorer.score(ml_patterns)
+                    ml_regime = None
+                    try:
+                        ml_regime = ml_regime_clf.classify(ticker_df)
+                    except Exception:
+                        pass
+                    prediction = predict_signal(
+                        ml_indicators, ml_patterns,
+                        ml_composite, ml_pat_composite,
+                        ml_regime, ticker_df,
+                    )
+                    if prediction is not None:
+                        r.ai_rating = prediction.ai_rating
+                except Exception:
+                    logger.debug("ML scoring failed for %s", r.ticker, exc_info=True)
+    except ImportError:
+        logger.debug("ML model modules not available, skipping AI rating")
 
     elapsed = time.time() - t0
     logger.info(

@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { analyzeStock } from "@/lib/api";
-import type { AnalysisResult } from "@/lib/api";
+import type { AnalysisResult, MlScoreResult } from "@/lib/api";
 import CandlestickChart from "@/components/CandlestickChart";
 import HelpTip from "@/components/HelpTip";
 import ErrorBanner from "@/components/ErrorBanner";
@@ -34,6 +34,7 @@ import {
   INDICATOR_HELP,
   PATTERN_HELP,
   HELP_AI_ANALYSIS,
+  HELP_AI_RATING,
 } from "@/lib/helpText";
 
 const PERIODS = ["1mo", "3mo", "6mo", "1y", "2y", "5y"];
@@ -263,6 +264,11 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
               loading={aiLoading}
               error={aiError}
             />
+          )}
+
+          {/* ML Signal Score Card */}
+          {result.ml_score && (
+            <MlScoreCard score={result.ml_score} />
           )}
 
           {/* Composite Scores */}
@@ -602,6 +608,76 @@ function AiAnalysisCard({
         <p className="text-xs text-gray-600">
           Click the AI Analysis button above to generate a qualitative summary.
         </p>
+      )}
+    </div>
+  );
+}
+
+
+function MlScoreCard({ score }: { score: MlScoreResult }) {
+  // Color based on label
+  let ratingColor = "text-gray-400";
+  let borderColor = "border-gray-800";
+  if (score.label === "Bullish") {
+    ratingColor = "text-green-400";
+    borderColor = "border-green-900/50";
+  } else if (score.label === "Bearish") {
+    ratingColor = "text-red-400";
+    borderColor = "border-red-900/50";
+  } else {
+    ratingColor = "text-blue-400";
+    borderColor = "border-blue-900/50";
+  }
+
+  return (
+    <div className={`bg-gray-900 border ${borderColor} rounded-xl p-4`}>
+      <h3 className="text-sm font-medium text-gray-400 mb-3">
+        <span className="text-cyan-400">ML</span> Signal Score{" "}
+        <HelpTip text={HELP_AI_RATING} />
+      </h3>
+
+      <div className="flex items-center gap-6 mb-3">
+        {/* Big rating number */}
+        <div className="text-center">
+          <div className={`text-3xl font-bold ${ratingColor}`}>
+            {score.ai_rating.toFixed(0)}
+          </div>
+          <div className="text-xs text-gray-500">AI Rating</div>
+        </div>
+
+        {/* Label + confidence */}
+        <div className="space-y-1">
+          <div className={`text-sm font-medium ${ratingColor}`}>
+            {score.label}
+          </div>
+          <div className="text-xs text-gray-500">
+            Confidence: <span className="text-gray-400">{score.confidence}</span>
+          </div>
+          <div className="text-xs text-gray-500">
+            Win probability: <span className="text-gray-400">{(score.probability * 100).toFixed(1)}%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Top features */}
+      {score.top_features.length > 0 && (
+        <div>
+          <div className="text-xs text-gray-500 mb-1.5">Top Contributing Features</div>
+          <div className="space-y-1">
+            {score.top_features.map((f, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between bg-gray-800 rounded px-2.5 py-1"
+              >
+                <span className="text-xs text-gray-300">{f.name.replace(/_/g, " ")}</span>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-gray-500">val: {f.value.toFixed(2)}</span>
+                  <span className="text-cyan-400">{(f.importance * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

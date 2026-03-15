@@ -24,6 +24,8 @@ dependencies = [
     "anthropic>=0.39",
     "openai>=1.50",
     "google-genai>=1.0",
+    "xgboost>=2.0",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]

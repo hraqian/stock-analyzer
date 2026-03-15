@@ -455,6 +455,18 @@ export const HELP_LLM_PROVIDER =
 export const HELP_AI_ANALYSIS =
   "An AI-generated plain-English summary of all the technical data above. It highlights the key takeaways so you don't have to interpret every indicator yourself. This costs one API call each time you request it.";
 
+export const HELP_AI_RATING =
+  "A machine learning score (0-100) predicting whether this signal will be profitable. Trained on thousands of historical signals using XGBoost. 65+ is Bullish, 35- is Bearish, in between is Neutral. Only available after training a model in Settings.";
+
+export const HELP_AI_MODEL_STATUS =
+  "Shows whether an XGBoost signal scoring model has been trained. Once trained, the model scores scanner results and analysis signals with an AI Rating. Retrain periodically with fresh data for best results.";
+
+export const HELP_AI_UNIVERSE =
+  "The universe of stocks to use for generating training data. Larger universes (like S&P 500) produce more training samples and generally better models, but take longer to train.";
+
+export const HELP_AI_TRADE_MODE =
+  "Determines the forward-looking horizon for labeling training samples. Swing mode uses 10 bars ahead, Long-term uses 60 bars. Choose the mode that matches how you trade.";
+
 export const HELP_LLM_API_KEY =
   "Your personal API key for the selected provider. Get one from the provider's website (e.g. aistudio.google.com for Gemini). Your key is stored securely on the server and never shown in full after saving.";
 

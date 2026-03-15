@@ -207,6 +207,18 @@ export interface CompositeScore {
   dominant_group: string | null;
 }
 
+export interface MlScoreResult {
+  ai_rating: number;
+  probability: number;
+  label: string;
+  confidence: string;
+  top_features: Array<{
+    name: string;
+    value: number;
+    importance: number;
+  }>;
+}
+
 export interface AnalysisResult {
   ticker: string;
   period: string;
@@ -220,6 +232,7 @@ export interface AnalysisResult {
   pattern_composite: Record<string, unknown>;
   regime: RegimeAssessment | null;
   ai_analysis: string | null;
+  ml_score: MlScoreResult | null;
 }
 
 export async function analyzeStock(
@@ -252,6 +265,7 @@ export interface ScannerResultRow {
   volume: number;
   price: number;
   atr_ratio: number;
+  ai_rating: number | null;
 }
 
 export interface ScanResponse {
@@ -690,4 +704,66 @@ export async function importStrategy(data: StrategyExport): Promise<StrategyItem
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// ML Signal Scoring
+// ---------------------------------------------------------------------------
+
+export interface MlModelStatus {
+  trained: boolean;
+  model_file: string | null;
+  meta: {
+    trade_mode?: string;
+    universe?: string;
+    n_samples?: number;
+    n_windows?: number;
+    metrics?: Record<string, number>;
+    feature_importances?: Record<string, number>;
+    trained_at?: string;
+  } | null;
+}
+
+export interface MlTrainResult {
+  status: string;
+  metrics: Record<string, number>;
+  n_samples: number;
+  n_windows: number;
+  feature_importances: Record<string, number>;
+}
+
+export async function getMlModelStatus(): Promise<MlModelStatus> {
+  return apiFetch<MlModelStatus>("/api/ml/status");
+}
+
+export async function trainMlModel(
+  universe: string = "sp500",
+  tradeMode: string = "swing",
+  period: string = "5y",
+): Promise<MlTrainResult> {
+  const params = new URLSearchParams({
+    universe,
+    trade_mode: tradeMode,
+    period,
+  });
+  return apiFetch<MlTrainResult>(`/api/ml/train?${params}`, {
+    method: "POST",
+  });
+}
+
+export interface MlPrediction {
+  ticker: string;
+  ai_rating: number;
+  probability: number;
+  label: string;
+  confidence: string;
+  top_features: Array<{ name: string; value: number; importance: number }>;
+}
+
+export async function getMlPrediction(
+  ticker: string,
+  period: string = "6mo",
+): Promise<MlPrediction> {
+  return apiFetch<MlPrediction>(`/api/ml/predict/${encodeURIComponent(ticker)}?period=${period}`);
 }

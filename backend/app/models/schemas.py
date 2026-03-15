@@ -280,6 +280,7 @@ class AnalysisResponse(BaseModel):
     pattern_composite: dict = {}
     regime: RegimeSchema | None = None
     ai_analysis: str | None = None
+    ml_score: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +321,7 @@ class ScannerResultSchema(BaseModel):
     volume: float = 0.0
     price: float = 0.0
     atr_ratio: float = 0.0
+    ai_rating: float | None = None
 
 
 class ScanResponse(BaseModel):
