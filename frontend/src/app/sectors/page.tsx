@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getSectorOverview,
   getSectorDetail,
@@ -9,6 +9,7 @@ import {
   type SectorOverviewResponse,
   type SectorDetailResponse,
 } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import HelpTip from "@/components/HelpTip";
 import {
   HELP_SECTORS,
@@ -410,14 +411,26 @@ function SectorDetailPanel({
 // ---------------------------------------------------------------------------
 
 export default function SectorsPage() {
+  const { user } = useAuth();
   const [overview, setOverview] = useState<SectorOverviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Default time window based on trade mode: swing → 1w, long_term → 3m
   const [window, setWindow] = useState<TimeWindow>("1m");
+  const windowSetByUser = useRef(false);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [detail, setDetail] = useState<SectorDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Sync default window with trade mode on initial load
+  useEffect(() => {
+    if (user && !windowSetByUser.current) {
+      const tw: TimeWindow =
+        user.trade_mode === "long_term" ? "3m" : user.trade_mode === "swing" ? "1w" : "1m";
+      setWindow(tw);
+    }
+  }, [user]);
 
   // Fetch overview on mount
   const fetchOverview = useCallback(async () => {
@@ -489,7 +502,7 @@ export default function SectorsPage() {
           {(["1w", "1m", "3m"] as TimeWindow[]).map((w) => (
             <button
               key={w}
-              onClick={() => setWindow(w)}
+              onClick={() => { windowSetByUser.current = true; setWindow(w); }}
               className={`px-3 py-1 rounded text-sm font-medium transition-colors
                 ${
                   window === w
