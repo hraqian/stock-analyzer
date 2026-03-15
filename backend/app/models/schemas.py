@@ -33,6 +33,8 @@ class UserResponse(BaseModel):
     tax_province: str | None = None
     tax_annual_income: float = 0.0
     tax_treatment: str = "auto"
+    # AI / LLM settings
+    llm_provider: str = "anthropic"
 
     model_config = {"from_attributes": True}
 
@@ -49,6 +51,8 @@ class UserUpdate(BaseModel):
     tax_province: str | None = None
     tax_annual_income: float | None = None
     tax_treatment: str | None = None
+    # AI / LLM settings
+    llm_provider: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -261,6 +265,7 @@ class AnalysisResponse(BaseModel):
     composite: CompositeScoreSchema
     pattern_composite: dict = {}
     regime: RegimeSchema | None = None
+    ai_analysis: str | None = None
 
 
 # ---------------------------------------------------------------------------

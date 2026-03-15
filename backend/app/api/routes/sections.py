@@ -356,6 +356,7 @@ async def analyze_stock(
     ticker: str,
     period: str = Query("6mo", description="Data period: 1mo, 3mo, 6mo, 1y, 2y, 5y"),
     interval: str = Query("1d", description="Bar interval: 1d, 1wk, 1mo"),
+    ai: bool = Query(False, description="Include LLM qualitative analysis"),
     user: User = Depends(get_current_user),
 ):
     """Run full technical analysis on a single ticker.
@@ -363,6 +364,9 @@ async def analyze_stock(
     Uses the engine's Analyzer to compute indicators, patterns, support/resistance,
     composite scores, and regime classification.  The trade_mode from the user's
     profile selects the appropriate configuration objective (swing_trade, long_term).
+
+    Pass ``ai=true`` to also generate an LLM qualitative analysis (requires an
+    API key for the user's configured LLM provider).
     """
     valid_periods = {"1mo", "3mo", "6mo", "1y", "2y", "5y", "ytd", "max"}
     valid_intervals = {"1d", "5d", "1wk", "1mo"}
@@ -384,6 +388,16 @@ async def analyze_stock(
     except Exception as exc:
         logger.exception("Analysis failed for %s", ticker)
         raise HTTPException(500, f"Analysis failed: {exc}") from exc
+
+    # Optional LLM analysis (opt-in to control API costs)
+    if ai:
+        try:
+            from app.services.llm import generate_analysis
+            ai_text = await generate_analysis(result, user.llm_provider)
+            result["ai_analysis"] = ai_text
+        except Exception as exc:
+            logger.warning("LLM analysis failed for %s: %s", ticker, exc)
+            result["ai_analysis"] = f"AI analysis unavailable: {exc}"
 
     return result
 

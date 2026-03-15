@@ -9,6 +9,7 @@ import {
   HELP_TAX_ANNUAL_INCOME,
   HELP_TAX_TREATMENT,
   HELP_TAX_MARGINAL_RATE,
+  HELP_LLM_PROVIDER,
 } from "@/lib/helpText";
 
 /** Province options for the dropdown. */
@@ -44,12 +45,18 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
+  // LLM provider state
+  const [llmProvider, setLlmProvider] = useState<string>("anthropic");
+  const [savingLlm, setSavingLlm] = useState(false);
+  const [llmMsg, setLlmMsg] = useState<string | null>(null);
+
   // Sync form state when user loads
   useEffect(() => {
     if (user) {
       setTaxProvince(user.tax_province ?? "");
       setTaxIncome(user.tax_annual_income ? String(user.tax_annual_income) : "");
       setTaxTreatment(user.tax_treatment ?? "auto");
+      setLlmProvider(user.llm_provider ?? "anthropic");
     }
   }, [user]);
 
@@ -279,13 +286,61 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Data & AI card */}
+        {/* AI / LLM Settings card */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-gray-300 mb-3">
-            Data &amp; AI
+            AI Analysis
           </h3>
-          <div className="space-y-2 text-sm text-gray-600">
-            <p>Data provider and AI configuration coming later.</p>
+          <p className="text-xs text-gray-500 mb-4">
+            Choose which LLM provider powers the qualitative AI analysis on
+            the Single Stock Analysis page. API keys are configured via
+            environment variables (ANTHROPIC_API_KEY / OPENAI_API_KEY).
+          </p>
+
+          <div className="mb-4">
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-xs text-gray-400">LLM Provider</span>
+              <HelpTip text={HELP_LLM_PROVIDER} size={12} />
+            </div>
+            <select
+              value={llmProvider}
+              onChange={(e) => setLlmProvider(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI (GPT)</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={async () => {
+                setSavingLlm(true);
+                setLlmMsg(null);
+                try {
+                  await updateUser({ llm_provider: llmProvider } as Partial<User>);
+                  setLlmMsg("Saved!");
+                  setTimeout(() => setLlmMsg(null), 3000);
+                } catch (e: unknown) {
+                  setLlmMsg(e instanceof Error ? e.message : "Save failed");
+                } finally {
+                  setSavingLlm(false);
+                }
+              }}
+              disabled={savingLlm}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {savingLlm ? "Saving..." : "Save AI Settings"}
+            </button>
+            {llmMsg && (
+              <span
+                className={`text-sm ${
+                  llmMsg === "Saved!" ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {llmMsg}
+              </span>
+            )}
           </div>
         </div>
       </div>

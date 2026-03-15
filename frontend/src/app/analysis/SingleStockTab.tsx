@@ -33,6 +33,7 @@ import {
   HELP_INTERVAL,
   INDICATOR_HELP,
   PATTERN_HELP,
+  HELP_AI_ANALYSIS,
 } from "@/lib/helpText";
 
 const PERIODS = ["1mo", "3mo", "6mo", "1y", "2y", "5y"];
@@ -77,6 +78,10 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
+  // AI analysis state
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   // Track whether we've already auto-run from initialTicker prop
   const autoRanRef = useRef(false);
 
@@ -95,6 +100,22 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
       setLoading(false);
     }
   }, [ticker, period, interval]);
+
+  /** Request AI-powered qualitative analysis (separate call with ai=true). */
+  const runAiAnalysis = useCallback(async () => {
+    if (!result) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const data = await analyzeStock(result.ticker, period, interval, true);
+      // Merge AI text into the existing result
+      setResult((prev) => prev ? { ...prev, ai_analysis: data.ai_analysis } : prev);
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : "AI analysis failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [result, period, interval]);
 
   // Auto-run analysis if initialTicker is provided (e.g. from scanner)
   useEffect(() => {
@@ -204,7 +225,7 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
           {/* Ticker Info Bar */}
           <TickerInfoBar result={result} />
 
-          {/* Action button: cross-section navigation */}
+          {/* Action buttons: cross-section navigation + AI */}
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() =>
@@ -221,7 +242,28 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
               </svg>
               Auto-Tune Strategy
             </button>
+            <button
+              onClick={runAiAnalysis}
+              disabled={aiLoading}
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:text-gray-500
+                         text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              {aiLoading ? "Generating..." : "AI Analysis"}
+            </button>
           </div>
+
+          {/* AI Analysis Card */}
+          {(result.ai_analysis || aiLoading || aiError) && (
+            <AiAnalysisCard
+              text={result.ai_analysis ?? null}
+              loading={aiLoading}
+              error={aiError}
+            />
+          )}
 
           {/* Composite Scores */}
           <CompositeScoreCard result={result} />
@@ -522,6 +564,45 @@ function ResultsTable({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AiAnalysisCard({
+  text,
+  loading,
+  error,
+}: {
+  text: string | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <div className="bg-gray-900 border border-purple-900/50 rounded-xl p-4">
+      <h3 className="text-sm font-medium text-gray-400 mb-3">
+        <span className="text-purple-400">AI</span> Qualitative Analysis{" "}
+        <HelpTip text={HELP_AI_ANALYSIS} />
+      </h3>
+
+      {loading && (
+        <div className="animate-pulse text-gray-400 text-sm">
+          Generating AI analysis...
+        </div>
+      )}
+
+      {error && (
+        <div className="text-sm text-red-400">{error}</div>
+      )}
+
+      {text && !loading && (
+        <p className="text-sm text-gray-300 leading-relaxed">{text}</p>
+      )}
+
+      {!text && !loading && !error && (
+        <p className="text-xs text-gray-600">
+          Click the AI Analysis button above to generate a qualitative summary.
+        </p>
+      )}
     </div>
   );
 }

@@ -23,6 +23,7 @@ from app.models.schemas import (
 from app.services.tax_calculator import VALID_PROVINCES
 
 VALID_TAX_TREATMENTS = {"auto", "capital_gains", "business_income"}
+VALID_LLM_PROVIDERS = {"anthropic", "openai"}
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -145,6 +146,15 @@ async def update_me(
             raise HTTPException(
                 400,
                 f"Invalid tax_treatment '{treat}'. Must be one of: {sorted(VALID_TAX_TREATMENTS)}",
+            )
+
+    # Validate LLM provider
+    if "llm_provider" in updates:
+        prov = updates["llm_provider"]
+        if prov not in VALID_LLM_PROVIDERS:
+            raise HTTPException(
+                400,
+                f"Invalid llm_provider '{prov}'. Must be one of: {sorted(VALID_LLM_PROVIDERS)}",
             )
 
     for field, value in updates.items():

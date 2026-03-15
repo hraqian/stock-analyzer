@@ -49,6 +49,10 @@ class User(Base):
     # Tax treatment: "auto", "capital_gains", "business_income"
     tax_treatment: Mapped[str] = mapped_column(String(20), default="auto")
 
+    # AI / LLM settings
+    # Provider: "anthropic" or "openai" (keys come from env vars)
+    llm_provider: Mapped[str] = mapped_column(String(20), default="anthropic")
+
     # Serialised JSON blobs for complex preferences
     # (custom watchlists, filter defaults, display prefs, etc.)
     preferences_json: Mapped[str | None] = mapped_column(Text, default=None)

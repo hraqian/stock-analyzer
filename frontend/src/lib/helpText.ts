@@ -444,3 +444,13 @@ export const HELP_TOTAL_TAX_PAID =
 
 export const HELP_AFTER_TAX_RETURN =
   "Your total return after deducting Canadian income tax from each profitable trade. This is the 'real' return you would actually keep.";
+
+// ---------------------------------------------------------------------------
+// AI / LLM
+// ---------------------------------------------------------------------------
+
+export const HELP_LLM_PROVIDER =
+  "Which AI model generates the qualitative analysis. Anthropic (Claude) and OpenAI (GPT) are supported. API keys are set as environment variables on the server — you just pick which one to use.";
+
+export const HELP_AI_ANALYSIS =
+  "An AI-generated plain-English summary of all the technical data above. It highlights the key takeaways so you don't have to interpret every indicator yourself. This costs one API call each time you request it.";

@@ -82,6 +82,7 @@ export interface User {
   tax_province: string | null;
   tax_annual_income: number;
   tax_treatment: string;  // "auto" | "capital_gains" | "business_income"
+  llm_provider: string;   // "anthropic" | "openai"
 }
 
 export async function login(
@@ -216,15 +217,19 @@ export interface AnalysisResult {
   composite: CompositeScore;
   pattern_composite: Record<string, unknown>;
   regime: RegimeAssessment | null;
+  ai_analysis: string | null;
 }
 
 export async function analyzeStock(
   ticker: string,
   period: string = "6mo",
-  interval: string = "1d"
+  interval: string = "1d",
+  ai: boolean = false
 ): Promise<AnalysisResult> {
+  const params = new URLSearchParams({ period, interval });
+  if (ai) params.set("ai", "true");
   return apiFetch(
-    `/api/analysis/${encodeURIComponent(ticker)}?period=${period}&interval=${interval}`
+    `/api/analysis/${encodeURIComponent(ticker)}?${params.toString()}`
   );
 }
 
