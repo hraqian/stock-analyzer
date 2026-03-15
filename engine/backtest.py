@@ -107,6 +107,7 @@ class BacktestTrade:
     exit_reason: str = ""  # "signal", "stop_loss", "take_profit"
     entry_reason: str = "" # strategy notes at entry (e.g. "ind=6.80 pat=5.20 eff=6.32")
     bars_held: int = 0     # number of bars position was held
+    tax_amount: float = 0.0  # Canadian tax deducted from this trade's profit
 
 
 @dataclass
@@ -159,6 +160,11 @@ class BacktestResult:
     best_trade_pnl_pct: float = 0.0
     worst_trade_pnl_pct: float = 0.0
     avg_bars_held: float = 0.0
+
+    # After-tax summary (populated when tax calculation is enabled)
+    total_tax_paid: float = 0.0
+    after_tax_return_pct: float = 0.0
+    after_tax_final_equity: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +272,13 @@ class BacktestEngine:
         self._trading_day_minutes: int = int(bt_cfg.get("trading_day_minutes", 390))
         self._default_score: float = float(bt_cfg.get("default_score", 5.0))
         self._close_on_end_of_data: bool = bool(bt_cfg.get("close_on_end_of_data", True))
+
+        # Tax calculation (Canadian)
+        # These are set to 0/None by default — the service wrapper injects
+        # actual values from the user's tax settings.
+        self._tax_marginal_rate: float = float(bt_cfg.get("tax_marginal_rate", 0.0))
+        self._tax_treatment: str = str(bt_cfg.get("tax_treatment", ""))  # "capital_gains" or "business_income" or ""
+        self._tax_enabled: bool = self._tax_marginal_rate > 0 and self._tax_treatment != ""
 
         # Strategy policy toggles (read from strategy section)
         self._allow_immediate_reversal: bool = bool(strat_cfg.get("allow_immediate_reversal", True))
@@ -919,6 +932,15 @@ class BacktestEngine:
         entry_cost = position.entry_price * position.quantity
         pnl_pct = pnl / entry_cost if entry_cost != 0 else 0.0
 
+        # Tax calculation: deduct tax from profitable trades
+        tax_amount = 0.0
+        if self._tax_enabled and pnl > 0:
+            if self._tax_treatment == "capital_gains":
+                inclusion = 0.50
+            else:
+                inclusion = 1.00
+            tax_amount = pnl * inclusion * self._tax_marginal_rate
+
         return BacktestTrade(
             entry_date=position.entry_date,
             exit_date=date,
@@ -931,20 +953,26 @@ class BacktestEngine:
             exit_reason=reason,
             entry_reason=position.entry_reason,
             bars_held=position.bars_held,
+            tax_amount=tax_amount,
         )
 
     def _trade_proceeds(self, trade: BacktestTrade, position: _Position) -> float:
         """Cash returned when closing a position.
 
-        Long close:  quantity * exit_price - exit_commission
-        Short close: -(quantity * exit_price + exit_commission)
+        Long close:  quantity * exit_price - exit_commission - tax
+        Short close: -(quantity * exit_price + exit_commission) - tax
+        Tax is deducted from proceeds so it naturally flows through the
+        equity curve.
         """
         exit_notional = trade.exit_price * trade.quantity
         exit_commission = self._calc_commission(exit_notional)
         if trade.side == "long":
-            return exit_notional - exit_commission
+            proceeds = exit_notional - exit_commission
         else:
-            return -(exit_notional + exit_commission)
+            proceeds = -(exit_notional + exit_commission)
+        # Deduct tax from proceeds (tax is always positive or zero)
+        proceeds -= trade.tax_amount
+        return proceeds
 
     def _apply_slippage(self, price: float, side: str, opening: bool) -> float:
         """Adjust fill price for slippage.
@@ -1350,3 +1378,31 @@ class BacktestEngine:
                 std_r = math.sqrt(var_r)
                 if std_r > 0:
                     result.sharpe_ratio = (mean_r / std_r) * math.sqrt(bars_per_year)
+
+        # After-tax summary fields
+        # Tax is already deducted from equity via _trade_proceeds(), so
+        # final_equity already reflects tax.  We populate the explicit
+        # after-tax fields so the frontend can display them alongside
+        # the pre-tax numbers.
+        if self._tax_enabled and trades:
+            result.total_tax_paid = sum(t.tax_amount for t in trades)
+            result.after_tax_final_equity = result.final_equity
+            if result.initial_cash > 0:
+                result.after_tax_return_pct = (
+                    (result.after_tax_final_equity - result.initial_cash)
+                    / result.initial_cash * 100
+                )
+
+        # After-tax summary fields
+        # Tax is already deducted from equity via _trade_proceeds(), so
+        # final_equity already reflects tax.  We populate the explicit
+        # after-tax fields so the frontend can display them alongside
+        # the pre-tax numbers.
+        if self._tax_enabled and trades:
+            result.total_tax_paid = sum(t.tax_amount for t in trades)
+            result.after_tax_final_equity = result.final_equity
+            if result.initial_cash > 0:
+                result.after_tax_return_pct = (
+                    (result.after_tax_final_equity - result.initial_cash)
+                    / result.initial_cash * 100
+                )

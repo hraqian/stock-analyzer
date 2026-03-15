@@ -20,6 +20,9 @@ from app.models.schemas import (
     VALID_USER_MODES,
     VALID_RISK_TOLERANCES,
 )
+from app.services.tax_calculator import VALID_PROVINCES
+
+VALID_TAX_TREATMENTS = {"auto", "capital_gains", "business_income"}
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -123,6 +126,26 @@ async def update_me(
     if "risk_tolerance" in updates:
         if updates["risk_tolerance"] not in VALID_RISK_TOLERANCES:
             raise HTTPException(400, f"Invalid risk_tolerance. Must be one of {VALID_RISK_TOLERANCES}")
+
+    # Validate tax fields
+    if "tax_province" in updates:
+        prov = updates["tax_province"]
+        if prov is not None and prov not in VALID_PROVINCES:
+            raise HTTPException(
+                400,
+                f"Invalid tax_province '{prov}'. Must be one of: {sorted(VALID_PROVINCES)}",
+            )
+    if "tax_annual_income" in updates:
+        income = updates["tax_annual_income"]
+        if income is not None and income < 0:
+            raise HTTPException(400, "tax_annual_income must be >= 0")
+    if "tax_treatment" in updates:
+        treat = updates["tax_treatment"]
+        if treat not in VALID_TAX_TREATMENTS:
+            raise HTTPException(
+                400,
+                f"Invalid tax_treatment '{treat}'. Must be one of: {sorted(VALID_TAX_TREATMENTS)}",
+            )
 
     for field, value in updates.items():
         setattr(user, field, value)

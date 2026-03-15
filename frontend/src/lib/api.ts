@@ -79,8 +79,9 @@ export interface User {
   commission_per_trade: number;
   spread_pct: number;
   slippage_pct: number;
-  tax_rate_short_term: number;
-  tax_rate_long_term: number;
+  tax_province: string | null;
+  tax_annual_income: number;
+  tax_treatment: string;  // "auto" | "capital_gains" | "business_income"
 }
 
 export async function login(
@@ -401,6 +402,8 @@ export interface BacktestTrade {
   exit_reason: string;
   entry_reason: string;
   bars_held: number;
+  tax_amount: number;
+  pnl_after_tax: number;
 }
 
 export interface EquityPoint {
@@ -436,6 +439,13 @@ export interface BacktestResult {
   equity_curve: EquityPoint[];
   regime: BacktestRegime | null;
   warmup_bars: number;
+  // After-tax fields (present when tax is enabled)
+  tax_enabled: boolean;
+  tax_treatment_used: string | null;
+  tax_marginal_rate: number;
+  total_tax_paid: number;
+  after_tax_return_pct: number;
+  after_tax_final_equity: number;
   // Walk-forward robustness fields
   train_years: number;
   test_years: number;

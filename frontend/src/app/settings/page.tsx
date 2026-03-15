@@ -1,21 +1,95 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import type { User } from "@/lib/api";
+import HelpTip from "@/components/HelpTip";
+import {
+  HELP_TAX_PROVINCE,
+  HELP_TAX_ANNUAL_INCOME,
+  HELP_TAX_TREATMENT,
+  HELP_TAX_MARGINAL_RATE,
+} from "@/lib/helpText";
+
+/** Province options for the dropdown. */
+const PROVINCES: { code: string; name: string }[] = [
+  { code: "AB", name: "Alberta" },
+  { code: "BC", name: "British Columbia" },
+  { code: "MB", name: "Manitoba" },
+  { code: "NB", name: "New Brunswick" },
+  { code: "NL", name: "Newfoundland & Labrador" },
+  { code: "NS", name: "Nova Scotia" },
+  { code: "NT", name: "Northwest Territories" },
+  { code: "NU", name: "Nunavut" },
+  { code: "ON", name: "Ontario" },
+  { code: "PE", name: "Prince Edward Island" },
+  { code: "QC", name: "Quebec" },
+  { code: "SK", name: "Saskatchewan" },
+  { code: "YT", name: "Yukon" },
+];
+
+const TREATMENT_OPTIONS = [
+  { value: "auto", label: "Auto-detect" },
+  { value: "capital_gains", label: "Capital Gains" },
+  { value: "business_income", label: "Business Income" },
+];
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+
+  // Tax form state
+  const [taxProvince, setTaxProvince] = useState<string>("");
+  const [taxIncome, setTaxIncome] = useState<string>("");
+  const [taxTreatment, setTaxTreatment] = useState<string>("auto");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  // Sync form state when user loads
+  useEffect(() => {
+    if (user) {
+      setTaxProvince(user.tax_province ?? "");
+      setTaxIncome(user.tax_annual_income ? String(user.tax_annual_income) : "");
+      setTaxTreatment(user.tax_treatment ?? "auto");
+    }
+  }, [user]);
+
+  async function handleSaveTax() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const incomeNum = taxIncome ? parseFloat(taxIncome) : 0;
+      if (isNaN(incomeNum) || incomeNum < 0) {
+        setSaveMsg("Income must be a positive number.");
+        setSaving(false);
+        return;
+      }
+      await updateUser({
+        tax_province: taxProvince || null,
+        tax_annual_income: incomeNum,
+        tax_treatment: taxTreatment,
+      } as Partial<User>);
+      setSaveMsg("Saved!");
+      setTimeout(() => setSaveMsg(null), 3000);
+    } catch (e: unknown) {
+      setSaveMsg(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const taxEnabled = !!taxProvince && parseFloat(taxIncome || "0") > 0;
 
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-white">Settings</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Account profile, cost model, data sources, and AI configuration.
+          Account profile, cost model, tax settings, and data sources.
         </p>
       </div>
 
-      {/* Profile overview — basic placeholder showing current settings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Account card (read-only) */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-gray-300 mb-3">Account</h3>
           <div className="space-y-2 text-sm">
@@ -34,6 +108,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Cost Model card (read-only) */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-gray-300 mb-3">Cost Model</h3>
           <div className="space-y-2 text-sm">
@@ -64,28 +139,147 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3">Tax Rates</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Short-Term</span>
-              <span className="text-gray-300">
-                {user?.tax_rate_short_term != null
-                  ? `${user.tax_rate_short_term}%`
-                  : "—"}
-              </span>
+        {/* Canadian Tax Settings card (editable) */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:col-span-2">
+          <div className="flex items-center gap-2 mb-4">
+            <h3 className="text-sm font-semibold text-gray-300">
+              Canadian Tax Settings
+            </h3>
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                taxEnabled
+                  ? "bg-green-900/50 text-green-400"
+                  : "bg-gray-800 text-gray-500"
+              }`}
+            >
+              {taxEnabled ? "Enabled" : "Disabled"}
+            </span>
+          </div>
+
+          <p className="text-xs text-gray-500 mb-4">
+            When enabled, backtest results deduct Canadian income tax from each
+            profitable trade. The auto-tuner optimises for after-tax returns.
+            Set your province and income to enable.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Province */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <label
+                  htmlFor="tax-province"
+                  className="text-xs text-gray-400"
+                >
+                  Province / Territory
+                </label>
+                <HelpTip text={HELP_TAX_PROVINCE} size={12} />
+              </div>
+              <select
+                id="tax-province"
+                value={taxProvince}
+                onChange={(e) => setTaxProvince(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">— Not set —</option>
+                {PROVINCES.map((p) => (
+                  <option key={p.code} value={p.code}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Long-Term</span>
-              <span className="text-gray-300">
-                {user?.tax_rate_long_term != null
-                  ? `${user.tax_rate_long_term}%`
-                  : "—"}
-              </span>
+
+            {/* Annual Income */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <label
+                  htmlFor="tax-income"
+                  className="text-xs text-gray-400"
+                >
+                  Annual Income (CAD)
+                </label>
+                <HelpTip text={HELP_TAX_ANNUAL_INCOME} size={12} />
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">
+                  $
+                </span>
+                <input
+                  id="tax-income"
+                  type="text"
+                  inputMode="numeric"
+                  value={taxIncome}
+                  onChange={(e) => {
+                    // Allow only digits and one decimal point
+                    const v = e.target.value.replace(/[^0-9.]/g, "");
+                    setTaxIncome(v);
+                  }}
+                  placeholder="85000"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-7 pr-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
             </div>
+
+            {/* Tax Treatment */}
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <label
+                  htmlFor="tax-treatment"
+                  className="text-xs text-gray-400"
+                >
+                  Tax Treatment
+                </label>
+                <HelpTip text={HELP_TAX_TREATMENT} size={12} />
+              </div>
+              <select
+                id="tax-treatment"
+                value={taxTreatment}
+                onChange={(e) => setTaxTreatment(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {TREATMENT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Marginal rate display */}
+          {taxEnabled && (
+            <div className="mt-3 flex items-center gap-1 text-xs text-gray-400">
+              <span>
+                Your marginal tax rate will be calculated from {" "}
+                {PROVINCES.find((p) => p.code === taxProvince)?.name ?? taxProvince}
+                {" "} federal + provincial brackets at ${parseFloat(taxIncome || "0").toLocaleString()} income.
+              </span>
+              <HelpTip text={HELP_TAX_MARGINAL_RATE} size={12} />
+            </div>
+          )}
+
+          {/* Save button + message */}
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={handleSaveTax}
+              disabled={saving}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {saving ? "Saving..." : "Save Tax Settings"}
+            </button>
+            {saveMsg && (
+              <span
+                className={`text-sm ${
+                  saveMsg === "Saved!" ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {saveMsg}
+              </span>
+            )}
           </div>
         </div>
 
+        {/* Data & AI card */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-gray-300 mb-3">
             Data &amp; AI

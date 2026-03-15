@@ -422,3 +422,25 @@ export const HELP_STRATEGY_EXPORT =
 
 export const HELP_STRATEGY_IMPORT =
   "Load a strategy from a JSON file. This is useful for importing strategies shared by others or restoring from a backup.";
+
+// ---------------------------------------------------------------------------
+// Settings — Canadian Tax
+// ---------------------------------------------------------------------------
+
+export const HELP_TAX_PROVINCE =
+  "Your province or territory of residence. Tax rates vary significantly between provinces — for example, Alberta has the lowest provincial rates, while Nova Scotia has some of the highest.";
+
+export const HELP_TAX_ANNUAL_INCOME =
+  "Your annual employment income before trading profits. This determines your marginal tax bracket — the rate applied to the next dollar you earn. Trading profits are taxed at this marginal rate.";
+
+export const HELP_TAX_TREATMENT =
+  "How the CRA classifies your trading profits. Capital Gains: only 50% of profit is taxable (most investors). Business Income: 100% is taxable (frequent traders). Auto-detect guesses based on your trade mode.";
+
+export const HELP_TAX_MARGINAL_RATE =
+  "Your combined federal + provincial marginal tax rate. This is the rate applied to each additional dollar of income. It's NOT your average tax rate — it's the rate on your trading profits specifically.";
+
+export const HELP_TOTAL_TAX_PAID =
+  "The total tax deducted from profitable trades during the backtest. Tax is only applied to winning trades — losing trades are not taxed (though capital losses can offset future gains in real life).";
+
+export const HELP_AFTER_TAX_RETURN =
+  "Your total return after deducting Canadian income tax from each profitable trade. This is the 'real' return you would actually keep.";

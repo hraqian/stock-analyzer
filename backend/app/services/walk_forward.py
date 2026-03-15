@@ -21,6 +21,8 @@ def run_walk_forward(
     train_years: int = 5,
     test_years: int = 1,
     max_windows: int = 10,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run walk-forward testing and return JSON-safe results."""
     from config import Config                            # type: ignore[import-untyped]
@@ -33,6 +35,11 @@ def run_walk_forward(
     objective = TRADE_MODE_OBJECTIVES.get(trade_mode)
     if objective and objective in cfg.available_objectives():
         cfg.apply_objective(objective)
+
+    # Inject tax params into backtest config
+    bt_section = cfg.section("backtest")
+    bt_section["tax_marginal_rate"] = tax_marginal_rate
+    bt_section["tax_treatment"] = tax_treatment
 
     provider = YahooFinanceProvider()
     strat_section = cfg.section("strategy")

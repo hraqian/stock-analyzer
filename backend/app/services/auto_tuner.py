@@ -43,6 +43,8 @@ def run_auto_tune(
     train_years: int = 3,
     test_years: int = 1,
     max_windows: int = 3,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run the auto-tuner and return JSON-safe results.
 
@@ -76,6 +78,11 @@ def run_auto_tune(
     obj_key = TRADE_MODE_OBJECTIVES.get(trade_mode)
     if obj_key and obj_key in cfg.available_objectives():
         cfg.apply_objective(obj_key)
+
+    # 1b. Inject tax params into backtest config
+    bt_section = cfg.section("backtest")
+    bt_section["tax_marginal_rate"] = tax_marginal_rate
+    bt_section["tax_treatment"] = tax_treatment
 
     # 2. Build components
     provider = YahooFinanceProvider()

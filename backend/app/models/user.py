@@ -40,8 +40,14 @@ class User(Base):
     commission_per_trade: Mapped[float] = mapped_column(Float, default=0.0)
     spread_pct: Mapped[float] = mapped_column(Float, default=0.02)
     slippage_pct: Mapped[float] = mapped_column(Float, default=0.01)
-    tax_rate_short_term: Mapped[float] = mapped_column(Float, default=0.37)
-    tax_rate_long_term: Mapped[float] = mapped_column(Float, default=0.20)
+
+    # Canadian tax settings
+    # Province code: "ON", "BC", "AB", etc.  None = tax disabled.
+    tax_province: Mapped[str | None] = mapped_column(String(5), default=None)
+    # Annual employment income (used to look up marginal bracket)
+    tax_annual_income: Mapped[float] = mapped_column(Float, default=0.0)
+    # Tax treatment: "auto", "capital_gains", "business_income"
+    tax_treatment: Mapped[str] = mapped_column(String(20), default="auto")
 
     # Serialised JSON blobs for complex preferences
     # (custom watchlists, filter defaults, display prefs, etc.)

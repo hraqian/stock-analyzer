@@ -29,8 +29,10 @@ class UserResponse(BaseModel):
     commission_per_trade: float
     spread_pct: float
     slippage_pct: float
-    tax_rate_short_term: float
-    tax_rate_long_term: float
+    # Canadian tax settings
+    tax_province: str | None = None
+    tax_annual_income: float = 0.0
+    tax_treatment: str = "auto"
 
     model_config = {"from_attributes": True}
 
@@ -43,8 +45,10 @@ class UserUpdate(BaseModel):
     commission_per_trade: float | None = None
     spread_pct: float | None = None
     slippage_pct: float | None = None
-    tax_rate_short_term: float | None = None
-    tax_rate_long_term: float | None = None
+    # Canadian tax settings
+    tax_province: str | None = None
+    tax_annual_income: float | None = None
+    tax_treatment: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -354,6 +358,9 @@ class BacktestTradeSchema(BaseModel):
     exit_reason: str = ""
     entry_reason: str = ""
     bars_held: int = 0
+    # Tax fields (populated when tax calculation is enabled)
+    tax_amount: float = 0.0                 # tax deducted from this trade
+    pnl_after_tax: float = 0.0             # pnl minus tax
 
 
 class EquityPointSchema(BaseModel):
@@ -414,6 +421,14 @@ class BacktestResponse(BaseModel):
     wf_return_std_dev: float = 0.0
     stability_score: float = 0.0
     verdict: str = ""
+    # Tax-aware fields (populated when user has tax settings configured)
+    tax_enabled: bool = False
+    tax_treatment_used: str = ""            # "capital_gains" or "business_income"
+    tax_province: str = ""
+    tax_marginal_rate: float = 0.0          # combined federal + provincial
+    total_tax_paid: float = 0.0
+    after_tax_return_pct: float = 0.0
+    after_tax_final_equity: float = 0.0
 
 
 # ---------------------------------------------------------------------------

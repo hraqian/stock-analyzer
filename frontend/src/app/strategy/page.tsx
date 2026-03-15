@@ -78,6 +78,9 @@ import {
   HELP_STRATEGY_COMPARE,
   HELP_STRATEGY_EXPORT,
   HELP_STRATEGY_IMPORT,
+  HELP_TOTAL_TAX_PAID,
+  HELP_AFTER_TAX_RETURN,
+  HELP_TAX_TREATMENT,
 } from "@/lib/helpText";
 
 // ---------------------------------------------------------------------------
@@ -810,6 +813,41 @@ function StrategyPageContent() {
                     value={fmtNum(result.avg_bars_held, 1)}
                     helpText={HELP_AVG_BARS_HELD}
                   />
+                  {/* After-tax metrics (shown when tax is enabled) */}
+                  {result.tax_enabled && (
+                    <>
+                      <div className="col-span-full mt-2 mb-1">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2 py-0.5 bg-amber-900/40 text-amber-400 rounded-full">
+                            Tax Applied
+                          </span>
+                          <span className="text-gray-500">
+                            Treatment: {result.tax_treatment_used === "capital_gains" ? "Capital Gains (50% inclusion)" : "Business Income (100%)"} ·{" "}
+                            Marginal rate: {(result.tax_marginal_rate * 100).toFixed(1)}%
+                          </span>
+                          <HelpTip text={HELP_TAX_TREATMENT} size={12} />
+                        </div>
+                      </div>
+                      <MetricCard
+                        label="Total Tax Paid"
+                        value={fmtMoney(result.total_tax_paid)}
+                        helpText={HELP_TOTAL_TAX_PAID}
+                        color="red"
+                      />
+                      <MetricCard
+                        label="After-Tax Return"
+                        value={fmtPct(result.after_tax_return_pct)}
+                        helpText={HELP_AFTER_TAX_RETURN}
+                        color={metricColor(result.after_tax_return_pct)}
+                      />
+                      <MetricCard
+                        label="After-Tax Equity"
+                        value={fmtMoney(result.after_tax_final_equity)}
+                        helpText={HELP_AFTER_TAX_RETURN}
+                        color={result.after_tax_final_equity >= result.initial_cash ? "green" : "red"}
+                      />
+                    </>
+                  )}
                 </div>
               )}
 

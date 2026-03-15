@@ -34,6 +34,8 @@ def _backtest_result_to_dict(result: Any) -> dict:
             "exit_reason": t.exit_reason,
             "entry_reason": t.entry_reason,
             "bars_held": t.bars_held,
+            "tax_amount": safe(t.tax_amount),
+            "pnl_after_tax": safe(t.pnl - t.tax_amount),
         }
         for t in result.trades
     ]
@@ -74,6 +76,10 @@ def _backtest_result_to_dict(result: Any) -> dict:
         "equity_curve": equity_curve,
         "regime": regime,
         "warmup_bars": result.warmup_bars,
+        # After-tax fields (populated when tax is enabled)
+        "total_tax_paid": safe(result.total_tax_paid),
+        "after_tax_return_pct": safe(result.after_tax_return_pct),
+        "after_tax_final_equity": safe(result.after_tax_final_equity),
     }
 
 
@@ -128,6 +134,8 @@ def run_backtest(
     train_years: int = 3,
     test_years: int = 1,
     max_windows: int = 5,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run a unified backtest with walk-forward robustness analysis.
 
@@ -156,6 +164,8 @@ def run_backtest(
     bt_section["initial_cash"] = initial_cash
     bt_section["commission_pct"] = commission_pct
     bt_section["slippage_pct"] = slippage_pct
+    bt_section["tax_marginal_rate"] = tax_marginal_rate
+    bt_section["tax_treatment"] = tax_treatment
 
     strat_section = cfg.section("strategy")
     if stop_loss_pct is not None:
@@ -340,6 +350,11 @@ def run_backtest(
             )
     else:
         verdict = "All walk-forward windows failed. Check data availability."
+
+    # Add tax metadata to result
+    result_dict["tax_enabled"] = tax_marginal_rate > 0 and tax_treatment != ""
+    result_dict["tax_treatment_used"] = tax_treatment if tax_treatment else None
+    result_dict["tax_marginal_rate"] = safe(tax_marginal_rate)
 
     result_dict.update({
         "train_years": train_years,

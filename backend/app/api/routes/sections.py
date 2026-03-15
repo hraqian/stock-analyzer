@@ -685,6 +685,47 @@ strategy_router = APIRouter(prefix="/strategy", tags=["strategy"])
 _backtest_pool = ThreadPoolExecutor(max_workers=1)
 
 
+def _resolve_tax_params(user: "User", trade_mode: str) -> tuple[float, str]:
+    """Compute marginal rate and resolve tax treatment from user settings.
+
+    Returns (tax_marginal_rate, tax_treatment).  If the user hasn't
+    configured tax (no province or zero income), returns (0.0, "")
+    which disables tax in the engine.
+
+    For ``tax_treatment == "auto"``, we resolve to a concrete treatment
+    using a trade-mode heuristic (since we don't have backtest stats yet):
+      - day_trade  → business_income
+      - swing      → capital_gains
+      - position   → capital_gains
+    """
+    province = getattr(user, "tax_province", None)
+    income = getattr(user, "tax_annual_income", 0.0)
+    treatment = getattr(user, "tax_treatment", "auto")
+
+    if not province or income <= 0:
+        return 0.0, ""
+
+    from app.services.tax_calculator import get_combined_marginal_rate, VALID_PROVINCES
+
+    if province not in VALID_PROVINCES:
+        return 0.0, ""
+
+    marginal_rate = get_combined_marginal_rate(income, province)
+
+    # Resolve "auto" using trade-mode heuristic
+    if treatment == "auto":
+        if trade_mode == "day_trade":
+            resolved = "business_income"
+        else:
+            resolved = "capital_gains"
+    elif treatment in ("capital_gains", "business_income"):
+        resolved = treatment
+    else:
+        resolved = "capital_gains"
+
+    return marginal_rate, resolved
+
+
 def _run_backtest(
     ticker: str,
     trade_mode: str,
@@ -700,6 +741,8 @@ def _run_backtest(
     train_years: int,
     test_years: int,
     max_windows: int,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run unified backtest with walk-forward (called from thread pool)."""
     from app.services.backtest import run_backtest  # late import
@@ -719,6 +762,8 @@ def _run_backtest(
         train_years=train_years,
         test_years=test_years,
         max_windows=max_windows,
+        tax_marginal_rate=tax_marginal_rate,
+        tax_treatment=tax_treatment,
     )
 
 
@@ -748,6 +793,8 @@ async def run_strategy_backtest(
             f"Invalid interval '{req.interval}'. Must be one of: {sorted(valid_intervals)}",
         )
 
+    tax_marginal_rate, tax_treatment = _resolve_tax_params(user, user.trade_mode)
+
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -767,6 +814,8 @@ async def run_strategy_backtest(
             req.train_years,
             req.test_years,
             req.max_windows,
+            tax_marginal_rate,
+            tax_treatment,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -900,6 +949,8 @@ def _run_walk_forward(
     train_years: int,
     test_years: int,
     max_windows: int,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run walk-forward testing synchronously (called from thread pool)."""
     from app.services.walk_forward import run_walk_forward  # late import
@@ -910,6 +961,8 @@ def _run_walk_forward(
         train_years=train_years,
         test_years=test_years,
         max_windows=max_windows,
+        tax_marginal_rate=tax_marginal_rate,
+        tax_treatment=tax_treatment,
     )
 
 
@@ -931,6 +984,8 @@ async def run_walk_forward_test(
     if req.max_windows < 1 or req.max_windows > 20:
         raise HTTPException(400, "max_windows must be between 1 and 20")
 
+    tax_marginal_rate, tax_treatment = _resolve_tax_params(user, user.trade_mode)
+
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -941,6 +996,8 @@ async def run_walk_forward_test(
             req.train_years,
             req.test_years,
             req.max_windows,
+            tax_marginal_rate,
+            tax_treatment,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -965,6 +1022,8 @@ def _run_auto_tune(
     train_years: int,
     test_years: int,
     max_windows: int,
+    tax_marginal_rate: float = 0.0,
+    tax_treatment: str = "",
 ) -> dict:
     """Run auto-tuner synchronously (called from thread pool)."""
     from app.services.auto_tuner import run_auto_tune  # late import
@@ -979,6 +1038,8 @@ def _run_auto_tune(
         train_years=train_years,
         test_years=test_years,
         max_windows=max_windows,
+        tax_marginal_rate=tax_marginal_rate,
+        tax_treatment=tax_treatment,
     )
 
 
@@ -1034,6 +1095,8 @@ async def run_auto_tuner(
     sector_val = req.sector if req.sector else None
     label = sector_val or (", ".join(tickers_val[:3]) if tickers_val else ticker_val)
 
+    tax_marginal_rate, tax_treatment = _resolve_tax_params(user, user.trade_mode)
+
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -1048,6 +1111,8 @@ async def run_auto_tuner(
             req.train_years,
             req.test_years,
             req.max_windows,
+            tax_marginal_rate,
+            tax_treatment,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1105,8 +1170,11 @@ async def get_settings(user: User = Depends(get_current_user)):
             "commission_per_trade": user.commission_per_trade,
             "spread_pct": user.spread_pct,
             "slippage_pct": user.slippage_pct,
-            "tax_rate_short_term": user.tax_rate_short_term,
-            "tax_rate_long_term": user.tax_rate_long_term,
+        },
+        "tax_settings": {
+            "tax_province": user.tax_province,
+            "tax_annual_income": user.tax_annual_income,
+            "tax_treatment": user.tax_treatment,
         },
         "data_providers": {
             "yahoo_finance": {"enabled": True, "status": "active"},
