@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _HOLDINGS_FILE = _DATA_DIR / "sector_holdings.json"
 
-# Thread lock for safe concurrent writes
+# Thread lock for safe concurrent read-modify-write operations
 _lock = threading.Lock()
 
 
@@ -35,13 +35,8 @@ def _ensure_data_dir() -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_holdings() -> dict[str, list[list[str]]]:
-    """Load sector holdings overrides from the JSON config file.
-
-    Returns:
-        Dict mapping sector name -> list of [ticker, company_name] pairs.
-        Returns empty dict if the file doesn't exist yet.
-    """
+def _load_unlocked() -> dict[str, list[list[str]]]:
+    """Load holdings from disk (caller must hold _lock)."""
     if not _HOLDINGS_FILE.exists():
         return {}
     try:
@@ -56,21 +51,37 @@ def load_holdings() -> dict[str, list[list[str]]]:
         return {}
 
 
+def _save_unlocked(holdings: dict[str, list[list[str]]]) -> None:
+    """Save holdings to disk (caller must hold _lock)."""
+    _ensure_data_dir()
+    try:
+        with open(_HOLDINGS_FILE, "w") as f:
+            json.dump(holdings, f, indent=2)
+        logger.info("Saved holdings config for %d sectors", len(holdings))
+    except OSError as exc:
+        logger.error("Failed to write holdings config: %s", exc)
+        raise
+
+
+def load_holdings() -> dict[str, list[list[str]]]:
+    """Load sector holdings overrides from the JSON config file.
+
+    Returns:
+        Dict mapping sector name -> list of [ticker, company_name] pairs.
+        Returns empty dict if the file doesn't exist yet.
+    """
+    with _lock:
+        return _load_unlocked()
+
+
 def save_holdings(holdings: dict[str, list[list[str]]]) -> None:
     """Save sector holdings overrides to the JSON config file.
 
     Args:
         holdings: Dict mapping sector name -> list of [ticker, company_name].
     """
-    _ensure_data_dir()
     with _lock:
-        try:
-            with open(_HOLDINGS_FILE, "w") as f:
-                json.dump(holdings, f, indent=2)
-            logger.info("Saved holdings config for %d sectors", len(holdings))
-        except OSError as exc:
-            logger.error("Failed to write holdings config: %s", exc)
-            raise
+        _save_unlocked(holdings)
 
 
 def get_sector_holdings(sector_name: str) -> list[list[str]] | None:
@@ -79,29 +90,36 @@ def get_sector_holdings(sector_name: str) -> list[list[str]] | None:
     Returns:
         List of [ticker, name] pairs, or None if no override exists.
     """
-    data = load_holdings()
+    with _lock:
+        data = _load_unlocked()
     return data.get(sector_name)
 
 
 def set_sector_holdings(sector_name: str, holdings: list[list[str]]) -> None:
     """Set holdings for a single sector (merges with existing config).
 
+    Uses a single lock to ensure atomic read-modify-write.
+
     Args:
         sector_name: GICS sector name.
         holdings: List of [ticker, company_name] pairs.
     """
-    data = load_holdings()
-    data[sector_name] = holdings
-    save_holdings(data)
+    with _lock:
+        data = _load_unlocked()
+        data[sector_name] = holdings
+        _save_unlocked(data)
 
 
 def reset_sector_holdings(sector_name: str) -> None:
     """Remove the override for a sector (reverts to built-in defaults).
 
+    Uses a single lock to ensure atomic read-modify-write.
+
     Args:
         sector_name: GICS sector name.
     """
-    data = load_holdings()
-    if sector_name in data:
-        del data[sector_name]
-        save_holdings(data)
+    with _lock:
+        data = _load_unlocked()
+        if sector_name in data:
+            del data[sector_name]
+            _save_unlocked(data)

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCallback } from "react";
 import SingleStockTab from "./SingleStockTab";
@@ -7,7 +8,7 @@ import SectorsTab from "./SectorsTab";
 
 type AnalysisTab = "stock" | "sectors";
 
-export default function AnalysisPage() {
+function AnalysisContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -28,7 +29,7 @@ export default function AnalysisPage() {
       } else {
         params.set("tab", tab);
       }
-      // Clear ticker when switching to sectors (it\'s not relevant there)
+      // Clear ticker when switching to sectors (it's not relevant there)
       if (tab === "sectors") {
         params.delete("ticker");
       }
@@ -91,5 +92,13 @@ export default function AnalysisPage() {
         <SectorsTab onAnalyzeTicker={handleAnalyzeTicker} />
       )}
     </div>
+  );
+}
+
+export default function AnalysisPage() {
+  return (
+    <Suspense fallback={<div className="text-gray-500 text-sm p-4">Loading...</div>}>
+      <AnalysisContent />
+    </Suspense>
   );
 }

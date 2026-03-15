@@ -108,18 +108,22 @@ export default function SingleStockTab({ initialTicker }: SingleStockTabProps) {
     if (autoRanRef.current) return;
     if (initialTicker && initialTicker.trim()) {
       autoRanRef.current = true;
+      let cancelled = false;
       const t = initialTicker.trim().toUpperCase();
       setTicker(t);
       // Run analysis directly (can't rely on state update + runAnalysis dep)
       setLoading(true);
       setError(null);
       analyzeStock(t, period, interval)
-        .then((data) => setResult(data))
+        .then((data) => { if (!cancelled) setResult(data); })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Analysis failed");
-          setResult(null);
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Analysis failed");
+            setResult(null);
+          }
         })
-        .finally(() => setLoading(false));
+        .finally(() => { if (!cancelled) setLoading(false); });
+      return () => { cancelled = true; };
     }
   }, [initialTicker, period, interval]);
 

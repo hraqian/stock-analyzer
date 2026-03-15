@@ -65,8 +65,8 @@ export default function HelpTip({ text, size = 14 }: HelpTipProps) {
       // Vertical: prefer above, flip below if not enough room
       const flipped = btn.top < tipH + 12;
       const top = flipped
-        ? btn.bottom + 8 + window.scrollY
-        : btn.top - tipH - 8 + window.scrollY;
+        ? btn.bottom + 8
+        : btn.top - tipH - 8;
 
       // Horizontal: center on button, clamp to viewport
       const btnCenter = btn.left + btn.width / 2;
@@ -119,7 +119,7 @@ export default function HelpTip({ text, size = 14 }: HelpTipProps) {
               const actualH = el.getBoundingClientRect().height;
               const btn = btnRef.current.getBoundingClientRect();
               if (!pos.flipped) {
-                el.style.top = `${btn.top - actualH - 8 + window.scrollY}px`;
+                el.style.top = `${btn.top - actualH - 8}px`;
               }
             }}
           >

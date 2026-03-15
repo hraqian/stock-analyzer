@@ -22,11 +22,19 @@ export function Header() {
 
   const handleTradeMode = async (mode: string) => {
     if (mode === "day_trade") return;
-    await updateUser({ trade_mode: mode });
+    try {
+      await updateUser({ trade_mode: mode });
+    } catch (err) {
+      console.error("Failed to update trade mode:", err);
+    }
   };
 
   const handleUserMode = async (mode: string) => {
-    await updateUser({ user_mode: mode });
+    try {
+      await updateUser({ user_mode: mode });
+    } catch (err) {
+      console.error("Failed to update user mode:", err);
+    }
   };
 
   return (

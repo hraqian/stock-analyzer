@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createChart, ColorType, LineData, Time } from "lightweight-charts";
 import HelpTip from "@/components/HelpTip";
@@ -338,7 +338,15 @@ function TradeLogTable({ trades }: { trades: BacktestTrade[] }) {
 // Main page component
 // ---------------------------------------------------------------------------
 
-export default function StrategyPage() {
+export default function StrategyPageWrapper() {
+  return (
+    <Suspense fallback={<div className="text-gray-500 text-sm p-4">Loading...</div>}>
+      <StrategyPageContent />
+    </Suspense>
+  );
+}
+
+function StrategyPageContent() {
   const searchParams = useSearchParams();
 
   // Read URL params for cross-section navigation
@@ -350,7 +358,7 @@ export default function StrategyPage() {
   const backtestRef = useRef<HTMLDivElement>(null);
   const autoTunerRef = useRef<HTMLDivElement>(null);
   const libraryRef = useRef<HTMLDivElement>(null);
-  const autoRanRef = useRef(false);
+  const autoRanRef = useRef<string | null>(null);
 
   // Library refresh trigger (incremented to force re-fetch)
   const [libraryRefreshTrigger, setLibraryRefreshTrigger] = useState(0);
@@ -425,20 +433,22 @@ export default function StrategyPage() {
 
   // Auto-navigate to auto-tuner if URL has ?tab=autotune
   useEffect(() => {
-    if (autoRanRef.current) return;
+    // Build a key from URL params to detect new navigations
+    const navKey = `${urlTab}|${urlTicker || ""}|${urlSector || ""}`;
+    if (autoRanRef.current === navKey) return;
     if (urlTab === "autotune" && autoTunerRef.current) {
-      autoRanRef.current = true;
+      autoRanRef.current = navKey;
       setTimeout(() => {
         autoTunerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 300);
     } else if (urlTab === "backtest" && urlTicker) {
-      autoRanRef.current = true;
+      autoRanRef.current = navKey;
       setTicker(urlTicker.trim().toUpperCase());
       setTimeout(() => {
         backtestRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 300);
     }
-  }, [urlTab, urlTicker]);
+  }, [urlTab, urlTicker, urlSector]);
 
   // Determine metric colors
   const metricColor = (val: number | null | undefined): "green" | "red" | "default" =>
@@ -1631,7 +1641,7 @@ function AutoTunerSection({
                 Parameter Sensitivity <HelpTip text={HELP_SENSITIVITY} />
               </h4>
               <div className="space-y-2">
-                {result.sensitivity
+                {[...result.sensitivity]
                   .sort((a, b) => b.importance - a.importance)
                   .map((s) => (
                     <div key={s.param_name} className="flex items-center gap-3">
@@ -1676,7 +1686,7 @@ function AutoTunerSection({
                     </tr>
                   </thead>
                   <tbody>
-                    {result.trials
+                    {[...result.trials]
                       .sort((a, b) => b.objective_value - a.objective_value)
                       .slice(0, 10)
                       .map((t, i) => (

@@ -45,6 +45,14 @@ async function apiFetch<T>(
   });
 
   if (!res.ok) {
+    // Handle expired/invalid JWT — redirect to login
+    if (res.status === 401) {
+      setToken(null);
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      throw new Error("Session expired. Please log in again.");
+    }
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `API error: ${res.status}`);
   }
