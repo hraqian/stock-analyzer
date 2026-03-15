@@ -310,7 +310,11 @@ class UniverseListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class BacktestRequest(BaseModel):
-    """POST body for /api/strategy/backtest."""
+    """POST body for /api/strategy/backtest.
+
+    Walk-forward validation is always performed: the backtest runs across
+    multiple rolling train/test windows for robustness analysis.
+    """
     ticker: str
     period: str = "2y"                      # e.g. "1y", "2y", "5y"
     interval: str = "1d"                    # "1d" only for now
@@ -321,6 +325,10 @@ class BacktestRequest(BaseModel):
     slippage_pct: float = 0.001
     stop_loss_pct: float | None = None      # None → use config default
     take_profit_pct: float | None = None    # None → use config default
+    # Walk-forward parameters (always run)
+    train_years: int = 3
+    test_years: int = 1
+    max_windows: int = 5
 
 
 class BacktestTradeSchema(BaseModel):
@@ -353,7 +361,12 @@ class BacktestRegimeSchema(BaseModel):
 
 
 class BacktestResponse(BaseModel):
-    """Full backtest result returned by POST /api/strategy/backtest."""
+    """Full backtest result returned by POST /api/strategy/backtest.
+
+    Includes detailed results from the most recent walk-forward window
+    (equity curve, trades, regime) plus aggregated robustness metrics
+    from all walk-forward windows.
+    """
     ticker: str
     period: str
     strategy_name: str
@@ -374,6 +387,23 @@ class BacktestResponse(BaseModel):
     equity_curve: list[EquityPointSchema]
     regime: BacktestRegimeSchema | None = None
     warmup_bars: int = 0
+    # Walk-forward robustness fields
+    train_years: int = 3
+    test_years: int = 1
+    total_windows: int = 0
+    windows: list[WalkForwardWindowSchema] = []
+    wf_avg_return_pct: float = 0.0
+    wf_avg_annualized_return_pct: float = 0.0
+    wf_avg_max_drawdown_pct: float = 0.0
+    wf_avg_sharpe_ratio: float = 0.0
+    wf_avg_win_rate_pct: float = 0.0
+    wf_avg_profit_factor: float = 0.0
+    wf_worst_return_pct: float = 0.0
+    wf_worst_drawdown_pct: float = 0.0
+    wf_worst_window_index: int = 0
+    wf_return_std_dev: float = 0.0
+    stability_score: float = 0.0
+    verdict: str = ""
 
 
 class StrategyMeta(BaseModel):

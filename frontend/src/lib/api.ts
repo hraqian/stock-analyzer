@@ -418,6 +418,23 @@ export interface BacktestResult {
   equity_curve: EquityPoint[];
   regime: BacktestRegime | null;
   warmup_bars: number;
+  // Walk-forward robustness fields
+  train_years: number;
+  test_years: number;
+  total_windows: number;
+  windows: WalkForwardWindow[];
+  wf_avg_return_pct: number;
+  wf_avg_annualized_return_pct: number;
+  wf_avg_max_drawdown_pct: number;
+  wf_avg_sharpe_ratio: number;
+  wf_avg_win_rate_pct: number;
+  wf_avg_profit_factor: number;
+  wf_worst_return_pct: number;
+  wf_worst_drawdown_pct: number;
+  wf_worst_window_index: number;
+  wf_return_std_dev: number;
+  stability_score: number;
+  verdict: string;
 }
 
 export interface BacktestRequest {
@@ -431,6 +448,10 @@ export interface BacktestRequest {
   slippage_pct?: number;
   stop_loss_pct?: number | null;
   take_profit_pct?: number | null;
+  // Walk-forward parameters
+  train_years?: number;
+  test_years?: number;
+  max_windows?: number;
 }
 
 export async function runBacktest(req: BacktestRequest): Promise<BacktestResult> {

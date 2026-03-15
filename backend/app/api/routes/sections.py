@@ -540,8 +540,11 @@ def _run_backtest(
     slippage_pct: float,
     stop_loss_pct: float | None,
     take_profit_pct: float | None,
+    train_years: int,
+    test_years: int,
+    max_windows: int,
 ) -> dict:
-    """Run backtest synchronously (called from thread pool)."""
+    """Run unified backtest with walk-forward (called from thread pool)."""
     from app.services.backtest import run_backtest  # late import
 
     return run_backtest(
@@ -556,6 +559,9 @@ def _run_backtest(
         slippage_pct=slippage_pct,
         stop_loss_pct=stop_loss_pct,
         take_profit_pct=take_profit_pct,
+        train_years=train_years,
+        test_years=test_years,
+        max_windows=max_windows,
     )
 
 
@@ -601,6 +607,9 @@ async def run_strategy_backtest(
             req.slippage_pct,
             req.stop_loss_pct,
             req.take_profit_pct,
+            req.train_years,
+            req.test_years,
+            req.max_windows,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
