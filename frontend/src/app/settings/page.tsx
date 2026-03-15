@@ -307,6 +307,7 @@ export default function SettingsPage() {
               onChange={(e) => setLlmProvider(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
+              <option value="gemini">Google Gemini (Free tier)</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
             </select>

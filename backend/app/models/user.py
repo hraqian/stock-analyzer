@@ -50,8 +50,8 @@ class User(Base):
     tax_treatment: Mapped[str] = mapped_column(String(20), default="auto")
 
     # AI / LLM settings
-    # Provider: "anthropic" or "openai" (keys come from env vars)
-    llm_provider: Mapped[str] = mapped_column(String(20), default="anthropic")
+    # Provider: "anthropic", "openai", or "gemini" (keys come from env vars)
+    llm_provider: Mapped[str] = mapped_column(String(20), default="gemini")
 
     # Serialised JSON blobs for complex preferences
     # (custom watchlists, filter defaults, display prefs, etc.)

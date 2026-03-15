@@ -23,6 +23,7 @@ dependencies = [
     "optuna>=3.6",
     "anthropic>=0.39",
     "openai>=1.50",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]

@@ -23,7 +23,7 @@ from app.models.schemas import (
 from app.services.tax_calculator import VALID_PROVINCES
 
 VALID_TAX_TREATMENTS = {"auto", "capital_gains", "business_income"}
-VALID_LLM_PROVIDERS = {"anthropic", "openai"}
+VALID_LLM_PROVIDERS = {"anthropic", "openai", "gemini"}
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])

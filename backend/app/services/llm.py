@@ -81,6 +81,33 @@ class OpenAIProvider(LLMProvider):
 
 
 # ---------------------------------------------------------------------------
+# Google Gemini
+# ---------------------------------------------------------------------------
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini provider (free tier: 15 req/min)."""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+        if not api_key:
+            raise ValueError("Google Gemini API key is required")
+        self._api_key = api_key
+        self._model = model
+
+    async def generate(self, prompt: str, max_tokens: int = 1024) -> str:
+        from google import genai
+
+        client = genai.Client(api_key=self._api_key)
+        response = await client.aio.models.generate_content(
+            model=self._model,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+            ),
+        )
+        return response.text or ""
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -114,9 +141,17 @@ def get_llm_provider(provider_name: str) -> LLMProvider:
             )
         return OpenAIProvider(api_key=settings.openai_api_key)
 
+    if provider_name == "gemini":
+        if not settings.gemini_api_key:
+            raise ValueError(
+                "Google Gemini API key not configured. "
+                "Set the GEMINI_API_KEY environment variable."
+            )
+        return GeminiProvider(api_key=settings.gemini_api_key)
+
     raise ValueError(
         f"Unknown LLM provider '{provider_name}'. "
-        f"Supported: 'anthropic', 'openai'"
+        f"Supported: 'anthropic', 'openai', 'gemini'"
     )
 
 
