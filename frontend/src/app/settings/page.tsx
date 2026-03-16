@@ -129,7 +129,10 @@ export default function SettingsPage() {
       setMlMsg(
         `Trained! ${result.total_samples.toLocaleString()} samples, ` +
         `${result.walk_forward_results.length} windows. ` +
-        `Accuracy: ${((result.final_metrics.accuracy ?? 0) * 100).toFixed(1)}%`
+        `Accuracy: ${((result.final_metrics.accuracy ?? 0) * 100).toFixed(1)}% · ` +
+        `${result.elapsed_seconds < 120
+          ? `${result.elapsed_seconds.toFixed(0)}s`
+          : `${(result.elapsed_seconds / 60).toFixed(1)} min`}`
       );
       // Refresh status
       await fetchMlStatus();
