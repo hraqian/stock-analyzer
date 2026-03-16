@@ -456,7 +456,10 @@ export const HELP_AI_ANALYSIS =
   "An AI-generated plain-English summary of all the technical data above. It highlights the key takeaways so you don't have to interpret every indicator yourself. This costs one API call each time you request it.";
 
 export const HELP_AI_RATING =
-  "A machine learning score (0-100) predicting whether this signal will be profitable. Trained on thousands of historical signals using XGBoost. 65+ is Bullish, 35- is Bearish, in between is Neutral. Only available after training a model in Settings.";
+  "A machine learning score (0-100) predicting whether this signal will be profitable. Trained on thousands of historical signals using XGBoost with 3-class classification (win/neutral/loss). The label (Bullish/Neutral/Bearish) reflects the most probable outcome class. Only available after training a model in Settings.";
+
+export const HELP_AI_ACCURACY =
+  "Model accuracy measures how often the model correctly predicts whether a signal leads to a win, loss, or neutral outcome. Since there are 3 classes, random guessing would score ~33%. Below 40% means the model hasn't learned useful patterns. 50%+ is good, and 60%+ is strong. AUC-ROC is another key metric — 0.50 means random, above 0.60 means real predictive power.";
 
 export const HELP_AI_MODEL_STATUS =
   "Shows whether an XGBoost signal scoring model has been trained. Once trained, the model scores scanner results and analysis signals with an AI Rating. Retrain periodically with fresh data for best results.";

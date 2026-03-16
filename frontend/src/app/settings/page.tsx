@@ -14,6 +14,7 @@ import {
   HELP_LLM_API_KEY,
   HELP_LLM_MODEL,
   HELP_AI_MODEL_STATUS,
+  HELP_AI_ACCURACY,
   HELP_AI_UNIVERSE,
   HELP_AI_TRADE_MODE,
 } from "@/lib/helpText";
@@ -540,10 +541,49 @@ export default function SettingsPage() {
                 </div>
                 {mlStatus.metrics && (
                   <>
+                    <div className="flex justify-between items-center bg-gray-800 rounded px-2.5 py-1.5">
+                      <span className="text-gray-500 flex items-center gap-1">
+                        Accuracy <HelpTip text={HELP_AI_ACCURACY} size={11} />
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className={(() => {
+                          const acc = (mlStatus.metrics.accuracy ?? 0) * 100;
+                          if (acc >= 60) return "text-cyan-400";
+                          if (acc >= 50) return "text-green-400";
+                          if (acc >= 40) return "text-amber-400";
+                          return "text-red-400";
+                        })()}>
+                          {((mlStatus.metrics.accuracy ?? 0) * 100).toFixed(1)}%
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${(() => {
+                          const acc = (mlStatus.metrics.accuracy ?? 0) * 100;
+                          if (acc >= 70) return "bg-cyan-900/40 text-cyan-300";
+                          if (acc >= 60) return "bg-cyan-900/30 text-cyan-400";
+                          if (acc >= 50) return "bg-green-900/30 text-green-400";
+                          if (acc >= 40) return "bg-amber-900/30 text-amber-400";
+                          return "bg-red-900/30 text-red-400";
+                        })()}`}>
+                          {(() => {
+                            const acc = (mlStatus.metrics.accuracy ?? 0) * 100;
+                            if (acc >= 70) return "Excellent";
+                            if (acc >= 60) return "Strong";
+                            if (acc >= 50) return "Good";
+                            if (acc >= 40) return "Fair";
+                            return "Poor";
+                          })()}
+                        </span>
+                      </span>
+                    </div>
                     <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
-                      <span className="text-gray-500">Accuracy</span>
-                      <span className="text-green-400">
-                        {((mlStatus.metrics.accuracy ?? 0) * 100).toFixed(1)}%
+                      <span className="text-gray-500">AUC-ROC</span>
+                      <span className={(() => {
+                        const auc = mlStatus.metrics.auc_roc ?? 0;
+                        if (auc >= 0.65) return "text-cyan-400";
+                        if (auc >= 0.55) return "text-green-400";
+                        if (auc >= 0.45) return "text-amber-400";
+                        return "text-red-400";
+                      })()}>
+                        {(mlStatus.metrics.auc_roc ?? 0).toFixed(3)}
                       </span>
                     </div>
                     <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
