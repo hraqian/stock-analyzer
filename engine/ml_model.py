@@ -49,15 +49,24 @@ FORWARD_BARS: dict[str, int] = {
 # Minimum win threshold — the forward return must exceed this to be
 # labelled "win". Using a small positive threshold avoids counting
 # tiny gains as wins when they wouldn't cover costs.
-WIN_THRESHOLD_PCT = 0.5  # 0.5%
+# When DYNAMIC_WIN_THRESHOLD is True, we use ATR-based threshold instead.
+WIN_THRESHOLD_PCT = 0.5         # fallback if ATR unavailable
+DYNAMIC_WIN_THRESHOLD = True    # use ATR-based win threshold
+WIN_ATR_MULTIPLIER = 0.5        # win requires return > 0.5 * ATR%
 
 # Walk-forward configuration
 WF_TRAIN_RATIO = 0.75     # 75% train, 25% test in each window
 WF_NUM_WINDOWS = 4        # number of walk-forward windows
 WF_MIN_SAMPLES = 200      # minimum training samples per window
 
-# Sampling: how often to take a sample from each ticker's history
-SAMPLE_INTERVAL_BARS = 20  # every 20 bars ≈ monthly for daily data
+# Sampling configuration
+SAMPLE_INTERVAL_BARS = 5   # check every 5 bars (denser, since filter rejects most)
+
+# Signal-based sampling: only take samples where the rule-based engine
+# produces a non-trivial signal.  This is the single biggest accuracy
+# improvement — random sampling generates mostly noise.
+SIGNAL_SAMPLING = True
+SIGNAL_SCORE_MIN_DEVIATION = 1.0  # |composite - 5.0| must exceed this
 
 
 # ── Data classes ──────────────────────────────────────────────────────
@@ -229,6 +238,11 @@ def _generate_samples_for_ticker(
     At each stop, we slice df[:bar_idx], run the full analysis, extract
     features, and compute the forward return from bar_idx to
     bar_idx + forward_bars.
+
+    If SIGNAL_SAMPLING is enabled, we skip bars where the composite
+    score is too close to neutral (5.0).  This ensures the model trains
+    only on points where the rule-based engine has a real opinion, which
+    dramatically improves accuracy vs. blind periodic sampling.
     """
     samples: list[TrainingSample] = []
     n = len(df)
@@ -248,6 +262,12 @@ def _generate_samples_for_ticker(
             pattern_results = pat_registry.run_all(df_slice)
             composite = scorer.score(indicator_results)
             pattern_composite = pat_scorer.score(pattern_results)
+
+            # Signal-based sampling filter: skip neutral signals
+            if SIGNAL_SAMPLING:
+                overall_score = composite.get("overall", 5.0)
+                if abs(overall_score - 5.0) < SIGNAL_SCORE_MIN_DEVIATION:
+                    continue  # too close to neutral — skip this bar
 
             # Regime
             regime = None
@@ -270,8 +290,15 @@ def _generate_samples_for_ticker(
                 (future_price - current_price) / current_price * 100
             )
 
+            # Dynamic win threshold based on ATR
+            win_threshold = WIN_THRESHOLD_PCT  # fallback
+            if DYNAMIC_WIN_THRESHOLD:
+                atr_threshold = _compute_atr_threshold(df, bar_idx)
+                if atr_threshold is not None:
+                    win_threshold = atr_threshold
+
             # Label: 1 = win (return > threshold), 0 = loss
-            label = 1 if forward_return_pct > WIN_THRESHOLD_PCT else 0
+            label = 1 if forward_return_pct > win_threshold else 0
 
             # Date for this sample
             date_val = df.index[bar_idx]
@@ -293,6 +320,44 @@ def _generate_samples_for_ticker(
             continue
 
     return samples
+
+
+def _compute_atr_threshold(df: pd.DataFrame, bar_idx: int) -> float | None:
+    """Compute ATR-based win threshold at a specific bar.
+
+    Returns the threshold as a percentage of price, or None if ATR
+    cannot be computed (too few bars).  Uses a 14-period ATR ending
+    at bar_idx.
+    """
+    if bar_idx < 14:
+        return None
+
+    try:
+        window = df.iloc[max(0, bar_idx - 14):bar_idx + 1]
+        high = window["high"].values
+        low = window["low"].values
+        close = window["close"].values
+
+        # True Range
+        tr = np.maximum(
+            high[1:] - low[1:],
+            np.maximum(
+                np.abs(high[1:] - close[:-1]),
+                np.abs(low[1:] - close[:-1]),
+            ),
+        )
+        atr = float(np.mean(tr))
+        price = float(close[-1])
+
+        if price <= 0:
+            return None
+
+        # Threshold = ATR as % of price * multiplier
+        atr_pct = (atr / price) * 100
+        return atr_pct * WIN_ATR_MULTIPLIER
+
+    except Exception:
+        return None
 
 
 # ── Walk-forward training ─────────────────────────────────────────────
@@ -325,6 +390,7 @@ def train_model(
         accuracy_score, precision_score, recall_score,
         f1_score, roc_auc_score,
     )
+    from sklearn.preprocessing import StandardScaler
 
     t0 = time.time()
     forward_bars = FORWARD_BARS.get(trade_mode, 10)
@@ -341,10 +407,22 @@ def train_model(
         )
 
     # Build feature matrix and labels
-    X = np.array([s.features for s in sorted_samples], dtype=np.float32)
+    X_raw = np.array([s.features for s in sorted_samples], dtype=np.float32)
     y = np.array([s.label for s in sorted_samples], dtype=np.int32)
     dates = [s.date for s in sorted_samples]
     tickers_used = list(set(s.ticker for s in sorted_samples))
+
+    # ── Feature normalization ─────────────────────────────────────────
+    # StandardScaler ensures features with different scales (RSI 0-100,
+    # MACD histogram, boolean flags) are on a comparable footing.
+    # The scaler is saved alongside the model for prediction time.
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X_raw).astype(np.float32)
+
+    logger.info(
+        "ML train: %d samples, %d features, class balance: %.1f%% wins",
+        n, X.shape[1], (y.sum() / len(y)) * 100,
+    )
 
     # ── Walk-forward windows ──────────────────────────────────────────
     wf_results: list[WalkForwardResult] = []
@@ -375,8 +453,8 @@ def train_model(
         if len(X_test) == 0:
             continue
 
-        # Train XGBoost
-        model = _train_xgb(X_train, y_train)
+        # Train XGBoost (no tuning for walk-forward windows — speed)
+        model = _train_xgb(X_train, y_train, tune_hyperparams=False)
 
         # Evaluate
         y_pred = model.predict(X_test)
@@ -402,8 +480,8 @@ def train_model(
             metrics=metrics,
         ))
 
-    # ── Final model: train on ALL data ────────────────────────────────
-    final_model = _train_xgb(X, y)
+    # ── Final model: train on ALL data with hyperparameter tuning ─────
+    final_model = _train_xgb(X, y, tune_hyperparams=True)
 
     # Feature importances from final model
     importances = final_model.feature_importances_
@@ -436,8 +514,8 @@ def train_model(
 
     final_metrics.feature_importances = feat_imp
 
-    # ── Save model ────────────────────────────────────────────────────
-    _save_model(final_model, trade_mode, final_metrics, len(tickers_used), n)
+    # ── Save model + scaler ───────────────────────────────────────────
+    _save_model(final_model, trade_mode, final_metrics, len(tickers_used), n, scaler)
 
     elapsed = time.time() - t0
 
@@ -454,8 +532,19 @@ def train_model(
     )
 
 
-def _train_xgb(X: np.ndarray, y: np.ndarray) -> Any:
-    """Train an XGBoost classifier with tuned hyperparameters."""
+def _train_xgb(
+    X: np.ndarray,
+    y: np.ndarray,
+    tune_hyperparams: bool = False,
+) -> Any:
+    """Train an XGBoost classifier with optional hyperparameter tuning.
+
+    Args:
+        X: Feature matrix (already scaled).
+        y: Label array.
+        tune_hyperparams: If True, run cross-validated grid search over
+            key parameters (slower but better).  Used for final model only.
+    """
     import xgboost as xgb
 
     # Class balance weight
@@ -463,12 +552,19 @@ def _train_xgb(X: np.ndarray, y: np.ndarray) -> Any:
     n_neg = len(y) - n_pos
     scale_pos = n_neg / n_pos if n_pos > 0 else 1.0
 
+    if tune_hyperparams and len(X) >= 500:
+        return _train_xgb_tuned(X, y, scale_pos)
+
     model = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.05,
+        n_estimators=300,
+        max_depth=5,
+        learning_rate=0.03,
         subsample=0.8,
-        colsample_bytree=0.8,
+        colsample_bytree=0.7,
+        min_child_weight=5,
+        gamma=0.1,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
         scale_pos_weight=scale_pos,
         eval_metric="logloss",
         use_label_encoder=False,
@@ -480,7 +576,62 @@ def _train_xgb(X: np.ndarray, y: np.ndarray) -> Any:
     return model
 
 
+def _train_xgb_tuned(
+    X: np.ndarray,
+    y: np.ndarray,
+    scale_pos_weight: float,
+) -> Any:
+    """Train XGBoost with cross-validated hyperparameter search.
+
+    Uses a focused grid over the parameters most impactful for
+    financial signal classification.
+    """
+    import xgboost as xgb
+    from sklearn.model_selection import StratifiedKFold, GridSearchCV
+
+    base = xgb.XGBClassifier(
+        subsample=0.8,
+        colsample_bytree=0.7,
+        scale_pos_weight=scale_pos_weight,
+        eval_metric="logloss",
+        use_label_encoder=False,
+        random_state=42,
+        n_jobs=-1,
+        verbosity=0,
+    )
+
+    param_grid = {
+        "n_estimators": [200, 400],
+        "max_depth": [4, 6],
+        "learning_rate": [0.02, 0.05],
+        "min_child_weight": [3, 7],
+        "gamma": [0.0, 0.2],
+    }
+
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
+    search = GridSearchCV(
+        base, param_grid,
+        cv=cv,
+        scoring="roc_auc",
+        n_jobs=1,          # XGBoost already uses all cores internally
+        refit=True,
+        verbose=0,
+    )
+    search.fit(X, y)
+
+    logger.info(
+        "XGBoost tuning: best AUC=%.4f, params=%s",
+        search.best_score_, search.best_params_,
+    )
+
+    return search.best_estimator_
+
+
 # ── Model persistence ─────────────────────────────────────────────────
+
+
+SCALER_FILE = MODEL_DIR / "xgb_scaler.pkl"
 
 
 def _save_model(
@@ -489,13 +640,19 @@ def _save_model(
     metrics: ModelMetrics,
     n_tickers: int,
     n_samples: int,
+    scaler: Any = None,
 ) -> None:
-    """Save the trained model and metadata to disk."""
+    """Save the trained model, scaler, and metadata to disk."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     # Save model
     with open(MODEL_FILE, "wb") as f:
         pickle.dump(model, f)
+
+    # Save scaler (for feature normalization at prediction time)
+    if scaler is not None:
+        with open(SCALER_FILE, "wb") as f:
+            pickle.dump(scaler, f)
 
     # Save metadata
     meta = {
@@ -534,6 +691,18 @@ def load_model() -> Any | None:
         return None
 
 
+def load_scaler() -> Any | None:
+    """Load the feature scaler from disk. Returns None if not found."""
+    if not SCALER_FILE.exists():
+        return None
+    try:
+        with open(SCALER_FILE, "rb") as f:
+            return pickle.load(f)  # noqa: S301
+    except Exception:
+        logger.warning("Failed to load ML scaler", exc_info=True)
+        return None
+
+
 def load_model_meta() -> dict[str, Any] | None:
     """Load model metadata. Returns None if not found."""
     if not META_FILE.exists():
@@ -548,6 +717,11 @@ def load_model_meta() -> dict[str, Any] | None:
 def model_exists() -> bool:
     """Check if a trained model exists on disk."""
     return MODEL_FILE.exists() and META_FILE.exists()
+
+
+def model_fully_exists() -> bool:
+    """Check if model, metadata, AND scaler all exist."""
+    return MODEL_FILE.exists() and META_FILE.exists() and SCALER_FILE.exists()
 
 
 # ── Prediction ────────────────────────────────────────────────────────
@@ -587,8 +761,13 @@ def predict_signal(
         regime, df,
     )
 
-    # Predict
+    # Apply the same scaling used during training
     X = features.reshape(1, -1)
+    scaler = load_scaler()
+    if scaler is not None:
+        X = scaler.transform(X)
+
+    # Predict
     prob = float(model.predict_proba(X)[0, 1])  # probability of win
     ai_rating = round(prob * 100, 1)             # 0-100 scale
 
