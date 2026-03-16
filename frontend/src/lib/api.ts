@@ -760,6 +760,7 @@ export async function trainMlModel(
   tradeMode: string = "swing",
   period: string = "5y",
   onProgress?: (msg: MlTrainProgress) => void,
+  timeoutMinutes: number = 120,
 ): Promise<MlTrainResult> {
   const params = new URLSearchParams({
     universe,
@@ -777,7 +778,7 @@ export async function trainMlModel(
 
   // Training uses SSE streaming for progress updates
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2 * 60 * 60 * 1000); // 2 hours
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMinutes * 60 * 1000);
 
   try {
     const res = await fetch(

@@ -65,6 +65,7 @@ export default function SettingsPage() {
   const [mlUniverse, setMlUniverse] = useState("sp500");
   const [mlTradeMode, setMlTradeMode] = useState("swing");
   const [mlPeriod, setMlPeriod] = useState("5y");
+  const [mlTimeout, setMlTimeout] = useState(120);
   const [mlMsg, setMlMsg] = useState<string | null>(null);
   const [mlProgress, setMlProgress] = useState<{pct: number; detail: string} | null>(null);
 
@@ -119,6 +120,7 @@ export default function SettingsPage() {
           }
           setMlProgress({ pct: msg.pct, detail });
         },
+        mlTimeout,
       );
       setMlProgress(null);
       setMlMsg(
@@ -590,7 +592,7 @@ export default function SettingsPage() {
           )}
 
           {/* Training controls */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3">
             <div>
               <div className="flex items-center gap-1 mb-1">
                 <span className="text-xs text-gray-400">Universe</span>
@@ -638,6 +640,23 @@ export default function SettingsPage() {
                 <option value="2y">2 Years</option>
                 <option value="5y">5 Years (recommended)</option>
                 <option value="10y">10 Years</option>
+              </select>
+            </div>
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">Timeout</span>
+                <HelpTip text="Maximum time to wait for training to complete before aborting. Larger universes need more time." size={12} />
+              </div>
+              <select
+                value={mlTimeout}
+                onChange={(e) => setMlTimeout(Number(e.target.value))}
+                disabled={mlTraining}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value={30}>30 min</option>
+                <option value={60}>1 hour</option>
+                <option value={120}>2 hours (default)</option>
+                <option value={240}>4 hours</option>
               </select>
             </div>
           </div>
