@@ -777,7 +777,7 @@ export async function trainMlModel(
 
   // Training uses SSE streaming for progress updates
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60 * 60 * 1000); // 60 min
+  const timeoutId = setTimeout(() => controller.abort(), 2 * 60 * 60 * 1000); // 2 hours
 
   try {
     const res = await fetch(
