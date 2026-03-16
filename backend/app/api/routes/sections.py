@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.auth import get_current_user
@@ -1256,13 +1257,16 @@ async def ml_train(
     period: str = Query("5y", description="Historical data period"),
     user: User = Depends(get_current_user),
 ):
-    """Train the XGBoost signal scoring model.
+    """Train the XGBoost signal scoring model with SSE progress streaming.
 
-    This is a long-running operation (can take several minutes for large
-    universes). The model is trained with walk-forward validation and
-    saved to disk for future predictions.
+    Returns a Server-Sent Events stream with progress updates:
+      - event: progress  (phase, pct, detail)
+      - event: complete  (result dict)
+      - event: error     (message)
     """
-    from app.services.ml_scoring import train_ml_model
+    import json as _json
+
+    from app.services.ml_scoring import train_ml_model_streaming
 
     if trade_mode not in ("swing", "long_term"):
         raise HTTPException(400, "trade_mode must be 'swing' or 'long_term'")
@@ -1277,14 +1281,42 @@ async def ml_train(
             f"Invalid universe '{universe}'. Must be one of: {sorted(valid_universes)}",
         )
 
-    try:
-        result = await train_ml_model(universe=universe, trade_mode=trade_mode, period=period)
-        return result
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:
-        logger.error("ML training failed: %s", e, exc_info=True)
-        raise HTTPException(500, f"Training failed: {e}")
+    progress_queue = train_ml_model_streaming(
+        universe=universe, trade_mode=trade_mode, period=period,
+    )
+
+    async def event_generator():
+        """Yield SSE events from the training progress queue."""
+        while True:
+            # Poll queue in a non-blocking way to avoid blocking the event loop
+            try:
+                msg = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: progress_queue.get(timeout=0.5),
+                )
+            except Exception:
+                # queue.Empty — no message yet, yield a keep-alive comment
+                yield ": keepalive\n\n"
+                continue
+
+            if msg is None:
+                # Sentinel — training thread is done
+                break
+
+            event_type = msg.get("event", "progress")
+            yield f"event: {event_type}\ndata: {_json.dumps(msg)}\n\n"
+
+            if event_type in ("complete", "error"):
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @ml_router.get("/predict/{ticker}")

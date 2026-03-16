@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import type { User, MlModelStatus } from "@/lib/api";
+import type { User, MlModelStatus, MlTrainProgress } from "@/lib/api";
 import { getMlModelStatus, trainMlModel } from "@/lib/api";
 import HelpTip from "@/components/HelpTip";
 import {
@@ -66,6 +66,7 @@ export default function SettingsPage() {
   const [mlTradeMode, setMlTradeMode] = useState("swing");
   const [mlPeriod, setMlPeriod] = useState("5y");
   const [mlMsg, setMlMsg] = useState<string | null>(null);
+  const [mlProgress, setMlProgress] = useState<{pct: number; detail: string} | null>(null);
 
   // Sync form state when user loads
   useEffect(() => {
@@ -103,8 +104,23 @@ export default function SettingsPage() {
   async function handleTrainModel() {
     setMlTraining(true);
     setMlMsg(null);
+    setMlProgress({ pct: 0, detail: "Starting..." });
     try {
-      const result = await trainMlModel(mlUniverse, mlTradeMode, mlPeriod);
+      const result = await trainMlModel(
+        mlUniverse, mlTradeMode, mlPeriod,
+        (msg: MlTrainProgress) => {
+          let detail = "";
+          if (msg.phase === "fetch") {
+            detail = msg.detail || "Downloading data...";
+          } else if (msg.phase === "generate") {
+            detail = `Processing ${msg.ticker} (${msg.current}/${msg.total})`;
+          } else if (msg.phase === "train") {
+            detail = `Walk-forward window ${msg.window}/${msg.total_windows}`;
+          }
+          setMlProgress({ pct: msg.pct, detail });
+        },
+      );
+      setMlProgress(null);
       setMlMsg(
         `Trained! ${result.total_samples.toLocaleString()} samples, ` +
         `${result.walk_forward_results.length} windows. ` +
@@ -113,6 +129,7 @@ export default function SettingsPage() {
       // Refresh status
       await fetchMlStatus();
     } catch (e: unknown) {
+      setMlProgress(null);
       setMlMsg(e instanceof Error ? e.message : "Training failed");
     } finally {
       setMlTraining(false);
@@ -625,23 +642,41 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleTrainModel}
-              disabled={mlTraining}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {mlTraining ? "Training... (this may take minutes)" : "Train Model"}
-            </button>
-            {mlMsg && (
-              <span
-                className={`text-sm ${
-                  mlMsg.startsWith("Trained") ? "text-green-400" : "text-red-400"
-                }`}
-              >
-                {mlMsg}
-              </span>
+          <div className="space-y-3">
+            {/* Progress bar (visible during training) */}
+            {mlTraining && mlProgress && (
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-gray-400">{mlProgress.detail}</span>
+                  <span className="text-xs text-cyan-400 font-mono">{mlProgress.pct}%</span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-cyan-500 h-full rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${mlProgress.pct}%` }}
+                  />
+                </div>
+              </div>
             )}
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleTrainModel}
+                disabled={mlTraining}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {mlTraining ? "Training..." : "Train Model"}
+              </button>
+              {mlMsg && (
+                <span
+                  className={`text-sm ${
+                    mlMsg.startsWith("Trained") ? "text-green-400" : "text-red-400"
+                  }`}
+                >
+                  {mlMsg}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

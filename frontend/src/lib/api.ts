@@ -759,23 +759,135 @@ export async function trainMlModel(
   universe: string = "sp500",
   tradeMode: string = "swing",
   period: string = "5y",
+  onProgress?: (msg: MlTrainProgress) => void,
 ): Promise<MlTrainResult> {
   const params = new URLSearchParams({
     universe,
     trade_mode: tradeMode,
     period,
   });
-  // Training can take 10+ minutes for large universes — use a long timeout
+
+  const t = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (t) {
+    headers["Authorization"] = `Bearer ${t}`;
+  }
+
+  // Training uses SSE streaming for progress updates
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000); // 15 min
+  const timeoutId = setTimeout(() => controller.abort(), 30 * 60 * 1000); // 30 min
+
   try {
-    return await apiFetch<MlTrainResult>(`/api/ml/train?${params}`, {
-      method: "POST",
-      signal: controller.signal,
-    });
+    const res = await fetch(
+      `${API_URL}/api/ml/train?${params}`,
+      {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+      },
+    );
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        setToken(null);
+        if (typeof window !== "undefined") {
+          window.location.href = "/login";
+        }
+        throw new Error("Session expired. Please log in again.");
+      }
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `API error: ${res.status}`);
+    }
+
+    // Read the SSE stream
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error("No response body for SSE stream");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult: MlTrainResult | null = null;
+    let errorMsg: string | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE messages (separated by double newline)
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || ""; // Keep incomplete part in buffer
+
+      for (const part of parts) {
+        if (!part.trim() || part.trim().startsWith(": keepalive")) continue;
+
+        // Parse SSE format: "event: <type>\ndata: <json>"
+        const lines = part.trim().split("\n");
+        let data: string | null = null;
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            data = line.slice(6);
+          }
+        }
+
+        if (!data) continue;
+
+        try {
+          const msg = JSON.parse(data) as MlTrainProgress | MlTrainComplete | MlTrainError;
+
+          if (msg.event === "progress" && onProgress) {
+            onProgress(msg);
+          } else if (msg.event === "complete") {
+            finalResult = msg.result;
+          } else if (msg.event === "error") {
+            errorMsg = msg.message;
+          }
+        } catch {
+          // Ignore malformed SSE data
+        }
+      }
+    }
+
+    if (errorMsg) {
+      throw new Error(errorMsg);
+    }
+
+    if (!finalResult) {
+      throw new Error("Training stream ended without a result");
+    }
+
+    return finalResult;
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// SSE event types for ML training progress
+export interface MlTrainProgress {
+  event: "progress";
+  phase: "fetch" | "generate" | "train";
+  pct: number;
+  detail?: string;
+  ticker?: string;
+  current?: number;
+  total?: number;
+  window?: number;
+  total_windows?: number;
+}
+
+export interface MlTrainComplete {
+  event: "complete";
+  result: MlTrainResult;
+}
+
+export interface MlTrainError {
+  event: "error";
+  message: string;
 }
 
 export interface MlPrediction {
