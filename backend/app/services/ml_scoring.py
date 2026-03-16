@@ -98,6 +98,7 @@ def _train_ml_model_sync(
     )
 
     # Step 1: Generate training data
+    logger.info("ML train: generating training data...")
     samples = generate_training_data(
         tickers=tickers,
         trade_mode=trade_mode,
@@ -110,8 +111,16 @@ def _train_ml_model_sync(
             "insufficient data or all tickers failed to download."
         )
 
+    logger.info("ML train: %d samples generated, starting walk-forward training...", len(samples))
+
     # Step 2: Train with walk-forward validation
     result = train_model(samples, trade_mode=trade_mode)
+
+    logger.info(
+        "ML train: complete! %d samples, %d tickers, accuracy=%.3f, elapsed=%.1fs",
+        result.total_samples, result.total_tickers,
+        result.final_metrics.accuracy, result.elapsed_seconds,
+    )
 
     # Convert to serialisable dict
     wf_dicts = []

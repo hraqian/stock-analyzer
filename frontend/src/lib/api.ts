@@ -765,9 +765,17 @@ export async function trainMlModel(
     trade_mode: tradeMode,
     period,
   });
-  return apiFetch<MlTrainResult>(`/api/ml/train?${params}`, {
-    method: "POST",
-  });
+  // Training can take 10+ minutes for large universes — use a long timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000); // 15 min
+  try {
+    return await apiFetch<MlTrainResult>(`/api/ml/train?${params}`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export interface MlPrediction {

@@ -21,6 +21,8 @@ services:
       - ./analysis:/analysis
       - ./data:/data
       - ./config.py:/config.py:ro
+      # Persist trained ML models to host
+      - ./models:/models
     environment:
       DEBUG: "true"
       CORS_ORIGINS: '["http://localhost:3000"]'
