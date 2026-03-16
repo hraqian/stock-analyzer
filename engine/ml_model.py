@@ -3,7 +3,7 @@ engine/ml_model.py — XGBoost signal scoring model: training, evaluation, predi
 
 This module implements the full ML pipeline for scoring trading signals:
   1. Training data generation — runs analysis at historical points, labels
-     with forward returns.
+     with forward returns using a 3-class target (win / neutral / loss).
   2. Walk-forward training — trains on expanding windows, validates on
      held-out recent data.
   3. Prediction — scores new signals with probability + feature importances.
@@ -46,13 +46,15 @@ FORWARD_BARS: dict[str, int] = {
     "long_term": 60,
 }
 
-# Minimum win threshold — the forward return must exceed this to be
-# labelled "win". Using a small positive threshold avoids counting
-# tiny gains as wins when they wouldn't cover costs.
-# When DYNAMIC_WIN_THRESHOLD is True, we use ATR-based threshold instead.
-WIN_THRESHOLD_PCT = 0.5         # fallback if ATR unavailable
-DYNAMIC_WIN_THRESHOLD = True    # use ATR-based win threshold
-WIN_ATR_MULTIPLIER = 0.5        # win requires return > 0.5 * ATR%
+# ── 3-class labeling thresholds ───────────────────────────────────────
+# Class 2: strong win  — forward return > WIN_ATR_MULT * ATR%
+# Class 1: neutral     — between -LOSS_ATR_MULT * ATR% and +WIN_ATR_MULT * ATR%
+# Class 0: strong loss — forward return < -LOSS_ATR_MULT * ATR%
+DYNAMIC_WIN_THRESHOLD = True    # use ATR-based thresholds
+WIN_ATR_MULTIPLIER = 1.0        # win requires return > 1.0 * ATR%
+LOSS_ATR_MULTIPLIER = 0.5       # loss requires return < -0.5 * ATR%
+WIN_THRESHOLD_PCT = 1.0         # fallback if ATR unavailable
+LOSS_THRESHOLD_PCT = -0.5       # fallback if ATR unavailable
 
 # Walk-forward configuration
 WF_TRAIN_RATIO = 0.75     # 75% train, 25% test in each window
@@ -63,10 +65,12 @@ WF_MIN_SAMPLES = 200      # minimum training samples per window
 SAMPLE_INTERVAL_BARS = 20  # every 20 bars ≈ monthly for daily data
 
 # Signal-based sampling: only take samples where the rule-based engine
-# produces a non-trivial signal.  This is the single biggest accuracy
-# improvement — random sampling generates mostly noise.
+# produces a non-trivial signal.
 SIGNAL_SAMPLING = True
 SIGNAL_SCORE_MIN_DEVIATION = 0.5  # |composite - 5.0| must exceed this
+
+# Number of output classes
+NUM_CLASSES = 3  # 0=loss, 1=neutral, 2=win
 
 
 # ── Data classes ──────────────────────────────────────────────────────
@@ -78,7 +82,7 @@ class TrainingSample:
     ticker: str
     date: str
     features: np.ndarray       # shape (NUM_FEATURES,)
-    label: int                 # 1 = win, 0 = loss
+    label: int                 # 0=loss, 1=neutral, 2=win
     forward_return_pct: float  # actual forward return
 
 
@@ -92,6 +96,7 @@ class ModelMetrics:
     auc_roc: float = 0.0
     n_train: int = 0
     n_test: int = 0
+    class_distribution: dict[str, int] = field(default_factory=dict)
     feature_importances: dict[str, float] = field(default_factory=dict)
 
 
@@ -130,6 +135,62 @@ class PredictionResult:
     top_features: list[dict]     # top contributing features [{name, value, importance}]
 
 
+# ── Cross-asset data fetching ─────────────────────────────────────────
+
+
+def _fetch_cross_asset_data(period: str = "5y") -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Fetch SPY and VIX data for cross-asset features.
+
+    Returns (spy_df, vix_df) — either can be None if fetch fails.
+    """
+    try:
+        from data.yahoo import YahooFinanceProvider  # type: ignore[import-untyped]
+        provider = YahooFinanceProvider()
+
+        spy_df = None
+        vix_df = None
+
+        try:
+            spy_df = provider.fetch("SPY", period=period)
+        except Exception:
+            logger.debug("Failed to fetch SPY for cross-asset features")
+
+        try:
+            vix_df = provider.fetch("^VIX", period=period)
+        except Exception:
+            logger.debug("Failed to fetch VIX for cross-asset features")
+
+        return spy_df, vix_df
+    except Exception:
+        return None, None
+
+
+def _align_cross_asset(
+    stock_df: pd.DataFrame,
+    cross_df: pd.DataFrame | None,
+    bar_idx: int,
+) -> pd.DataFrame | None:
+    """Slice cross-asset data to align with the stock slice ending at bar_idx.
+
+    Returns a DataFrame sliced to the same date range as stock_df[:bar_idx+1],
+    or None if alignment fails.
+    """
+    if cross_df is None or len(cross_df) == 0:
+        return None
+
+    try:
+        target_date = stock_df.index[bar_idx]
+        # Find the closest date in cross_df that is <= target_date
+        mask = cross_df.index <= target_date
+        if not mask.any():
+            return None
+        aligned = cross_df.loc[mask]
+        # Return last 200+ bars to have enough history
+        return aligned
+    except Exception:
+        return None
+
+
 # ── Training data generation ──────────────────────────────────────────
 
 
@@ -147,8 +208,8 @@ def generate_training_data(
       2. At regular intervals (every sample_interval bars), slice
          the data up to that point, run the full indicator/pattern/regime
          pipeline, and extract features.
-      3. Look at the forward return over the next N bars to label as
-         win (1) or loss (0).
+      3. Look at the forward return over the next N bars to assign a
+         3-class label: 0=loss, 1=neutral, 2=win.
 
     Args:
         tickers: List of ticker symbols.
@@ -188,6 +249,14 @@ def generate_training_data(
     # Minimum bars needed to compute indicators + have forward return
     min_bars = 200 + forward_bars
 
+    # ── Fetch cross-asset data ────────────────────────────────────────
+    logger.info("ML training: fetching cross-asset data (SPY, VIX)...")
+    spy_df, vix_df = _fetch_cross_asset_data(period=period)
+    if spy_df is not None:
+        logger.info("ML training: SPY data loaded (%d bars)", len(spy_df))
+    if vix_df is not None:
+        logger.info("ML training: VIX data loaded (%d bars)", len(vix_df))
+
     # ── Batch fetch ──────────────────────────────────────────────────
     logger.info(
         "ML training: fetching %d tickers (period=%s, forward=%d bars)",
@@ -217,15 +286,20 @@ def generate_training_data(
                 ticker, df, forward_bars,
                 ind_registry, pat_registry, scorer, pat_scorer, regime_clf,
                 sample_interval=actual_interval,
+                spy_df=spy_df, vix_df=vix_df,
             )
             samples.extend(ticker_samples)
         except Exception:
             logger.debug("ML training: error on %s", ticker, exc_info=True)
             continue
 
+    # Log class distribution
+    labels = [s.label for s in samples]
+    dist = {0: labels.count(0), 1: labels.count(1), 2: labels.count(2)}
     logger.info(
-        "ML training: generated %d samples from %d tickers",
-        len(samples), total,
+        "ML training: generated %d samples from %d tickers — "
+        "class distribution: loss=%d, neutral=%d, win=%d",
+        len(samples), total, dist[0], dist[1], dist[2],
     )
     return samples
 
@@ -240,18 +314,15 @@ def _generate_samples_for_ticker(
     pat_scorer: Any,
     regime_clf: Any,
     sample_interval: int = 20,
+    spy_df: pd.DataFrame | None = None,
+    vix_df: pd.DataFrame | None = None,
 ) -> list[TrainingSample]:
     """Generate samples from a single ticker's historical data.
 
-    We walk through the data, stopping every SAMPLE_INTERVAL_BARS bars.
+    We walk through the data, stopping every sample_interval bars.
     At each stop, we slice df[:bar_idx], run the full analysis, extract
-    features, and compute the forward return from bar_idx to
-    bar_idx + forward_bars.
-
-    If SIGNAL_SAMPLING is enabled, we skip bars where the composite
-    score is too close to neutral (5.0).  This ensures the model trains
-    only on points where the rule-based engine has a real opinion, which
-    dramatically improves accuracy vs. blind periodic sampling.
+    features (including cross-asset context), and compute the forward
+    return to assign a 3-class label.
     """
     samples: list[TrainingSample] = []
     n = len(df)
@@ -285,11 +356,16 @@ def _generate_samples_for_ticker(
             except Exception:
                 pass
 
-            # Extract features
+            # Align cross-asset data to this bar's date
+            spy_slice = _align_cross_asset(df, spy_df, bar_idx)
+            vix_slice = _align_cross_asset(df, vix_df, bar_idx)
+
+            # Extract features (now includes temporal + cross-asset)
             features = extract_features(
                 indicator_results, pattern_results,
                 composite, pattern_composite,
                 regime, df_slice,
+                spy_df=spy_slice, vix_df=vix_slice,
             )
 
             # Compute forward return
@@ -299,15 +375,8 @@ def _generate_samples_for_ticker(
                 (future_price - current_price) / current_price * 100
             )
 
-            # Dynamic win threshold based on ATR
-            win_threshold = WIN_THRESHOLD_PCT  # fallback
-            if DYNAMIC_WIN_THRESHOLD:
-                atr_threshold = _compute_atr_threshold(df, bar_idx)
-                if atr_threshold is not None:
-                    win_threshold = atr_threshold
-
-            # Label: 1 = win (return > threshold), 0 = loss
-            label = 1 if forward_return_pct > win_threshold else 0
+            # 3-class labeling
+            label = _compute_label(df, bar_idx, forward_return_pct)
 
             # Date for this sample
             date_val = df.index[bar_idx]
@@ -331,12 +400,40 @@ def _generate_samples_for_ticker(
     return samples
 
 
-def _compute_atr_threshold(df: pd.DataFrame, bar_idx: int) -> float | None:
-    """Compute ATR-based win threshold at a specific bar.
+def _compute_label(
+    df: pd.DataFrame,
+    bar_idx: int,
+    forward_return_pct: float,
+) -> int:
+    """Compute 3-class label based on forward return vs ATR threshold.
 
-    Returns the threshold as a percentage of price, or None if ATR
-    cannot be computed (too few bars).  Uses a 14-period ATR ending
-    at bar_idx.
+    Returns:
+        2 = strong win (return > +WIN_ATR_MULT * ATR%)
+        1 = neutral (between thresholds)
+        0 = strong loss (return < -LOSS_ATR_MULT * ATR%)
+    """
+    win_thresh = WIN_THRESHOLD_PCT
+    loss_thresh = LOSS_THRESHOLD_PCT
+
+    if DYNAMIC_WIN_THRESHOLD:
+        atr_threshold = _compute_atr_threshold(df, bar_idx)
+        if atr_threshold is not None:
+            win_thresh = atr_threshold * WIN_ATR_MULTIPLIER
+            loss_thresh = -atr_threshold * LOSS_ATR_MULTIPLIER
+
+    if forward_return_pct > win_thresh:
+        return 2  # win
+    elif forward_return_pct < loss_thresh:
+        return 0  # loss
+    else:
+        return 1  # neutral
+
+
+def _compute_atr_threshold(df: pd.DataFrame, bar_idx: int) -> float | None:
+    """Compute ATR as percentage of price at a specific bar.
+
+    Returns the ATR percentage, or None if it cannot be computed.
+    Uses a 14-period ATR ending at bar_idx.
     """
     if bar_idx < 14:
         return None
@@ -361,9 +458,8 @@ def _compute_atr_threshold(df: pd.DataFrame, bar_idx: int) -> float | None:
         if price <= 0:
             return None
 
-        # Threshold = ATR as % of price * multiplier
-        atr_pct = (atr / price) * 100
-        return atr_pct * WIN_ATR_MULTIPLIER
+        # Return ATR as % of price
+        return (atr / price) * 100
 
     except Exception:
         return None
@@ -378,6 +474,8 @@ def train_model(
     progress_callback: Any | None = None,
 ) -> TrainingResult:
     """Train an XGBoost model with walk-forward validation.
+
+    Uses 3-class classification: 0=loss, 1=neutral, 2=win.
 
     Walk-forward approach:
       1. Sort samples by date.
@@ -421,16 +519,20 @@ def train_model(
     dates = [s.date for s in sorted_samples]
     tickers_used = list(set(s.ticker for s in sorted_samples))
 
+    # Class distribution
+    class_dist = {
+        "loss": int((y == 0).sum()),
+        "neutral": int((y == 1).sum()),
+        "win": int((y == 2).sum()),
+    }
+
     # ── Feature normalization ─────────────────────────────────────────
-    # StandardScaler ensures features with different scales (RSI 0-100,
-    # MACD histogram, boolean flags) are on a comparable footing.
-    # The scaler is saved alongside the model for prediction time.
     scaler = StandardScaler()
     X = scaler.fit_transform(X_raw).astype(np.float32)
 
     logger.info(
-        "ML train: %d samples, %d features, class balance: %.1f%% wins",
-        n, X.shape[1], (y.sum() / len(y)) * 100,
+        "ML train: %d samples, %d features, class dist: loss=%d neutral=%d win=%d",
+        n, X.shape[1], class_dist["loss"], class_dist["neutral"], class_dist["win"],
     )
 
     # ── Walk-forward windows ──────────────────────────────────────────
@@ -449,11 +551,9 @@ def train_model(
         if test_start >= n or test_end <= test_start:
             continue
 
-        # Train on everything before the test window
         train_end = test_start
 
         if train_end < WF_MIN_SAMPLES:
-            # Not enough training data for this window
             continue
 
         X_train, y_train = X[:train_end], y[:train_end]
@@ -467,18 +567,9 @@ def train_model(
 
         # Evaluate
         y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:, 1]
+        y_prob = model.predict_proba(X_test)
 
-        metrics = ModelMetrics(
-            accuracy=round(float(accuracy_score(y_test, y_pred)), 4),
-            precision=round(float(precision_score(y_test, y_pred, zero_division=0)), 4),
-            recall=round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
-            f1=round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
-            auc_roc=round(float(roc_auc_score(y_test, y_prob)), 4)
-                    if len(set(y_test)) > 1 else 0.0,
-            n_train=len(X_train),
-            n_test=len(X_test),
-        )
+        metrics = _compute_metrics(y_test, y_pred, y_prob, len(X_train), len(X_test))
 
         wf_results.append(WalkForwardResult(
             window_idx=w,
@@ -498,7 +589,6 @@ def train_model(
         FEATURE_NAMES[i]: round(float(importances[i]), 6)
         for i in range(NUM_FEATURES)
     }
-    # Sort by importance descending
     feat_imp = dict(sorted(feat_imp.items(), key=lambda x: x[1], reverse=True))
 
     # Final metrics (last walk-forward window, or overall if only one)
@@ -508,20 +598,12 @@ def train_model(
         # Fallback: evaluate on last 20% of data
         split = int(n * 0.8)
         y_pred = final_model.predict(X[split:])
-        y_prob = final_model.predict_proba(X[split:])[:, 1]
+        y_prob = final_model.predict_proba(X[split:])
         y_actual = y[split:]
-        final_metrics = ModelMetrics(
-            accuracy=round(float(accuracy_score(y_actual, y_pred)), 4),
-            precision=round(float(precision_score(y_actual, y_pred, zero_division=0)), 4),
-            recall=round(float(recall_score(y_actual, y_pred, zero_division=0)), 4),
-            f1=round(float(f1_score(y_actual, y_pred, zero_division=0)), 4),
-            auc_roc=round(float(roc_auc_score(y_actual, y_prob)), 4)
-                    if len(set(y_actual)) > 1 else 0.0,
-            n_train=split,
-            n_test=n - split,
-        )
+        final_metrics = _compute_metrics(y_actual, y_pred, y_prob, split, n - split)
 
     final_metrics.feature_importances = feat_imp
+    final_metrics.class_distribution = class_dist
 
     # ── Save model + scaler ───────────────────────────────────────────
     _save_model(final_model, trade_mode, final_metrics, len(tickers_used), n, scaler)
@@ -541,6 +623,45 @@ def train_model(
     )
 
 
+def _compute_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_prob: np.ndarray,
+    n_train: int,
+    n_test: int,
+) -> ModelMetrics:
+    """Compute evaluation metrics for 3-class classification."""
+    from sklearn.metrics import (
+        accuracy_score, precision_score, recall_score,
+        f1_score, roc_auc_score,
+    )
+
+    acc = round(float(accuracy_score(y_true, y_pred)), 4)
+    prec = round(float(precision_score(y_true, y_pred, average="weighted", zero_division=0)), 4)
+    rec = round(float(recall_score(y_true, y_pred, average="weighted", zero_division=0)), 4)
+    f1 = round(float(f1_score(y_true, y_pred, average="weighted", zero_division=0)), 4)
+
+    # AUC-ROC for multi-class (one-vs-rest)
+    auc = 0.0
+    try:
+        if len(set(y_true)) > 1 and y_prob.shape[1] == NUM_CLASSES:
+            auc = round(float(roc_auc_score(
+                y_true, y_prob, multi_class="ovr", average="weighted",
+            )), 4)
+    except Exception:
+        pass
+
+    return ModelMetrics(
+        accuracy=acc,
+        precision=prec,
+        recall=rec,
+        f1=f1,
+        auc_roc=auc,
+        n_train=n_train,
+        n_test=n_test,
+    )
+
+
 def _train_xgb(
     X: np.ndarray,
     y: np.ndarray,
@@ -548,21 +669,12 @@ def _train_xgb(
 ) -> Any:
     """Train an XGBoost classifier with optional hyperparameter tuning.
 
-    Args:
-        X: Feature matrix (already scaled).
-        y: Label array.
-        tune_hyperparams: If True, run cross-validated grid search over
-            key parameters (slower but better).  Used for final model only.
+    Uses multi-class softmax for 3-class classification.
     """
     import xgboost as xgb
 
-    # Class balance weight
-    n_pos = int(y.sum())
-    n_neg = len(y) - n_pos
-    scale_pos = n_neg / n_pos if n_pos > 0 else 1.0
-
     if tune_hyperparams and len(X) >= 500:
-        return _train_xgb_tuned(X, y, scale_pos)
+        return _train_xgb_tuned(X, y)
 
     model = xgb.XGBClassifier(
         n_estimators=300,
@@ -574,8 +686,9 @@ def _train_xgb(
         gamma=0.1,
         reg_alpha=0.1,
         reg_lambda=1.0,
-        scale_pos_weight=scale_pos,
-        eval_metric="logloss",
+        objective="multi:softprob",
+        num_class=NUM_CLASSES,
+        eval_metric="mlogloss",
         use_label_encoder=False,
         random_state=42,
         n_jobs=-1,
@@ -588,21 +701,17 @@ def _train_xgb(
 def _train_xgb_tuned(
     X: np.ndarray,
     y: np.ndarray,
-    scale_pos_weight: float,
 ) -> Any:
-    """Train XGBoost with randomized hyperparameter search.
-
-    Uses RandomizedSearchCV with 12 iterations (vs 96 for full grid)
-    which is ~8x faster while finding near-optimal parameters.
-    """
+    """Train XGBoost with randomized hyperparameter search (3-class)."""
     import xgboost as xgb
     from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
 
     base = xgb.XGBClassifier(
         subsample=0.8,
         colsample_bytree=0.7,
-        scale_pos_weight=scale_pos_weight,
-        eval_metric="logloss",
+        objective="multi:softprob",
+        num_class=NUM_CLASSES,
+        eval_metric="mlogloss",
         use_label_encoder=False,
         random_state=42,
         n_jobs=-1,
@@ -621,10 +730,10 @@ def _train_xgb_tuned(
 
     search = RandomizedSearchCV(
         base, param_distributions,
-        n_iter=12,         # 12 random combos × 3 folds = 36 fits (vs 96)
+        n_iter=12,
         cv=cv,
-        scoring="roc_auc",
-        n_jobs=1,          # XGBoost already uses all cores internally
+        scoring="accuracy",   # multi-class: use accuracy instead of roc_auc
+        n_jobs=1,
         refit=True,
         random_state=42,
         verbose=0,
@@ -632,7 +741,7 @@ def _train_xgb_tuned(
     search.fit(X, y)
 
     logger.info(
-        "XGBoost tuning: best AUC=%.4f, params=%s",
+        "XGBoost tuning: best accuracy=%.4f, params=%s",
         search.best_score_, search.best_params_,
     )
 
@@ -672,6 +781,7 @@ def _save_model(
         "n_tickers": n_tickers,
         "n_samples": n_samples,
         "forward_bars": FORWARD_BARS.get(trade_mode, 10),
+        "num_classes": NUM_CLASSES,
         "feature_names": FEATURE_NAMES,
         "metrics": {
             "accuracy": metrics.accuracy,
@@ -681,6 +791,7 @@ def _save_model(
             "auc_roc": metrics.auc_roc,
             "n_train": metrics.n_train,
             "n_test": metrics.n_test,
+            "class_distribution": metrics.class_distribution,
         },
         "feature_importances": metrics.feature_importances,
     }
@@ -735,6 +846,31 @@ def model_fully_exists() -> bool:
     return MODEL_FILE.exists() and META_FILE.exists() and SCALER_FILE.exists()
 
 
+# ── Cached cross-asset data for predictions ──────────────────────────
+
+# Simple module-level cache so we don't re-fetch SPY/VIX on every
+# predict_signal() call.  Expires after 1 hour.
+_cross_asset_cache: dict[str, Any] = {
+    "spy_df": None,
+    "vix_df": None,
+    "fetched_at": 0.0,
+}
+_CACHE_TTL = 3600  # 1 hour
+
+
+def _get_cross_asset_cached() -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Return cached SPY/VIX data, refreshing if stale."""
+    now = time.time()
+    if now - _cross_asset_cache["fetched_at"] < _CACHE_TTL:
+        return _cross_asset_cache["spy_df"], _cross_asset_cache["vix_df"]
+
+    spy_df, vix_df = _fetch_cross_asset_data(period="1y")
+    _cross_asset_cache["spy_df"] = spy_df
+    _cross_asset_cache["vix_df"] = vix_df
+    _cross_asset_cache["fetched_at"] = now
+    return spy_df, vix_df
+
+
 # ── Prediction ────────────────────────────────────────────────────────
 
 
@@ -745,56 +881,82 @@ def predict_signal(
     pattern_composite: dict[str, Any],
     regime: Any | None,
     df: pd.DataFrame,
+    *,
+    spy_df: pd.DataFrame | None = None,
+    vix_df: pd.DataFrame | None = None,
 ) -> PredictionResult | None:
     """Score a single signal using the trained XGBoost model.
 
     Returns None if no model is available.
 
-    Args:
-        indicator_results: From IndicatorRegistry.run_all()
-        pattern_results: From PatternRegistry.run_all()
-        composite: From CompositeScorer.score()
-        pattern_composite: From PatternCompositeScorer.score()
-        regime: RegimeAssessment or None
-        df: OHLCV DataFrame
+    If spy_df/vix_df are not provided, they are auto-fetched and cached
+    (1 hour TTL) so callers don't need to worry about cross-asset data.
 
-    Returns:
-        PredictionResult with probability, AI rating, and top features.
+    For 3-class models:
+      - ai_rating = P(win) * 100 — the probability of the "win" class.
     """
     model = load_model()
     if model is None:
         return None
 
-    # Extract features
+    # Auto-fetch cross-asset data if not provided
+    if spy_df is None or vix_df is None:
+        try:
+            cached_spy, cached_vix = _get_cross_asset_cached()
+            if spy_df is None:
+                spy_df = cached_spy
+            if vix_df is None:
+                vix_df = cached_vix
+        except Exception:
+            pass  # proceed without cross-asset features
+
+    # Extract features (with cross-asset context)
     features = extract_features(
         indicator_results, pattern_results,
         composite, pattern_composite,
         regime, df,
+        spy_df=spy_df, vix_df=vix_df,
     )
 
     # Apply the same scaling used during training
     X = features.reshape(1, -1)
     scaler = load_scaler()
     if scaler is not None:
-        X = scaler.transform(X)
+        try:
+            X = scaler.transform(X)
+        except Exception:
+            pass  # shape mismatch from old scaler — use unscaled
 
     # Predict
-    prob = float(model.predict_proba(X)[0, 1])  # probability of win
-    ai_rating = round(prob * 100, 1)             # 0-100 scale
+    probs = model.predict_proba(X)[0]
 
-    # Label
-    if ai_rating >= 65:
+    # Handle both 2-class (legacy) and 3-class models
+    if len(probs) == NUM_CLASSES:
+        p_loss = float(probs[0])
+        p_neutral = float(probs[1])
+        p_win = float(probs[2])
+    else:
+        # Legacy 2-class model
+        p_loss = float(probs[0])
+        p_neutral = 0.0
+        p_win = float(probs[1]) if len(probs) > 1 else 0.0
+
+    ai_rating = round(p_win * 100, 1)  # 0-100 scale
+
+    # Label based on highest probability class
+    if p_win > p_loss and p_win > p_neutral:
         label = "Bullish"
-    elif ai_rating <= 35:
+    elif p_loss > p_win and p_loss > p_neutral:
         label = "Bearish"
     else:
         label = "Neutral"
 
-    # Confidence
-    distance_from_50 = abs(ai_rating - 50)
-    if distance_from_50 >= 25:
+    # Confidence based on margin between top two classes
+    sorted_probs = sorted([p_loss, p_neutral, p_win], reverse=True)
+    margin = sorted_probs[0] - sorted_probs[1]
+    if margin >= 0.25:
         confidence = "High"
-    elif distance_from_50 >= 10:
+    elif margin >= 0.10:
         confidence = "Medium"
     else:
         confidence = "Low"
@@ -804,7 +966,7 @@ def predict_signal(
     top_features = _get_top_features(features, importances, top_n=5)
 
     return PredictionResult(
-        probability=round(prob, 4),
+        probability=round(p_win, 4),
         ai_rating=ai_rating,
         label=label,
         confidence=confidence,
@@ -818,12 +980,14 @@ def _get_top_features(
     top_n: int = 5,
 ) -> list[dict[str, Any]]:
     """Get the top N most important features for this prediction."""
-    # Sort by importance
-    indices = np.argsort(importances)[::-1][:top_n]
+    # Handle potential size mismatch (old model vs new features)
+    n = min(len(features), len(importances))
+    indices = np.argsort(importances[:n])[::-1][:top_n]
     result = []
     for idx in indices:
+        name = FEATURE_NAMES[idx] if idx < len(FEATURE_NAMES) else f"feature_{idx}"
         result.append({
-            "name": FEATURE_NAMES[idx],
+            "name": name,
             "value": round(float(features[idx]), 4),
             "importance": round(float(importances[idx]), 4),
         })

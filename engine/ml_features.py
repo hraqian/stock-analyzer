@@ -14,6 +14,8 @@ Feature groups:
   6. Volatility context (ATR/price ratio)
   7. Multi-timeframe alignment score
   8. Composite scores (trend, contrarian, overall)
+  9. Temporal/momentum features (rate-of-change for key indicators)
+  10. Cross-asset context (SPY returns, VIX, market breadth)
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ import pandas as pd
 # ── Feature names (stable ordering for model consistency) ──────────────
 
 FEATURE_NAMES: list[str] = [
-    # Indicator raw values
+    # ── Group 1: Indicator raw values (23 features, indices 0-22) ──────
     "rsi",
     "rsi_prev",
     "macd_histogram",
@@ -52,7 +54,8 @@ FEATURE_NAMES: list[str] = [
     "ma_alignment_score",       # bullish alignment fraction
     "ma_golden_cross",
     "ma_death_cross",
-    # Indicator scores (0-10)
+
+    # ── Group 2: Indicator scores 0-10 (8 features, indices 23-30) ─────
     "score_rsi",
     "score_macd",
     "score_bollinger",
@@ -61,35 +64,68 @@ FEATURE_NAMES: list[str] = [
     "score_adx",
     "score_volume",
     "score_fibonacci",
-    # Pattern scores (0-10)
+
+    # ── Group 3: Pattern scores 0-10 (5 features, indices 31-35) ───────
     "score_gaps",
     "score_volume_range",
     "score_candlesticks",
     "score_spikes",
     "score_inside_outside",
-    # Composite scores
+
+    # ── Group 4: Composite scores (4 features, indices 36-39) ──────────
     "composite_overall",
     "composite_trend",
     "composite_contrarian",
     "pattern_composite_overall",
-    # Regime (one-hot)
+
+    # ── Group 5: Regime one-hot (9 features, indices 40-48) ────────────
     "regime_strong_trend",
     "regime_mean_reverting",
     "regime_volatile_choppy",
     "regime_breakout_transition",
     "regime_confidence",
-    # Regime sub-type (one-hot)
     "regime_sub_explosive",
     "regime_sub_volatile_directionless",
     "regime_sub_steady",
     "regime_sub_stagnant",
-    # Volume context
+
+    # ── Group 6: Volume context (1 feature, index 49) ─────────────────
     "volume_ratio",             # current volume / 20-day avg
-    # Volatility context
+
+    # ── Group 7: Volatility context (1 feature, index 50) ─────────────
     "atr_price_ratio",          # ATR(14) / close price
-    # Price context
+
+    # ── Group 8: Price context (2 features, indices 51-52) ─────────────
     "price_change_5d_pct",
     "price_change_20d_pct",
+
+    # ── Group 9: Temporal/momentum features (18 features, indices 53-70) ──
+    "rsi_change_5",             # RSI change over 5 bars
+    "rsi_oversold",             # 1 if RSI < 30
+    "rsi_overbought",           # 1 if RSI > 70
+    "macd_hist_slope_5",        # MACD histogram slope (change / 5 bars)
+    "stoch_k_change_5",         # Stochastic K change over 5 bars
+    "adx_change_5",             # ADX change over 5 bars
+    "bb_pct_b_change_5",        # BB %B change over 5 bars
+    "price_dist_ma20_pct",      # (price - MA20) / MA20
+    "price_dist_ma50_pct",      # (price - MA50) / MA50
+    "price_dist_ma200_pct",     # (price - MA200) / MA200
+    "vol_trend_ratio",          # volume SMA(5) / SMA(20) — rising vol?
+    "close_above_open_streak",  # consecutive bullish bars (normalised)
+    "high_low_range_pct",       # (high - low) / close — intrabar volatility
+    "price_change_1d_pct",      # 1-day return
+    "price_change_3d_pct",      # 3-day return
+    "rsi_ma_divergence",        # RSI direction vs price direction (divergence signal)
+    "composite_change_proxy",   # |composite - 5| / 5 — strength of signal
+    "score_dispersion",         # stdev of indicator scores — consensus vs mixed
+
+    # ── Group 10: Cross-asset context (6 features, indices 71-76) ──────
+    "spy_return_5d_pct",        # SPY 5-day return
+    "spy_return_20d_pct",       # SPY 20-day return
+    "spy_dist_ma50_pct",        # SPY distance from 50-day MA
+    "vix_level",                # VIX close (or 0 if unavailable)
+    "vix_change_5d_pct",        # VIX 5-day change
+    "stock_spy_corr_20",        # 20-day rolling correlation with SPY
 ]
 
 NUM_FEATURES = len(FEATURE_NAMES)
@@ -111,6 +147,24 @@ def _bool_to_float(val: Any) -> float:
     return 1.0 if val else 0.0
 
 
+def _pct_change(series: pd.Series, periods: int) -> float:
+    """Compute percentage change over N periods at end of series."""
+    if len(series) < periods + 1:
+        return 0.0
+    cur = float(series.iloc[-1])
+    prev = float(series.iloc[-periods - 1])
+    if prev == 0 or math.isnan(prev) or math.isnan(cur):
+        return 0.0
+    return (cur - prev) / abs(prev)
+
+
+def _sma(series: pd.Series, window: int) -> float:
+    """Simple moving average of last `window` values."""
+    if len(series) < window:
+        return float("nan")
+    return float(series.iloc[-window:].mean())
+
+
 # ── Main extraction function ──────────────────────────────────────────
 
 
@@ -121,6 +175,9 @@ def extract_features(
     pattern_composite: dict[str, Any],
     regime: Any | None,
     df: pd.DataFrame,
+    *,
+    spy_df: pd.DataFrame | None = None,
+    vix_df: pd.DataFrame | None = None,
 ) -> np.ndarray:
     """Extract a flat feature vector from analysis results.
 
@@ -131,6 +188,8 @@ def extract_features(
         pattern_composite: Dict from PatternCompositeScorer.score().
         regime: RegimeAssessment object or None.
         df: OHLCV DataFrame used for price/volume context.
+        spy_df: Optional SPY OHLCV DataFrame (same date range) for cross-asset.
+        vix_df: Optional VIX OHLCV DataFrame for cross-asset.
 
     Returns:
         np.ndarray of shape (NUM_FEATURES,) with dtype float32.
@@ -152,10 +211,12 @@ def extract_features(
 
     # RSI
     rsi_r = ind_by_key.get("rsi")
+    rsi_val = 50.0
     if rsi_r and not rsi_r.error:
         v = rsi_r.values
-        features[0] = _safe_float(v.get("rsi"), 50.0)       # rsi
-        features[1] = _safe_float(v.get("rsi_prev"), 50.0)   # rsi_prev
+        rsi_val = _safe_float(v.get("rsi"), 50.0)
+        features[0] = rsi_val                                  # rsi
+        features[1] = _safe_float(v.get("rsi_prev"), 50.0)    # rsi_prev
 
     # MACD
     macd_r = ind_by_key.get("macd")
@@ -204,6 +265,7 @@ def extract_features(
 
     # Moving Averages
     ma_r = ind_by_key.get("moving_averages")
+    ma_vals: dict[Any, float] = {}
     if ma_r and not ma_r.error:
         v = ma_r.values
         price = _safe_float(v.get("price"), 0.0)
@@ -240,12 +302,16 @@ def extract_features(
         "volume": 29,
         "fibonacci": 30,
     }
+    ind_scores: list[float] = []
     for key, idx in score_map.items():
         r = ind_by_key.get(key)
         if r and not r.error:
-            features[idx] = _safe_float(r.score, 5.0)
+            s = _safe_float(r.score, 5.0)
+            features[idx] = s
+            ind_scores.append(s)
         else:
             features[idx] = 5.0  # neutral default
+            ind_scores.append(5.0)
 
     # ── 3. Pattern scores ─────────────────────────────────────────────
 
@@ -265,7 +331,8 @@ def extract_features(
 
     # ── 4. Composite scores ───────────────────────────────────────────
 
-    features[36] = _safe_float(composite.get("overall"), 5.0)
+    composite_overall = _safe_float(composite.get("overall"), 5.0)
+    features[36] = composite_overall
     features[37] = _safe_float(composite.get("trend_score"), 5.0)
     features[38] = _safe_float(composite.get("contrarian_score"), 5.0)
     features[39] = _safe_float(pattern_composite.get("overall"), 5.0)
@@ -338,6 +405,195 @@ def extract_features(
         prev20 = float(close_series.iloc[-21])
         features[52] = (cur - prev20) / prev20 if prev20 != 0 else 0.0
 
+    # ── 9. Temporal / momentum features ───────────────────────────────
+
+    # 9a. RSI change over 5 bars
+    # We only have current & prev RSI from the indicator — compute
+    # 5-bar RSI change from the close series using pandas_ta / ta lib
+    # as a lightweight proxy.
+    features[53] = 0.0  # rsi_change_5 — filled below
+    features[54] = 1.0 if rsi_val < 30 else 0.0   # rsi_oversold
+    features[55] = 1.0 if rsi_val > 70 else 0.0   # rsi_overbought
+
+    if len(close_series) >= 20:
+        try:
+            import ta as ta_lib
+            rsi_series = ta_lib.momentum.RSIIndicator(
+                close=close_series, window=14,
+            ).rsi()
+            if len(rsi_series) >= 6:
+                rsi_now = float(rsi_series.iloc[-1])
+                rsi_5ago = float(rsi_series.iloc[-6])
+                if not (math.isnan(rsi_now) or math.isnan(rsi_5ago)):
+                    features[53] = rsi_now - rsi_5ago   # rsi_change_5
+        except Exception:
+            pass
+
+    # 9b. MACD histogram slope over 5 bars
+    if len(close_series) >= 34:  # need 26+8 bars for MACD
+        try:
+            import ta as ta_lib
+            macd_ind = ta_lib.trend.MACD(
+                close=close_series, window_slow=26, window_fast=12, window_sign=9,
+            )
+            hist = macd_ind.macd_diff()
+            if len(hist) >= 6:
+                h_now = float(hist.iloc[-1])
+                h_5ago = float(hist.iloc[-6])
+                if not (math.isnan(h_now) or math.isnan(h_5ago)):
+                    features[56] = (h_now - h_5ago) / 5.0  # macd_hist_slope_5
+        except Exception:
+            pass
+
+    # 9c. Stochastic K change over 5 bars
+    if len(df) >= 19:  # need 14+5 bars
+        try:
+            import ta as ta_lib
+            stoch = ta_lib.momentum.StochasticOscillator(
+                high=df["high"], low=df["low"], close=close_series,
+                window=14, smooth_window=3,
+            )
+            k_series = stoch.stoch()
+            if len(k_series) >= 6:
+                k_now = float(k_series.iloc[-1])
+                k_5ago = float(k_series.iloc[-6])
+                if not (math.isnan(k_now) or math.isnan(k_5ago)):
+                    features[57] = k_now - k_5ago  # stoch_k_change_5
+        except Exception:
+            pass
+
+    # 9d. ADX change over 5 bars
+    if len(df) >= 19:
+        try:
+            import ta as ta_lib
+            adx_ind = ta_lib.trend.ADXIndicator(
+                high=df["high"], low=df["low"], close=close_series, window=14,
+            )
+            adx_series = adx_ind.adx()
+            if len(adx_series) >= 6:
+                a_now = float(adx_series.iloc[-1])
+                a_5ago = float(adx_series.iloc[-6])
+                if not (math.isnan(a_now) or math.isnan(a_5ago)):
+                    features[58] = a_now - a_5ago  # adx_change_5
+        except Exception:
+            pass
+
+    # 9e. BB %B change over 5 bars
+    if len(close_series) >= 25:
+        try:
+            import ta as ta_lib
+            bb = ta_lib.volatility.BollingerBands(
+                close=close_series, window=20, window_dev=2,
+            )
+            pct_b = bb.bollinger_pband()
+            if len(pct_b) >= 6:
+                b_now = float(pct_b.iloc[-1])
+                b_5ago = float(pct_b.iloc[-6])
+                if not (math.isnan(b_now) or math.isnan(b_5ago)):
+                    features[59] = b_now - b_5ago  # bb_pct_b_change_5
+        except Exception:
+            pass
+
+    # 9f. Price distance from key MAs (%, signed)
+    cur_price = float(close_series.iloc[-1]) if len(close_series) > 0 else 0.0
+
+    if len(close_series) >= 20:
+        ma20 = _sma(close_series, 20)
+        if not math.isnan(ma20) and ma20 > 0:
+            features[60] = (cur_price - ma20) / ma20  # price_dist_ma20_pct
+    if len(close_series) >= 50:
+        ma50 = _sma(close_series, 50)
+        if not math.isnan(ma50) and ma50 > 0:
+            features[61] = (cur_price - ma50) / ma50  # price_dist_ma50_pct
+    if len(close_series) >= 200:
+        ma200 = _sma(close_series, 200)
+        if not math.isnan(ma200) and ma200 > 0:
+            features[62] = (cur_price - ma200) / ma200  # price_dist_ma200_pct
+
+    # 9g. Volume trend ratio: SMA(vol,5) / SMA(vol,20)
+    if len(df) >= 20:
+        vol_sma5 = _sma(df["volume"], 5)
+        vol_sma20 = _sma(df["volume"], 20)
+        if not math.isnan(vol_sma5) and not math.isnan(vol_sma20) and vol_sma20 > 0:
+            features[63] = vol_sma5 / vol_sma20  # vol_trend_ratio
+
+    # 9h. Consecutive bullish bars (normalised to 0-1, max 10)
+    if len(df) >= 2:
+        streak = 0
+        for i in range(len(df) - 1, max(len(df) - 11, -1), -1):
+            if float(df["close"].iloc[i]) >= float(df["open"].iloc[i]):
+                streak += 1
+            else:
+                break
+        features[64] = streak / 10.0  # close_above_open_streak
+
+    # 9i. Intra-bar range as % of close
+    if len(df) >= 1:
+        h = float(df["high"].iloc[-1])
+        lo = float(df["low"].iloc[-1])
+        c = float(df["close"].iloc[-1])
+        features[65] = (h - lo) / c if c > 0 else 0.0  # high_low_range_pct
+
+    # 9j. 1-day and 3-day returns
+    if len(close_series) >= 2:
+        features[66] = _pct_change(close_series, 1)  # price_change_1d_pct
+    if len(close_series) >= 4:
+        features[67] = _pct_change(close_series, 3)  # price_change_3d_pct
+
+    # 9k. RSI-price divergence: RSI falling while price rising (or vice versa)
+    # Simple proxy: sign(price_change_5d) != sign(rsi_change_5)
+    price_5d = features[51]  # already computed
+    rsi_5d = features[53]
+    if price_5d != 0 and rsi_5d != 0:
+        diverging = (price_5d > 0 and rsi_5d < 0) or (price_5d < 0 and rsi_5d > 0)
+        features[68] = 1.0 if diverging else 0.0  # rsi_ma_divergence
+
+    # 9l. Composite signal strength: |composite - 5| / 5
+    features[69] = abs(composite_overall - 5.0) / 5.0  # composite_change_proxy
+
+    # 9m. Score dispersion: stdev of indicator scores — high = mixed signals
+    if ind_scores:
+        features[70] = float(np.std(ind_scores))  # score_dispersion
+
+    # ── 10. Cross-asset context ───────────────────────────────────────
+
+    # SPY features
+    if spy_df is not None and len(spy_df) >= 2:
+        spy_close = spy_df["close"]
+        if len(spy_close) >= 6:
+            features[71] = _pct_change(spy_close, 5)    # spy_return_5d_pct
+        if len(spy_close) >= 21:
+            features[72] = _pct_change(spy_close, 20)   # spy_return_20d_pct
+        if len(spy_close) >= 50:
+            spy_ma50 = _sma(spy_close, 50)
+            spy_cur = float(spy_close.iloc[-1])
+            if not math.isnan(spy_ma50) and spy_ma50 > 0:
+                features[73] = (spy_cur - spy_ma50) / spy_ma50  # spy_dist_ma50_pct
+
+        # Stock-SPY correlation (20-bar rolling)
+        if len(df) >= 20 and len(spy_df) >= 20:
+            try:
+                # Align by index (date), take last 20 common bars
+                stock_ret = df["close"].pct_change().iloc[-20:]
+                spy_ret = spy_df["close"].pct_change().iloc[-20:]
+                # Merge on index for alignment
+                merged = pd.DataFrame({
+                    "stock": stock_ret, "spy": spy_ret,
+                }).dropna()
+                if len(merged) >= 10:
+                    corr = float(merged["stock"].corr(merged["spy"]))
+                    if not math.isnan(corr):
+                        features[76] = corr  # stock_spy_corr_20
+            except Exception:
+                pass
+
+    # VIX features
+    if vix_df is not None and len(vix_df) >= 2:
+        vix_close = vix_df["close"]
+        features[74] = _safe_float(float(vix_close.iloc[-1]))  # vix_level
+        if len(vix_close) >= 6:
+            features[75] = _pct_change(vix_close, 5)  # vix_change_5d_pct
+
     return features
 
 
@@ -348,6 +604,9 @@ def extract_features_dict(
     pattern_composite: dict[str, Any],
     regime: Any | None,
     df: pd.DataFrame,
+    *,
+    spy_df: pd.DataFrame | None = None,
+    vix_df: pd.DataFrame | None = None,
 ) -> dict[str, float]:
     """Same as extract_features() but returns a name→value dict.
 
@@ -357,5 +616,7 @@ def extract_features_dict(
         indicator_results, pattern_results,
         composite, pattern_composite,
         regime, df,
+        spy_df=spy_df,
+        vix_df=vix_df,
     )
     return {name: float(arr[i]) for i, name in enumerate(FEATURE_NAMES)}
