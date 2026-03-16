@@ -713,24 +713,42 @@ export async function importStrategy(data: StrategyExport): Promise<StrategyItem
 
 export interface MlModelStatus {
   trained: boolean;
-  model_file: string | null;
-  meta: {
-    trade_mode?: string;
-    universe?: string;
-    n_samples?: number;
-    n_windows?: number;
-    metrics?: Record<string, number>;
-    feature_importances?: Record<string, number>;
-    trained_at?: string;
-  } | null;
+  trade_mode?: string;
+  trained_at?: string;
+  n_tickers?: number;
+  n_samples?: number;
+  forward_bars?: number;
+  metrics?: Record<string, number>;
+  feature_importances?: Record<string, number>;
+}
+
+export interface MlWalkForwardWindow {
+  window_idx: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  metrics: Record<string, number>;
 }
 
 export interface MlTrainResult {
-  status: string;
-  metrics: Record<string, number>;
-  n_samples: number;
-  n_windows: number;
-  feature_importances: Record<string, number>;
+  total_samples: number;
+  total_tickers: number;
+  trade_mode: string;
+  forward_bars: number;
+  walk_forward_results: MlWalkForwardWindow[];
+  final_metrics: {
+    accuracy: number;
+    precision: number;
+    recall: number;
+    f1: number;
+    auc_roc: number;
+    n_train: number;
+    n_test: number;
+    feature_importances: Record<string, number>;
+  };
+  elapsed_seconds: number;
+  trained_at: string;
 }
 
 export async function getMlModelStatus(): Promise<MlModelStatus> {

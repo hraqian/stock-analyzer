@@ -208,40 +208,14 @@ def _predict_sync(
 def _load_universe_tickers(universe: str) -> list[str]:
     """Load ticker symbols from a universe file.
 
-    Universe files live in data/universes/ as .txt files (one ticker per line).
+    Delegates to the canonical ``data.universes.load()`` function which
+    is the same loader the scanner uses.  This ensures consistent path
+    resolution regardless of whether we run locally or inside Docker.
     """
-    import pathlib
+    from data.universes import load as load_universe  # type: ignore[import-untyped]
 
-    # Try multiple locations
-    base = pathlib.Path(__file__).resolve().parent.parent.parent
-    candidates = [
-        base / "data" / "universes" / f"{universe}.txt",
-        base / "data" / "universes" / f"{universe.upper()}.txt",
-        base / "data" / "universes" / f"{universe.lower()}.txt",
-    ]
-
-    for path in candidates:
-        if path.exists():
-            lines = path.read_text().strip().splitlines()
-            # Skip comments and empty lines
-            return [
-                line.strip() for line in lines
-                if line.strip() and not line.strip().startswith("#")
-            ]
-
-    # Try mapping common names
-    name_map = {
-        "sp500": "sp500",
-        "s&p500": "sp500",
-        "nasdaq100": "nasdaq100",
-        "dow30": "dow30",
-        "russell1000": "russell1000",
-        "russell2000": "russell2000",
-        "tsx60": "tsx60",
-        "tsx_composite": "tsx_composite",
-    }
-    mapped = name_map.get(universe.lower())
-    if mapped and mapped != universe:
-        return _load_universe_tickers(mapped)
-
-    return []
+    try:
+        return load_universe(universe)
+    except FileNotFoundError:
+        logger.warning("Universe '%s' not found", universe)
+        return []

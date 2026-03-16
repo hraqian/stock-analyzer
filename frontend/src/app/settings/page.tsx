@@ -106,8 +106,9 @@ export default function SettingsPage() {
     try {
       const result = await trainMlModel(mlUniverse, mlTradeMode, mlPeriod);
       setMlMsg(
-        `Trained! ${result.n_samples} samples, ${result.n_windows} windows. ` +
-        `Accuracy: ${((result.metrics.accuracy ?? 0) * 100).toFixed(1)}%`
+        `Trained! ${result.total_samples.toLocaleString()} samples, ` +
+        `${result.walk_forward_results.length} windows. ` +
+        `Accuracy: ${((result.final_metrics.accuracy ?? 0) * 100).toFixed(1)}%`
       );
       // Refresh status
       await fetchMlStatus();
@@ -497,57 +498,57 @@ export default function SettingsPage() {
           </p>
 
           {/* Model info (if trained) */}
-          {mlStatus?.trained && mlStatus.meta && (
+          {mlStatus?.trained && (
             <div className="mb-4 space-y-2 text-sm">
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
-                  <span className="text-gray-500">Universe</span>
-                  <span className="text-gray-300">{mlStatus.meta.universe ?? "—"}</span>
+                  <span className="text-gray-500">Trade Mode</span>
+                  <span className="text-gray-300">{mlStatus.trade_mode ?? "—"}</span>
                 </div>
                 <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
-                  <span className="text-gray-500">Trade Mode</span>
-                  <span className="text-gray-300">{mlStatus.meta.trade_mode ?? "—"}</span>
+                  <span className="text-gray-500">Forward Bars</span>
+                  <span className="text-gray-300">{mlStatus.forward_bars ?? "—"}</span>
+                </div>
+                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
+                  <span className="text-gray-500">Tickers</span>
+                  <span className="text-gray-300">{mlStatus.n_tickers?.toLocaleString() ?? "—"}</span>
                 </div>
                 <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
                   <span className="text-gray-500">Samples</span>
-                  <span className="text-gray-300">{mlStatus.meta.n_samples?.toLocaleString() ?? "—"}</span>
+                  <span className="text-gray-300">{mlStatus.n_samples?.toLocaleString() ?? "—"}</span>
                 </div>
-                <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
-                  <span className="text-gray-500">Windows</span>
-                  <span className="text-gray-300">{mlStatus.meta.n_windows ?? "—"}</span>
-                </div>
-                {mlStatus.meta.metrics && (
+                {mlStatus.metrics && (
                   <>
                     <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
                       <span className="text-gray-500">Accuracy</span>
                       <span className="text-green-400">
-                        {((mlStatus.meta.metrics.accuracy ?? 0) * 100).toFixed(1)}%
+                        {((mlStatus.metrics.accuracy ?? 0) * 100).toFixed(1)}%
                       </span>
                     </div>
                     <div className="flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
                       <span className="text-gray-500">F1 Score</span>
                       <span className="text-blue-400">
-                        {(mlStatus.meta.metrics.f1 ?? 0).toFixed(3)}
+                        {(mlStatus.metrics.f1 ?? 0).toFixed(3)}
                       </span>
                     </div>
                   </>
                 )}
-                {mlStatus.meta.trained_at && (
+                {mlStatus.trained_at && (
                   <div className="col-span-2 flex justify-between bg-gray-800 rounded px-2.5 py-1.5">
                     <span className="text-gray-500">Last Trained</span>
                     <span className="text-gray-300">
-                      {new Date(mlStatus.meta.trained_at).toLocaleDateString()}
+                      {new Date(mlStatus.trained_at).toLocaleDateString()}
                     </span>
                   </div>
                 )}
               </div>
 
               {/* Top feature importances */}
-              {mlStatus.meta.feature_importances && (
+              {mlStatus.feature_importances && (
                 <div className="mt-2">
                   <div className="text-xs text-gray-500 mb-1">Top Feature Importances</div>
                   <div className="space-y-0.5">
-                    {Object.entries(mlStatus.meta.feature_importances)
+                    {Object.entries(mlStatus.feature_importances)
                       .sort(([, a], [, b]) => b - a)
                       .slice(0, 8)
                       .map(([name, imp]) => (
