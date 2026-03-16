@@ -60,13 +60,13 @@ WF_NUM_WINDOWS = 4        # number of walk-forward windows
 WF_MIN_SAMPLES = 200      # minimum training samples per window
 
 # Sampling configuration
-SAMPLE_INTERVAL_BARS = 5   # check every 5 bars (denser, since filter rejects most)
+SAMPLE_INTERVAL_BARS = 20  # every 20 bars ≈ monthly for daily data
 
 # Signal-based sampling: only take samples where the rule-based engine
 # produces a non-trivial signal.  This is the single biggest accuracy
 # improvement — random sampling generates mostly noise.
 SIGNAL_SAMPLING = True
-SIGNAL_SCORE_MIN_DEVIATION = 1.0  # |composite - 5.0| must exceed this
+SIGNAL_SCORE_MIN_DEVIATION = 0.5  # |composite - 5.0| must exceed this
 
 
 # ── Data classes ──────────────────────────────────────────────────────
