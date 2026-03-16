@@ -1255,6 +1255,7 @@ async def ml_train(
     universe: str = Query("sp500", description="Universe to train on"),
     trade_mode: str = Query("swing", description="Trade mode: swing or long_term"),
     period: str = Query("5y", description="Historical data period"),
+    sample_interval: int = Query(20, description="Bars between samples (5=dense/slow, 20=standard, 40=fast/sparse)"),
     user: User = Depends(get_current_user),
 ):
     """Train the XGBoost signal scoring model with SSE progress streaming.
@@ -1283,6 +1284,7 @@ async def ml_train(
 
     progress_queue = train_ml_model_streaming(
         universe=universe, trade_mode=trade_mode, period=period,
+        sample_interval=sample_interval,
     )
 
     async def event_generator():

@@ -60,6 +60,7 @@ def train_ml_model_streaming(
     universe: str,
     trade_mode: str = "swing",
     period: str = "5y",
+    sample_interval: int = 20,
 ) -> queue.Queue:
     """Start ML training in a background thread and return a progress queue.
 
@@ -75,7 +76,7 @@ def train_ml_model_streaming(
     q: queue.Queue = queue.Queue()
     t = threading.Thread(
         target=_train_thread,
-        args=(q, universe, trade_mode, period),
+        args=(q, universe, trade_mode, period, sample_interval),
         daemon=True,
     )
     t.start()
@@ -87,6 +88,7 @@ def _train_thread(
     universe: str,
     trade_mode: str,
     period: str,
+    sample_interval: int,
 ) -> None:
     """Run the full training pipeline, posting progress to the queue."""
     try:
@@ -129,6 +131,7 @@ def _train_thread(
             trade_mode=trade_mode,
             period=period,
             progress_callback=on_ticker,
+            sample_interval=sample_interval,
         )
 
         if not samples:

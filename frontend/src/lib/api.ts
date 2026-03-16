@@ -761,11 +761,13 @@ export async function trainMlModel(
   period: string = "5y",
   onProgress?: (msg: MlTrainProgress) => void,
   timeoutMinutes: number = 120,
+  sampleInterval: number = 20,
 ): Promise<MlTrainResult> {
   const params = new URLSearchParams({
     universe,
     trade_mode: tradeMode,
     period,
+    sample_interval: String(sampleInterval),
   });
 
   const t = getToken();

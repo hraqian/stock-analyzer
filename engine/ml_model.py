@@ -138,12 +138,13 @@ def generate_training_data(
     trade_mode: str = "swing",
     period: str = "5y",
     progress_callback: Any | None = None,
+    sample_interval: int | None = None,
 ) -> list[TrainingSample]:
     """Generate labeled training samples from historical data.
 
     For each ticker, we:
       1. Fetch 5y of daily data.
-      2. At regular intervals (every SAMPLE_INTERVAL_BARS bars), slice
+      2. At regular intervals (every sample_interval bars), slice
          the data up to that point, run the full indicator/pattern/regime
          pipeline, and extract features.
       3. Look at the forward return over the next N bars to label as
@@ -154,6 +155,7 @@ def generate_training_data(
         trade_mode: "swing" or "long_term" — determines forward horizon.
         period: How much history to fetch per ticker.
         progress_callback: Optional callable(ticker, i, total) for progress.
+        sample_interval: Bars between samples (default: SAMPLE_INTERVAL_BARS).
 
     Returns:
         List of TrainingSample objects.
@@ -191,8 +193,13 @@ def generate_training_data(
         "ML training: fetching %d tickers (period=%s, forward=%d bars)",
         len(tickers), period, forward_bars,
     )
+    actual_interval = sample_interval if sample_interval is not None else SAMPLE_INTERVAL_BARS
+
     all_data = fetch_batch(tickers, period=period)
-    logger.info("ML training: got data for %d / %d tickers", len(all_data), len(tickers))
+    logger.info(
+        "ML training: got data for %d / %d tickers, sample_interval=%d",
+        len(all_data), len(tickers), actual_interval,
+    )
 
     samples: list[TrainingSample] = []
     total = len(all_data)
@@ -209,6 +216,7 @@ def generate_training_data(
             ticker_samples = _generate_samples_for_ticker(
                 ticker, df, forward_bars,
                 ind_registry, pat_registry, scorer, pat_scorer, regime_clf,
+                sample_interval=actual_interval,
             )
             samples.extend(ticker_samples)
         except Exception:
@@ -231,6 +239,7 @@ def _generate_samples_for_ticker(
     scorer: Any,
     pat_scorer: Any,
     regime_clf: Any,
+    sample_interval: int = 20,
 ) -> list[TrainingSample]:
     """Generate samples from a single ticker's historical data.
 
@@ -252,7 +261,7 @@ def _generate_samples_for_ticker(
     start_bar = 200
     end_bar = n - forward_bars
 
-    for bar_idx in range(start_bar, end_bar, SAMPLE_INTERVAL_BARS):
+    for bar_idx in range(start_bar, end_bar, sample_interval):
         try:
             # Slice data up to this point (no lookahead)
             df_slice = df.iloc[:bar_idx + 1].copy()

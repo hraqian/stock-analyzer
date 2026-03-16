@@ -66,6 +66,7 @@ export default function SettingsPage() {
   const [mlTradeMode, setMlTradeMode] = useState("swing");
   const [mlPeriod, setMlPeriod] = useState("5y");
   const [mlTimeout, setMlTimeout] = useState(120);
+  const [mlSampleInterval, setMlSampleInterval] = useState(20);
   const [mlMsg, setMlMsg] = useState<string | null>(null);
   const [mlProgress, setMlProgress] = useState<{pct: number; detail: string} | null>(null);
 
@@ -121,6 +122,7 @@ export default function SettingsPage() {
           setMlProgress({ pct: msg.pct, detail });
         },
         mlTimeout,
+        mlSampleInterval,
       );
       setMlProgress(null);
       setMlMsg(
@@ -592,7 +594,7 @@ export default function SettingsPage() {
           )}
 
           {/* Training controls */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div>
               <div className="flex items-center gap-1 mb-1">
                 <span className="text-xs text-gray-400">Universe</span>
@@ -644,8 +646,25 @@ export default function SettingsPage() {
             </div>
             <div>
               <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-gray-400">Sampling Density</span>
+                <HelpTip text="How often to sample each stock's history for training data. Denser sampling (every 5 bars) produces more training points and may improve accuracy, but takes much longer to compute. Standard (every 20 bars) is a good balance." size={12} />
+              </div>
+              <select
+                value={mlSampleInterval}
+                onChange={(e) => setMlSampleInterval(Number(e.target.value))}
+                disabled={mlTraining}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value={5}>Dense (every 5 bars) — slow</option>
+                <option value={10}>High (every 10 bars)</option>
+                <option value={20}>Standard (every 20 bars)</option>
+                <option value={40}>Fast (every 40 bars)</option>
+              </select>
+            </div>
+            <div>
+              <div className="flex items-center gap-1 mb-1">
                 <span className="text-xs text-gray-400">Timeout</span>
-                <HelpTip text="Maximum time to wait for training to complete before aborting. Larger universes need more time." size={12} />
+                <HelpTip text="Maximum time to wait for training to complete before aborting. Adjust based on the estimated time below." size={12} />
               </div>
               <select
                 value={mlTimeout}
@@ -659,6 +678,37 @@ export default function SettingsPage() {
                 <option value={240}>4 hours</option>
               </select>
             </div>
+          </div>
+
+          {/* Time estimate */}
+          <div className="text-xs text-gray-500 mb-3">
+            {(() => {
+              const universeSize: Record<string, number> = {
+                dow30: 30, nasdaq100: 100, sp500: 500,
+                tsx60: 60, tsx_composite: 230, russell1000: 1000,
+              };
+              const periodMultiplier: Record<string, number> = {
+                "2y": 0.4, "5y": 1.0, "10y": 2.0,
+              };
+              const tickers = universeSize[mlUniverse] ?? 500;
+              const pMul = periodMultiplier[mlPeriod] ?? 1.0;
+              // Base: ~500 tickers, 20-bar interval, 5y ≈ 30 min
+              const baseMinutes = (tickers / 500) * pMul * (20 / mlSampleInterval) * 30;
+              // Add ~5 min for hyperparameter tuning
+              const totalMin = Math.round(baseMinutes + 5);
+              const hours = Math.floor(totalMin / 60);
+              const mins = totalMin % 60;
+              const timeStr = hours > 0
+                ? `~${hours}h ${mins}m`
+                : `~${totalMin} min`;
+              const warn = totalMin > mlTimeout;
+              return (
+                <span className={warn ? "text-amber-400" : ""}>
+                  Estimated training time: <span className="font-mono">{timeStr}</span>
+                  {warn && " — increase timeout to avoid aborting"}
+                </span>
+              );
+            })()}
           </div>
 
           <div className="space-y-3">
